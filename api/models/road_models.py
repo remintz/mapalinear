@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union, Literal
 from enum import Enum
 from datetime import datetime
 from uuid import uuid4
@@ -87,4 +87,23 @@ class SavedMapResponse(BaseModel):
     total_length_km: float = Field(..., description="Comprimento total da rota em quilômetros")
     creation_date: datetime = Field(..., description="Data e hora de criação")
     road_refs: List[str] = Field(default_factory=list, description="Referências das estradas (ex: ['BR-101', 'SP-070'])")
-    milestone_count: int = Field(..., description="Número total de marcos no mapa") 
+    milestone_count: int = Field(..., description="Número total de marcos no mapa")
+
+
+class OperationStatus(str, Enum):
+    """Status de uma operação assíncrona."""
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class AsyncOperationResponse(BaseModel):
+    """Resposta para operações assíncronas."""
+    operation_id: str = Field(..., description="ID da operação assíncrona")
+    status: OperationStatus = Field(OperationStatus.IN_PROGRESS, description="Status atual da operação")
+    type: str = Field(..., description="Tipo da operação (ex: linear_map)")
+    started_at: datetime = Field(default_factory=datetime.now, description="Data e hora de início da operação")
+    progress_percent: float = Field(0.0, description="Percentual de progresso (0-100)")
+    estimated_completion: Optional[datetime] = Field(None, description="Estimativa de conclusão da operação")
+    result: Optional[Dict[str, Any]] = Field(None, description="Resultado da operação (quando concluída)")
+    error: Optional[str] = Field(None, description="Mensagem de erro (quando falha)") 

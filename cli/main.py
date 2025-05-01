@@ -6,13 +6,24 @@ from rich.console import Console
 from rich.table import Table
 from rich import print as rprint
 import os
+import time
 from pathlib import Path
+from rich.progress import Progress, SpinnerColumn, TextColumn
+
+# Import operations commands
+from cli.commands.operations import operations_app
 
 app = typer.Typer(help="CLI para extrair dados do OpenStreetMap e criar mapas lineares de estradas")
 console = Console()
 
+# Adicionar app de operações como subcomando
+app.add_typer(operations_app, name="operations", help="Gerenciar operações assíncronas")
+
 # API URL - pode ser configurado através de variável de ambiente
 API_URL = os.environ.get("MAPALINEAR_API_URL", "http://localhost:8000/api")
+
+# Timeout padrão para requisições
+DEFAULT_TIMEOUT = 300.0  # 5 minutos
 
 
 @app.command()
@@ -21,68 +32,109 @@ def search(
     destination: str = typer.Argument(..., help="Local de destino (ex: 'Rio de Janeiro, RJ')"),
     road_type: str = typer.Option("all", help="Tipo de estrada (highway, motorway, trunk, primary, secondary, all)"),
     output_file: Optional[Path] = typer.Option(None, help="Arquivo para salvar os resultados em JSON"),
+    no_wait: bool = typer.Option(False, help="Não aguardar a conclusão da operação, apenas retornar o ID da tarefa"),
 ):
     """
     Busca estradas entre dois pontos no OpenStreetMap.
     """
-    with console.status("[bold green]Buscando estradas..."):
+    request_data = {
+        "origin": origin,
+        "destination": destination,
+        "road_type": road_type
+    }
+    
+    # Sempre usar o modo assíncrono
+    with console.status("[bold green]Iniciando busca de estradas..."):
         try:
+            # Iniciar operação assíncrona
             response = httpx.post(
-                f"{API_URL}/osm/search",
-                json={
-                    "origin": origin,
-                    "destination": destination,
-                    "road_type": road_type
-                },
-                timeout=60.0  # Esta operação pode demorar
+                f"{API_URL}/operations/osm-search",
+                json=request_data,
+                timeout=30.0  # Timeout generoso para iniciar a operação
             )
             response.raise_for_status()
-            data = response.json()
+            operation = response.json()
+            operation_id = operation["operation_id"]
             
-            # Extract key information for display
-            total_segments = len(data["road_segments"])
-            total_length = data["total_length_km"]
-            road_id = data["road_id"]
+            console.print(f"[green]Operação iniciada com ID: [bold]{operation_id}[/]")
             
-            # Print summary information
-            console.print(f"\n[bold]Rota de [cyan]{origin}[/] para [cyan]{destination}[/]")
-            console.print(f"Total de segmentos: [cyan]{total_segments}[/]")
-            console.print(f"Comprimento total: [cyan]{total_length:.2f} km[/]")
-            console.print(f"ID da estrada: [cyan]{road_id}[/]")
+            if no_wait:
+                console.print("[green]Use o comando [bold]operations status " + operation_id + "[/] para verificar o progresso.")
+                return operation_id
             
-            # Create a table of segments
-            table = Table(show_header=True, header_style="bold green")
-            table.add_column("Segmento")
-            table.add_column("Nome")
-            table.add_column("Tipo")
-            table.add_column("Referência")
-            table.add_column("Comprimento (km)")
-            
-            for i, segment in enumerate(data["road_segments"]):
-                table.add_row(
-                    str(i + 1),
-                    segment["name"] or "-",
-                    segment["highway_type"],
-                    segment["ref"] or "-",
-                    f"{segment['length_meters'] / 1000:.2f}"
-                )
-            
-            console.print(table)
-            
-            # Save to file if requested
-            if output_file:
-                with open(output_file, "w") as f:
-                    json.dump(data, f, indent=2)
-                console.print(f"[green]Resultados salvos em [bold]{output_file}[/]")
-            
-            return road_id
-            
-        except httpx.HTTPStatusError as e:
-            console.print(f"[bold red]Erro HTTP: {e.response.status_code} - {e.response.text}")
-        except httpx.RequestError as e:
-            console.print(f"[bold red]Erro de requisição: {str(e)}")
+            # Aguardar a conclusão da operação
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[bold green]Buscando estradas..."),
+            ) as progress:
+                task = progress.add_task("Processando...", total=None)
+                
+                while True:
+                    try:
+                        status_response = httpx.get(f"{API_URL}/operations/{operation_id}")
+                        status_response.raise_for_status()
+                        op_status = status_response.json()
+                        
+                        if op_status["status"] != "in_progress":
+                            break
+                        
+                        progress.update(task, description=f"[bold green]Processando: {op_status['progress_percent']:.1f}%")
+                        time.sleep(2)
+                    except Exception as e:
+                        console.print(f"[bold yellow]Erro ao verificar status: {str(e)}")
+                        console.print("[yellow]Aguardando antes de tentar novamente...")
+                        time.sleep(5)
+                
+                if op_status["status"] == "completed":
+                    data = op_status["result"]
+                    _display_search_results(data, origin, destination, output_file)
+                    return data.get("road_id")
+                else:
+                    console.print(f"[bold red]Falha na operação: {op_status.get('error', 'Erro desconhecido')}")
+                    return None
+                
         except Exception as e:
             console.print(f"[bold red]Erro: {str(e)}")
+            return None
+
+
+def _display_search_results(data, origin, destination, output_file):
+    """Exibe os resultados da busca de estradas"""
+    # Extract key information for display
+    total_segments = len(data["road_segments"])
+    total_length = data["total_length_km"]
+    road_id = data["road_id"]
+    
+    # Print summary information
+    console.print(f"\n[bold]Rota de [cyan]{origin}[/] para [cyan]{destination}[/]")
+    console.print(f"Total de segmentos: [cyan]{total_segments}[/]")
+    console.print(f"Comprimento total: [cyan]{total_length:.2f} km[/]")
+    console.print(f"ID da estrada: [cyan]{road_id}[/]")
+    
+    # Create a table of segments
+    table = Table(show_header=True, header_style="bold green")
+    table.add_column("Segmento")
+    table.add_column("Nome")
+    table.add_column("Tipo")
+    table.add_column("Referência")
+    table.add_column("Comprimento (km)")
+    
+    for i, segment in enumerate(data["road_segments"]):
+        table.add_row(
+            str(i + 1),
+            segment["name"] or "-",
+            segment["highway_type"],
+            segment["ref"] or "-",
+            f"{segment['length_meters'] / 1000:.2f}"
+        )
+    
+    console.print(table)
+    
+    # Save to file if requested
+    if output_file:
+        with open(output_file, "w") as f:
+            json.dump(data, f, indent=2)
+        console.print(f"[green]Resultados salvos em [bold]{output_file}[/]")
 
 
 @app.command()
@@ -96,76 +148,114 @@ def generate_map(
     include_toll_booths: bool = typer.Option(True, help="Incluir pedágios como marcos"),
     max_distance: float = typer.Option(1000, help="Distância máxima em metros da estrada para incluir pontos de interesse"),
     output_file: Optional[Path] = typer.Option(None, help="Arquivo para salvar os resultados em JSON"),
+    no_wait: bool = typer.Option(False, help="Não aguardar a conclusão da operação, apenas retornar o ID da tarefa"),
 ):
     """
     Gera um mapa linear de uma estrada entre pontos de origem e destino.
     """
-    with console.status("[bold green]Gerando mapa linear..."):
-        try:
+    try:
+        request_data = {
+            "origin": origin,
+            "destination": destination,
+            "road_id": road_id,
+            "include_cities": include_cities,
+            "include_gas_stations": include_gas_stations,
+            "include_restaurants": include_restaurants,
+            "include_toll_booths": include_toll_booths,
+            "max_distance_from_road": max_distance
+        }
+        
+        # Sempre iniciar uma operação assíncrona
+        with console.status("[bold green]Iniciando geração do mapa..."):
             response = httpx.post(
-                f"{API_URL}/roads/linear-map",
-                json={
-                    "origin": origin,
-                    "destination": destination,
-                    "road_id": road_id,
-                    "include_cities": include_cities,
-                    "include_gas_stations": include_gas_stations,
-                    "include_restaurants": include_restaurants,
-                    "include_toll_booths": include_toll_booths,
-                    "max_distance_from_road": max_distance
-                },
-                timeout=60.0  # Esta operação pode demorar
+                f"{API_URL}/operations/linear-map",
+                json=request_data,
+                timeout=30.0  # Timeout generoso para iniciar a operação
             )
             response.raise_for_status()
-            data = response.json()
+            operation = response.json()
+            operation_id = operation["operation_id"]
             
-            # Extract key information for display
-            map_id = data["id"]
-            total_length = data["total_length_km"]
-            num_segments = len(data["segments"])
-            num_milestones = len(data["milestones"])
+            console.print(f"[green]Operação iniciada com ID: [bold]{operation_id}[/]")
             
-            # Print summary information
-            console.print(f"\n[bold]Mapa linear de [cyan]{origin}[/] para [cyan]{destination}[/]")
-            console.print(f"ID do mapa: [cyan]{map_id}[/]")
-            console.print(f"Comprimento total: [cyan]{total_length:.2f} km[/]")
-            console.print(f"Número de segmentos: [cyan]{num_segments}[/]")
-            console.print(f"Número de marcos: [cyan]{num_milestones}[/]")
+            if no_wait:
+                console.print("[green]Use o comando [bold]operations status " + operation_id + "[/] para verificar o progresso.")
+                return operation_id
             
-            # Create a table of milestones
-            table = Table(show_header=True, header_style="bold green")
-            table.add_column("Km")
-            table.add_column("Marco")
-            table.add_column("Tipo")
-            table.add_column("Lado")
-            
-            # Sort milestones by distance
-            milestones = sorted(data["milestones"], key=lambda m: m["distance_from_origin_km"])
-            
-            for milestone in milestones:
-                table.add_row(
-                    f"{milestone['distance_from_origin_km']:.1f}",
-                    milestone["name"],
-                    milestone["type"],
-                    milestone["side"]
-                )
-            
-            console.print(table)
-            
-            # Save to file if requested
-            if output_file:
-                with open(output_file, "w") as f:
-                    json.dump(data, f, indent=2)
-                console.print(f"[green]Mapa salvo em [bold]{output_file}[/]")
-            
-            return map_id
-            
-        except httpx.HTTPStatusError as e:
-            console.print(f"[bold red]Erro HTTP: {e.response.status_code} - {e.response.text}")
-        except httpx.RequestError as e:
-            console.print(f"[bold red]Erro de requisição: {str(e)}")
-        except Exception as e:
-            console.print(f"[bold red]Erro: {str(e)}")
+            # Aguardar a conclusão da operação com barra de progresso
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[bold green]Gerando mapa linear..."),
+            ) as progress:
+                task = progress.add_task("Processando...", total=None)
+                
+                while True:
+                    try:
+                        status_response = httpx.get(f"{API_URL}/operations/{operation_id}")
+                        status_response.raise_for_status()
+                        op_status = status_response.json()
+                        
+                        if op_status["status"] != "in_progress":
+                            break
+                        
+                        progress.update(task, description=f"[bold green]Processando: {op_status['progress_percent']:.1f}%")
+                        time.sleep(2)
+                    except Exception as e:
+                        console.print(f"[bold yellow]Erro ao verificar status: {str(e)}")
+                        console.print("[yellow]Aguardando antes de tentar novamente...")
+                        time.sleep(5)
+                
+                if op_status["status"] == "completed":
+                    data = op_status["result"]
+                    _display_map_results(data, origin, destination, output_file)
+                    return data.get("id")
+                else:
+                    console.print(f"[bold red]Falha na operação: {op_status.get('error', 'Erro desconhecido')}")
+                    
+    except Exception as e:
+        console.print(f"[bold red]Erro: {str(e)}")
+
+
+def _display_map_results(data, origin, destination, output_file):
+    """Exibe os resultados do mapa"""
+    # Extract key information for display
+    map_id = data["id"]
+    total_length = data["total_length_km"]
+    num_segments = len(data["segments"])
+    num_milestones = len(data["milestones"])
+    
+    # Print summary information
+    console.print(f"\n[bold]Mapa linear de [cyan]{origin}[/] para [cyan]{destination}[/]")
+    console.print(f"ID do mapa: [cyan]{map_id}[/]")
+    console.print(f"Comprimento total: [cyan]{total_length:.2f} km[/]")
+    console.print(f"Número de segmentos: [cyan]{num_segments}[/]")
+    console.print(f"Número de marcos: [cyan]{num_milestones}[/]")
+    
+    # Create a table of milestones
+    table = Table(show_header=True, header_style="bold green")
+    table.add_column("Km")
+    table.add_column("Marco")
+    table.add_column("Tipo")
+    table.add_column("Lado")
+    
+    # Sort milestones by distance
+    milestones = sorted(data["milestones"], key=lambda m: m["distance_from_origin_km"])
+    
+    for milestone in milestones:
+        table.add_row(
+            f"{milestone['distance_from_origin_km']:.1f}",
+            milestone["name"],
+            milestone["type"],
+            milestone["side"]
+        )
+    
+    console.print(table)
+    
+    # Save to file if requested
+    if output_file:
+        with open(output_file, "w") as f:
+            json.dump(data, f, indent=2)
+        console.print(f"[green]Mapa salvo em [bold]{output_file}[/]")
 
 
 @app.command()

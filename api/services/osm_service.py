@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from geopy.geocoders import Nominatim
 import logging
 from datetime import datetime
+import pandas as pd
 
 from api.models.osm_models import (
     OSMSearchResponse,
@@ -40,6 +41,18 @@ class OSMService:
         result = (location.latitude, location.longitude)
         self.cache[location_name] = result
         return result
+    
+    def _format_name(self, name_value) -> Optional[str]:
+        """
+        Formata o campo nome para garantir que seja sempre uma string ou None.
+        OSM pode retornar listas de nomes em alguns casos.
+        """
+        if name_value is None:
+            return None
+        if isinstance(name_value, list):
+            # Juntar a lista de nomes em uma única string
+            return "; ".join(str(n) for n in name_value if n)
+        return str(name_value)
     
     def search_road_data(
         self, 
@@ -82,13 +95,30 @@ class OSMService:
             # Check if destination is within the graph bounds
             G_dest = ox.graph_from_point((dest_lat, dest_lon), dist=10000, network_type=network_type,
                                          custom_filter=custom_filter)
-            # Merge graphs
-            G = ox.graph_from_gdfs(
-                ox.graph_to_gdfs(G, nodes=True, edges=True)[0],
-                ox.graph_to_gdfs(G, nodes=True, edges=True)[1].append(
-                    ox.graph_to_gdfs(G_dest, nodes=True, edges=True)[1]
-                )
-            )
+            
+            try:
+                # Merge graphs usando pandas.concat em vez de append (deprecado)
+                G_nodes = ox.graph_to_gdfs(G, nodes=True, edges=False)
+                G_edges = ox.graph_to_gdfs(G, nodes=False, edges=True)
+                G_dest_edges = ox.graph_to_gdfs(G_dest, nodes=False, edges=True)
+                
+                # Concatenar os dataframes de edges
+                merged_edges = pd.concat([G_edges, G_dest_edges], ignore_index=True)
+                
+                # Criar grafo do osmnx a partir dos gdfs
+                G = ox.graph_from_gdfs(G_nodes, merged_edges)
+            except Exception as merge_error:
+                logger.warning(f"Could not merge graphs, using extended origin graph: {str(merge_error)}")
+                # Aumentar o raio do grafo para incluir o destino
+                try:
+                    # Calcular distância aproximada entre os pontos
+                    from geopy.distance import geodesic
+                    dist_km = geodesic((origin_lat, origin_lon), (dest_lat, dest_lon)).kilometers
+                    # Acrescentar 20% à distância para garantir que cubra bem a área
+                    radius_m = (dist_km * 1.2) * 1000  # Converter para metros
+                    G = ox.graph_from_point((origin_lat, origin_lon), dist=radius_m, network_type=network_type)
+                except Exception as e:
+                    logger.warning(f"Could not create extended graph: {str(e)}. Using original graph.")
         except Exception as e:
             logger.warning(f"Could not get graph for destination, using extended origin graph: {str(e)}")
         
@@ -144,9 +174,9 @@ class OSMService:
                 # Create road segment
                 segment = OSMRoadSegment(
                     id=str(uuid.uuid4()),
-                    name=edge.get('name', None),
-                    highway_type=edge.get('highway', 'unknown'),
-                    ref=edge.get('ref', None),
+                    name=self._format_name(edge.get('name', None)),
+                    highway_type=self._format_name(edge.get('highway', 'unknown')),
+                    ref=self._format_name(edge.get('ref', None)),
                     geometry=geometry,
                     length_meters=length_meters,
                     start_node=str(current_node),
