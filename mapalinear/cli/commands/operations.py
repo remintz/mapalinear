@@ -10,6 +10,13 @@ from rich import print as rprint
 import os
 import sys
 
+try:
+    # Tentar importar a função wait_for_operation do módulo principal
+    from mapalinear.cli.main import wait_for_operation
+    has_wait_function = True
+except ImportError:
+    has_wait_function = False
+
 operations_app = typer.Typer(help="Gerenciar operações assíncronas")
 console = Console()
 
@@ -29,72 +36,96 @@ def status(
     """
     try:
         if wait:
-            # Indicação clara de início da operação
-            console.print(f"[bold green]Aguardando conclusão da operação [cyan]{operation_id}[/]...")
-            
-            # Configuração para o cursor animado
-            cursor_width = 30
-            cursor_position = 0
-            cursor_direction = 1  # 1 = direita, -1 = esquerda
-            animation_chars = list("▮" + "▯"*(cursor_width-1))
-            
-            # Controle de tempo
-            start_time = time.time()
-            last_poll_time = 0
-            poll_interval = interval  # Usar o intervalo definido pelo usuário
-            operation = None
-            
-            try:
-                console.show_cursor(False)  # Esconde o cursor do terminal
+            if has_wait_function:
+                # Usar a função utilitária para aguardar a conclusão com um timeout
+                start_time = time.time()
                 
-                # Loop de polling com animação de cursor
-                while True:
-                    current_time = time.time()
+                try:
+                    message = f"Aguardando conclusão da operação [cyan]{operation_id}[/]..."
                     
-                    # Verificar timeout
-                    elapsed = current_time - start_time
-                    if timeout > 0 and elapsed > timeout:
-                        print("\r" + " " * (cursor_width + 3), end="\r", flush=True)
-                        console.print(f"[bold red]Timeout após {timeout} segundos!")
-                        break
+                    # Criar uma função para verificar o timeout
+                    def check_timeout():
+                        if timeout > 0 and (time.time() - start_time) > timeout:
+                            console.print(f"\n[bold red]Timeout após {timeout} segundos!")
+                            return True
+                        return False
                     
-                    # Verificar se é hora de fazer polling
-                    if current_time - last_poll_time >= poll_interval or operation is None:
-                        try:
-                            # Verificar status da operação
-                            response = httpx.get(f"{API_URL}/operations/{operation_id}")
-                            response.raise_for_status()
-                            operation = response.json()
-                            last_poll_time = current_time
-                            
-                            if operation["status"] != "in_progress":
-                                break
-                        except Exception:
-                            # Silenciosamente ignora erros de polling
-                            pass
+                    # Utilizar a função de espera com verificação de timeout
+                    operation = wait_for_operation(operation_id, message, console, poll_interval=interval)
                     
-                    # Atualizar posição do cursor (movimento)
-                    cursor_position += cursor_direction
-                    if cursor_position >= cursor_width-1:
-                        cursor_direction = -1
-                    elif cursor_position <= 0:
-                        cursor_direction = 1
-                    
-                    # Atualizar animação
-                    animation_chars = ["▯"] * cursor_width
-                    animation_chars[cursor_position] = "▮"
-                    
-                    # Mostrar a barra com movimento de vai e vem
-                    print(f"\r[{''.join(animation_chars)}]", end="", flush=True)
-                    
-                    # Pausa curta para animação fluida
-                    time.sleep(0.2)
+                except KeyboardInterrupt:
+                    console.print("\n[bold yellow]Operação interrompida pelo usuário.")
+                    # Ainda precisamos verificar o status atual
+                    response = httpx.get(f"{API_URL}/operations/{operation_id}")
+                    response.raise_for_status()
+                    operation = response.json()
+            else:
+                # Indicação clara de início da operação
+                console.print(f"[bold green]Aguardando conclusão da operação [cyan]{operation_id}[/]...")
                 
-                # Limpar a linha após concluir
-                print("\r" + " " * (cursor_width + 3), end="\r", flush=True)
+                # Configuração para o cursor animado
+                cursor_width = 30
+                cursor_position = 0
+                cursor_direction = 1  # 1 = direita, -1 = esquerda
+                animation_chars = list("▮" + "▯"*(cursor_width-1))
                 
-            finally:
-                console.show_cursor(True)  # Certifica-se de restaurar o cursor
+                # Controle de tempo
+                start_time = time.time()
+                last_poll_time = 0
+                poll_interval = interval  # Usar o intervalo definido pelo usuário
+                operation = None
+                
+                try:
+                    console.show_cursor(False)  # Esconde o cursor do terminal
+                    
+                    # Loop de polling com animação de cursor
+                    while True:
+                        current_time = time.time()
+                        
+                        # Verificar timeout
+                        elapsed = current_time - start_time
+                        if timeout > 0 and elapsed > timeout:
+                            print("\r" + " " * (cursor_width + 3), end="\r", flush=True)
+                            console.print(f"[bold red]Timeout após {timeout} segundos!")
+                            break
+                        
+                        # Verificar se é hora de fazer polling
+                        if current_time - last_poll_time >= poll_interval or operation is None:
+                            try:
+                                # Verificar status da operação
+                                response = httpx.get(f"{API_URL}/operations/{operation_id}")
+                                response.raise_for_status()
+                                operation = response.json()
+                                last_poll_time = current_time
+                                
+                                if operation["status"] != "in_progress":
+                                    break
+                            except Exception:
+                                # Silenciosamente ignora erros de polling
+                                pass
+                        
+                        # Atualizar posição do cursor (movimento)
+                        cursor_position += cursor_direction
+                        if cursor_position >= cursor_width-1:
+                            cursor_direction = -1
+                        elif cursor_position <= 0:
+                            cursor_direction = 1
+                        
+                        # Atualizar animação
+                        animation_chars = ["▯"] * cursor_width
+                        animation_chars[cursor_position] = "▮"
+                        
+                        # Mostrar a barra com movimento de vai e vem
+                        print(f"\r[{''.join(animation_chars)}]", end="", flush=True)
+                        
+                        # Pausa curta para animação fluida
+                        time.sleep(0.2)
+                    
+                    # Limpar a linha após concluir
+                    print("\r" + " " * (cursor_width + 3), end="\r", flush=True)
+                    
+                finally:
+                    console.show_cursor(True)  # Certifica-se de restaurar o cursor
         else:
             with console.status("[bold green]Verificando status da operação..."):
                 response = httpx.get(f"{API_URL}/operations/{operation_id}")
