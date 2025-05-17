@@ -25,7 +25,7 @@ class OSMService:
         self.overpass_api = overpass.API()
         self.geolocator = Nominatim(user_agent="mapalinear/1.0")
         self.cache = {}  # Simple cache for geocoding results
-    
+        
     def _geocode_location(self, location_name: str) -> Tuple[float, float]:
         """Convert a location name to coordinates (latitude, longitude)."""
         if location_name in self.cache:
@@ -228,27 +228,21 @@ class OSMService:
         # Placeholder implementation
         return []
     
-    def _query_osm_route(self, origin_coords: Tuple[float, float], dest_coords: Tuple[float, float]) -> Dict:
+    def query_overpass(self, query: str) -> Dict:
         """
-        Query OSM for a route between two points using Overpass API.
+        Executa uma query no Overpass API.
         """
-        origin_lat, origin_lon = origin_coords
-        dest_lat, dest_lon = dest_coords
-        
-        # Bounding box with some buffer
-        min_lat = min(origin_lat, dest_lat) - 0.1
-        max_lat = max(origin_lat, dest_lat) + 0.1
-        min_lon = min(origin_lon, dest_lon) - 0.1
-        max_lon = max(origin_lon, dest_lon) + 0.1
-        
-        # Overpass query to get highways in the bounding box
-        query = f"""
-        [out:json];
-        (
-            way({min_lat},{min_lon},{max_lat},{max_lon})["highway"];
-        );
-        out body geom;
-        """
-        
-        result = self.overpass_api.get(query, responseformat="json")
-        return result 
+        try:
+            # Remove any duplicate query parts
+            if query.count('[out:json];') > 1:
+                query = query.split('[out:json];')[-1]
+                query = '[out:json];' + query
+            
+            if query.count('out body;') > 1:
+                query = query.split('out body;')[0] + 'out body;'
+            
+            logger.debug(f"Query Overpass final: {query}")
+            return self.overpass_api.get(query)
+        except Exception as e:
+            logger.error(f"Erro na query Overpass: {str(e)}")
+            raise 

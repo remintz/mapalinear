@@ -1,9 +1,10 @@
 import uuid
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Callable
 import logging
 from datetime import datetime
 import osmnx as ox
 import geopy.distance
+import os
 
 from api.models.road_models import (
     LinearMapResponse,
@@ -16,7 +17,45 @@ from api.models.road_models import (
 from api.services.osm_service import OSMService
 from api.models.osm_models import Coordinates
 
-logger = logging.getLogger(__name__)
+# Configuração do logging
+def setup_logging():
+    """
+    Configura o logging para gravar em arquivo e console.
+    """
+    # Criar diretório de logs se não existir
+    log_dir = "logs"
+    os.makedirs(log_dir, exist_ok=True)
+    
+    # Nome do arquivo de log com timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = os.path.join(log_dir, f"mapalinear_{timestamp}.log")
+    
+    # Configurar o logger
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False  # Desabilita a propagação para o logger pai
+    
+    # Formato do log
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    
+    # Handler para arquivo
+    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
+    
+    # Handler para console
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(formatter)
+    
+    # Adicionar handlers ao logger
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    return logger
+
+# Inicializar o logger
+logger = setup_logging()
 
 class RoadService:
     def __init__(self):
@@ -24,6 +63,324 @@ class RoadService:
         # In a real implementation, you would have a database connection here
         self.saved_maps = {}  # Simple in-memory storage for now
     
+    def _save_debug_info(self, osm_response, linear_segments, all_milestones):
+        """
+        Salva informações de debug sobre os segmentos e marcos em um arquivo texto.
+        """
+        debug_dir = "debug_outputs"
+        os.makedirs(debug_dir, exist_ok=True)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        debug_file = os.path.join(debug_dir, f"road_segments_{timestamp}.txt")
+        
+        with open(debug_file, "w", encoding="utf-8") as f:
+            f.write("=== INFORMAÇÕES DE DEBUG DO MAPA LINEAR ===\n\n")
+            
+            f.write("=== SEGMENTOS OSM ===\n")
+            accumulated_length = 0
+            for i, segment in enumerate(osm_response.road_segments):
+                f.write(f"\nSegmento OSM {i+1}:\n")
+                f.write(f"  Nome: {segment.name}\n")
+                f.write(f"  Tipo: {segment.highway_type}\n")
+                f.write(f"  Referência: {segment.ref}\n")
+                f.write(f"  Comprimento: {segment.length_meters:.2f}m\n")
+                accumulated_length += segment.length_meters
+                f.write(f"  Comprimento acumulado: {accumulated_length:.2f}m ({accumulated_length/1000:.2f}km)\n")
+                f.write(f"  Número de pontos: {len(segment.geometry)}\n")
+                f.write(f"  Primeiro ponto: {segment.geometry[0]}\n")
+                f.write(f"  Último ponto: {segment.geometry[-1]}\n")
+            
+            f.write("\n\n=== SEGMENTOS LINEARES ===\n")
+            for i, segment in enumerate(linear_segments):
+                f.write(f"\nSegmento Linear {i+1}:\n")
+                f.write(f"  ID: {segment.id}\n")
+                f.write(f"  Nome: {segment.name}\n")
+                f.write(f"  Referência: {segment.ref}\n")
+                f.write(f"  Distância inicial: {segment.start_distance_km:.2f}km\n")
+                f.write(f"  Distância final: {segment.end_distance_km:.2f}km\n")
+                f.write(f"  Comprimento: {segment.length_km:.2f}km\n")
+                f.write(f"  Número de marcos: {len(segment.milestones)}\n")
+            
+            f.write("\n\n=== MARCOS ===\n")
+            for i, milestone in enumerate(all_milestones):
+                f.write(f"\nMarco {i+1}:\n")
+                f.write(f"  ID: {milestone.id}\n")
+                f.write(f"  Nome: {milestone.name}\n")
+                f.write(f"  Tipo: {milestone.type}\n")
+                f.write(f"  Coordenadas: {milestone.coordinates}\n")
+                f.write(f"  Distância da origem: {milestone.distance_from_origin_km:.2f}km\n")
+                f.write(f"  Distância da estrada: {milestone.distance_from_road_meters:.2f}m\n")
+                f.write(f"  Lado: {milestone.side}\n")
+        
+        logger.info(f"Arquivo de debug salvo em: {debug_file}")
+        return debug_file
+
+    def _segment_road(self, road_segments: List[Any], segment_length_km: float = 10.0) -> List[Dict[str, Any]]:
+        """
+        Segmenta a estrada em trechos menores para processamento mais eficiente.
+        """
+        logger.info(f"Iniciando segmentação da estrada em trechos de {segment_length_km}km")
+        segments = []
+        current_segment = {
+            'start_idx': 0,
+            'end_idx': 0,
+            'start_distance': 0.0,
+            'end_distance': 0.0,
+            'center_point': None,
+            'length': 0.0
+        }
+        
+        total_length = 0.0
+        segment_length_m = segment_length_km * 1000  # Converter para metros
+        
+        for i, segment in enumerate(road_segments):
+            segment_length = segment.length_meters
+            total_length += segment_length
+            
+            # Se o trecho atual ainda não atingiu o tamanho desejado
+            if current_segment['length'] < segment_length_m:
+                current_segment['end_idx'] = i
+                current_segment['length'] += segment_length
+                current_segment['end_distance'] = total_length
+            else:
+                # Calcular o ponto central do trecho
+                if current_segment['start_idx'] == current_segment['end_idx']:
+                    # Se o trecho é um único segmento, usar seu ponto central
+                    segment = road_segments[current_segment['start_idx']]
+                    center_idx = len(segment.geometry) // 2
+                    current_segment['center_point'] = segment.geometry[center_idx]
+                else:
+                    # Se o trecho tem múltiplos segmentos, calcular o ponto médio
+                    start_segment = road_segments[current_segment['start_idx']]
+                    end_segment = road_segments[current_segment['end_idx']]
+                    start_point = start_segment.geometry[0]
+                    end_point = end_segment.geometry[-1]
+                    current_segment['center_point'] = Coordinates(
+                        lat=(start_point.lat + end_point.lat) / 2,
+                        lon=(start_point.lon + end_point.lon) / 2
+                    )
+                
+                logger.debug(f"Criado trecho de {current_segment['length']/1000:.2f}km com {current_segment['end_idx'] - current_segment['start_idx'] + 1} segmentos")
+                segments.append(current_segment)
+                
+                # Iniciar novo trecho
+                current_segment = {
+                    'start_idx': i,
+                    'end_idx': i,
+                    'start_distance': total_length - segment_length,
+                    'end_distance': total_length,
+                    'center_point': None,
+                    'length': segment_length
+                }
+        
+        # Adicionar o último trecho se ele tiver algum comprimento
+        if current_segment['length'] > 0:
+            if current_segment['start_idx'] == current_segment['end_idx']:
+                segment = road_segments[current_segment['start_idx']]
+                center_idx = len(segment.geometry) // 2
+                current_segment['center_point'] = segment.geometry[center_idx]
+            else:
+                start_segment = road_segments[current_segment['start_idx']]
+                end_segment = road_segments[current_segment['end_idx']]
+                start_point = start_segment.geometry[0]
+                end_point = end_segment.geometry[-1]
+                current_segment['center_point'] = Coordinates(
+                    lat=(start_point.lat + end_point.lat) / 2,
+                    lon=(start_point.lon + end_point.lon) / 2
+                )
+            logger.debug(f"Criado último trecho de {current_segment['length']/1000:.2f}km com {current_segment['end_idx'] - current_segment['start_idx'] + 1} segmentos")
+            segments.append(current_segment)
+        
+        logger.info(f"Segmentação concluída: {len(segments)} trechos criados, comprimento total: {total_length/1000:.2f}km")
+        return segments
+
+    def _find_milestones_along_road(
+        self, 
+        road_segments: List[Any], 
+        milestone_types: List[str], 
+        max_distance: float,
+        segment_length_km: float = 10.0
+    ) -> List[RoadMilestone]:
+        """
+        Find milestones along a road using real data from OpenStreetMap.
+        """
+        logger.info(f"Iniciando busca de marcos: tipos={milestone_types}, distância máxima={max_distance}m")
+        milestones = []
+        
+        # Get all coordinates from road segments
+        all_coordinates = []
+        for segment in road_segments:
+            all_coordinates.extend(segment.geometry)
+        
+        # Calculate total road length
+        total_length_km = sum(segment.length_meters for segment in road_segments) / 1000
+        logger.info(f"Comprimento total da estrada: {total_length_km:.2f}km")
+        
+        # Segment the road into smaller chunks
+        road_chunks = self._segment_road(road_segments, segment_length_km)
+        
+        # Process cities first (start and end points)
+        if any(t in ["city", "town", "village"] for t in milestone_types) and all_coordinates:
+            logger.info("Adicionando marcos de início e fim")
+            # Start city
+            start_milestone = RoadMilestone(
+                id=str(uuid.uuid4()),
+                name=f"{road_segments[0].name or 'Cidade Inicial'} (Início)",
+                type=MilestoneType.CITY,
+                coordinates=all_coordinates[0],
+                distance_from_origin_km=0.0,
+                distance_from_road_meters=0.0,
+                side="center",
+                tags={}
+            )
+            milestones.append(start_milestone)
+            
+            # End city
+            end_milestone = RoadMilestone(
+                id=str(uuid.uuid4()),
+                name=f"{road_segments[-1].name or 'Cidade Final'} (Fim)",
+                type=MilestoneType.CITY,
+                coordinates=all_coordinates[-1],
+                distance_from_origin_km=total_length_km,
+                distance_from_road_meters=0.0,
+                side="center",
+                tags={}
+            )
+            milestones.append(end_milestone)
+        
+        # Query OSM for all other milestone types in each chunk
+        logger.info(f"Iniciando busca de POIs em {len(road_chunks)} trechos")
+        for i, chunk in enumerate(road_chunks):
+            logger.info(f"Processando trecho {i+1}/{len(road_chunks)}")
+            try:
+                # Build Overpass query for this chunk
+                lat, lon = chunk['center_point'].lat, chunk['center_point'].lon
+                radius = max_distance  # in meters
+                
+                # Build query based on milestone types
+                node_queries = []
+                if "gas_station" in milestone_types:
+                    node_queries.append(f'node["amenity"="fuel"](around:{radius},{lat},{lon})')
+                if "toll_booth" in milestone_types:
+                    node_queries.append(f'node["barrier"="toll_booth"](around:{radius},{lat},{lon})')
+                if "restaurant" in milestone_types:
+                    node_queries.append(f'node["amenity"="restaurant"](around:{radius},{lat},{lon})')
+                
+                if not node_queries:
+                    continue
+                
+                # Build the complete query
+                query = f"""[out:json];
+(
+    {';'.join(node_queries)};
+);
+out body;"""
+                
+                logger.debug(f"Query Overpass para trecho {i+1}: {query}")
+                
+                try:
+                    # Execute query using the new method
+                    result = self.osm_service.query_overpass(query)
+                    
+                    if not result:
+                        logger.warning(f"Resposta vazia do Overpass API para o trecho {i+1}")
+                        continue
+                        
+                    if 'elements' not in result:
+                        logger.warning(f"Nenhum elemento encontrado na resposta do Overpass API para o trecho {i+1}")
+                        continue
+                    
+                    # Process results
+                    nodes_processed = 0
+                    milestones_found = 0
+                    
+                    for element in result['elements']:
+                        nodes_processed += 1
+                        
+                        # Skip elements without coordinates
+                        if 'lat' not in element or 'lon' not in element:
+                            continue
+                        
+                        # Determine milestone type and create milestone if applicable
+                        milestone = None
+                        
+                        # Check for gas stations
+                        if "gas_station" in milestone_types and element.get('tags', {}).get('amenity') == 'fuel':
+                            if 'name' in element.get('tags', {}):
+                                milestone = RoadMilestone(
+                                    id=str(uuid.uuid4()),
+                                    name=element['tags']['name'],
+                                    type=MilestoneType.GAS_STATION,
+                                    coordinates=Coordinates(
+                                        lat=element['lat'],
+                                        lon=element['lon']
+                                    ),
+                                    distance_from_origin_km=chunk['start_distance'] / 1000,
+                                    distance_from_road_meters=geopy.distance.geodesic(
+                                        (chunk['center_point'].lat, chunk['center_point'].lon),
+                                        (element['lat'], element['lon'])
+                                    ).meters,
+                                    side="right",  # Default to right side
+                                    tags=element.get('tags', {})
+                                )
+                        
+                        # Check for toll booths
+                        elif "toll_booth" in milestone_types and element.get('tags', {}).get('barrier') == 'toll_booth':
+                            milestone = RoadMilestone(
+                                id=str(uuid.uuid4()),
+                                name=element.get('tags', {}).get('name', 'Pedágio'),
+                                type=MilestoneType.TOLL_BOOTH,
+                                coordinates=Coordinates(
+                                    lat=element['lat'],
+                                    lon=element['lon']
+                                ),
+                                distance_from_origin_km=chunk['start_distance'] / 1000,
+                                distance_from_road_meters=geopy.distance.geodesic(
+                                    (chunk['center_point'].lat, chunk['center_point'].lon),
+                                    (element['lat'], element['lon'])
+                                ).meters,
+                                side="center",
+                                tags=element.get('tags', {})
+                            )
+                        
+                        # Check for restaurants
+                        elif "restaurant" in milestone_types and element.get('tags', {}).get('amenity') == 'restaurant':
+                            if 'name' in element.get('tags', {}):
+                                milestone = RoadMilestone(
+                                    id=str(uuid.uuid4()),
+                                    name=element['tags']['name'],
+                                    type=MilestoneType.RESTAURANT,
+                                    coordinates=Coordinates(
+                                        lat=element['lat'],
+                                        lon=element['lon']
+                                    ),
+                                    distance_from_origin_km=chunk['start_distance'] / 1000,
+                                    distance_from_road_meters=geopy.distance.geodesic(
+                                        (chunk['center_point'].lat, chunk['center_point'].lon),
+                                        (element['lat'], element['lon'])
+                                    ).meters,
+                                    side="right",  # Default to right side
+                                    tags=element.get('tags', {})
+                                )
+                        
+                        # Add milestone if created
+                        if milestone:
+                            milestones_found += 1
+                            milestones.append(milestone)
+                    
+                    logger.info(f"Trecho {i+1}: processados {nodes_processed} nós, encontrados {milestones_found} marcos")
+                    
+                except Exception as e:
+                    logger.error(f"Erro ao executar query Overpass para o trecho {i+1}: {str(e)}")
+                    continue
+                        
+            except Exception as e:
+                logger.error(f"Erro ao processar trecho {i+1}: {str(e)}")
+                continue  # Continue with next chunk even if this one fails
+        
+        logger.info(f"Busca de marcos concluída: {len(milestones)} marcos encontrados no total")
+        return milestones
+
     def generate_linear_map(
         self,
         origin: str,
@@ -33,7 +390,9 @@ class RoadService:
         include_gas_stations: bool = True,
         include_restaurants: bool = False,
         include_toll_booths: bool = True,
-        max_distance_from_road: float = 1000
+        max_distance_from_road: float = 1000,
+        progress_callback: Optional[Callable[[float], None]] = None,
+        segment_length_km: float = 10.0
     ) -> LinearMapResponse:
         """
         Gera um mapa linear de uma estrada entre os pontos de origem e destino.
@@ -67,7 +426,8 @@ class RoadService:
         all_milestones = self._find_milestones_along_road(
             osm_response.road_segments,
             milestone_types,
-            max_distance_from_road
+            max_distance_from_road,
+            segment_length_km
         )
         
         # Step 4: Assign milestones to segments
@@ -76,6 +436,9 @@ class RoadService:
                 milestone for milestone in all_milestones
                 if segment.start_distance_km <= milestone.distance_from_origin_km <= segment.end_distance_km
             ]
+        
+        # Save debug information
+        debug_file = self._save_debug_info(osm_response, linear_segments, all_milestones)
         
         # Create linear map response
         linear_map = LinearMapResponse(
@@ -120,148 +483,6 @@ class RoadService:
             current_distance = end_distance
         
         return linear_segments
-    
-    def _find_milestones_along_road(
-        self, 
-        road_segments: List[Any], 
-        milestone_types: List[str], 
-        max_distance: float
-    ) -> List[RoadMilestone]:
-        """
-        Find milestones along a road.
-        In a real implementation, this would use Overpass API to find POIs.
-        """
-        # This is a placeholder implementation
-        # In a real implementation, you would query Overpass API for POIs near the road
-        
-        milestones = []
-        
-        # Create some placeholder milestones for demonstration
-        # In a real implementation, these would come from OSM data
-        
-        # Example city milestone at the beginning of the road
-        if "city" in milestone_types:
-            start_milestone = RoadMilestone(
-                id=str(uuid.uuid4()),
-                name="Cidade Inicial",
-                type=MilestoneType.CITY,
-                coordinates=road_segments[0].geometry[0],
-                distance_from_origin_km=0.0,
-                distance_from_road_meters=0.0,
-                side="center",
-                tags={}
-            )
-            milestones.append(start_milestone)
-            
-            # Example city milestone in the middle of the road
-            if len(road_segments) > 3:
-                middle_segment = road_segments[len(road_segments) // 2]
-                middle_point = middle_segment.geometry[len(middle_segment.geometry) // 2]
-                
-                middle_milestone = RoadMilestone(
-                    id=str(uuid.uuid4()),
-                    name="Cidade Intermediária",
-                    type=MilestoneType.CITY,
-                    coordinates=middle_point,
-                    distance_from_origin_km=sum(segment.length_meters for segment in road_segments[:len(road_segments) // 2]) / 1000,
-                    distance_from_road_meters=0.0,
-                    side="right",
-                    tags={}
-                )
-                milestones.append(middle_milestone)
-            
-            # Example city milestone at the end of the road
-            end_milestone = RoadMilestone(
-                id=str(uuid.uuid4()),
-                name="Cidade Final",
-                type=MilestoneType.CITY,
-                coordinates=road_segments[-1].geometry[-1],
-                distance_from_origin_km=sum(segment.length_meters for segment in road_segments) / 1000,
-                distance_from_road_meters=0.0,
-                side="center",
-                tags={}
-            )
-            milestones.append(end_milestone)
-        
-        # Example gas station milestones
-        if "gas_station" in milestone_types and len(road_segments) > 2:
-            # Place gas stations at regular intervals
-            total_length_km = sum(segment.length_meters for segment in road_segments) / 1000
-            num_gas_stations = max(1, int(total_length_km / 50))  # One gas station every 50 km
-            
-            for i in range(num_gas_stations):
-                target_distance_km = (i + 1) * (total_length_km / (num_gas_stations + 1))
-                
-                # Find the segment that contains this distance
-                current_distance = 0
-                for segment in road_segments:
-                    next_distance = current_distance + segment.length_meters / 1000
-                    if current_distance <= target_distance_km <= next_distance:
-                        # Found the segment, now interpolate the position
-                        fraction = (target_distance_km - current_distance) / (next_distance - current_distance)
-                        
-                        # Simple linear interpolation of geometry
-                        if len(segment.geometry) > 1:
-                            idx = int(fraction * (len(segment.geometry) - 1))
-                            point = segment.geometry[idx]
-                        else:
-                            point = segment.geometry[0]
-                        
-                        gas_station = RoadMilestone(
-                            id=str(uuid.uuid4()),
-                            name=f"Posto de Gasolina {i+1}",
-                            type=MilestoneType.GAS_STATION,
-                            coordinates=point,
-                            distance_from_origin_km=target_distance_km,
-                            distance_from_road_meters=50.0,  # Arbitrary distance from road
-                            side="right" if i % 2 == 0 else "left",  # Alternate sides
-                            tags={}
-                        )
-                        milestones.append(gas_station)
-                        break
-                    
-                    current_distance = next_distance
-        
-        # Similarly, add toll booths and restaurants if requested
-        if "toll_booth" in milestone_types and len(road_segments) > 4:
-            # Place toll booths at regular intervals
-            total_length_km = sum(segment.length_meters for segment in road_segments) / 1000
-            num_toll_booths = max(1, int(total_length_km / 100))  # One toll booth every 100 km
-            
-            for i in range(num_toll_booths):
-                target_distance_km = (i + 1) * (total_length_km / (num_toll_booths + 1))
-                
-                # Find the segment that contains this distance
-                current_distance = 0
-                for segment in road_segments:
-                    next_distance = current_distance + segment.length_meters / 1000
-                    if current_distance <= target_distance_km <= next_distance:
-                        # Found the segment, now interpolate the position
-                        fraction = (target_distance_km - current_distance) / (next_distance - current_distance)
-                        
-                        # Simple linear interpolation of geometry
-                        if len(segment.geometry) > 1:
-                            idx = int(fraction * (len(segment.geometry) - 1))
-                            point = segment.geometry[idx]
-                        else:
-                            point = segment.geometry[0]
-                        
-                        toll_booth = RoadMilestone(
-                            id=str(uuid.uuid4()),
-                            name=f"Pedágio {i+1}",
-                            type=MilestoneType.TOLL_BOOTH,
-                            coordinates=point,
-                            distance_from_origin_km=target_distance_km,
-                            distance_from_road_meters=0.0,  # On the road
-                            side="center",
-                            tags={}
-                        )
-                        milestones.append(toll_booth)
-                        break
-                    
-                    current_distance = next_distance
-        
-        return milestones
     
     def get_road_milestones(
         self, 
