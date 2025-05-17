@@ -1,5 +1,6 @@
 import overpass
 import osmnx as ox
+import networkx as nx
 import geopy.distance
 import uuid
 from typing import Dict, List, Optional, Any, Tuple
@@ -99,62 +100,97 @@ class OSMService:
         logger.info(f"Origin coordinates: {origin_lat}, {origin_lon}")
         logger.info(f"Destination coordinates: {dest_lat}, {dest_lon}")
         
+        north = max(origin_lat, dest_lat) + 0.2
+        south = min(origin_lat, dest_lat) - 0.2
+        east = max(origin_lon, dest_lon) + 0.2
+        west = min(origin_lon, dest_lon) - 0.2
+        
         # Get the shortest path using OSMnx
         # Determine network type based on road_type
         network_type = "drive"  # Default network type
+        custom_filter = None
         if road_type and road_type != RoadType.ALL:
             custom_filter = f'["highway"="{road_type.value}"]'
-        else:
-            custom_filter = None
-        
+            logger.info(f"Using custom filter: {custom_filter}")
+
         # Get the graph
+        G = None
         try:
-            G = ox.graph_from_point((origin_lat, origin_lon), dist=10000, network_type=network_type, 
-                                    custom_filter=custom_filter)
+            logger.info(f"Attempting to get graph for area between {origin} and {destination}")
+            logger.info(f"Network type: {network_type}, Custom filter: {custom_filter}")
+            
+            # Primeiro tenta com o filtro customizado
+            if custom_filter:
+                try:
+                    # Tenta obter o grafo usando o nome da cidade
+                    G = ox.graph_from_place(
+                        origin,
+                        network_type=network_type,
+                        custom_filter=custom_filter
+                    )
+                    logger.info(f"Graph obtained with custom filter: {len(G.nodes) if G else 0} nodes")
+                except Exception as e:
+                    logger.warning(f"Failed to get graph with custom filter: {str(e)}")
+                    G = None
+            
+            # Se não conseguiu com o filtro customizado ou não há filtro, tenta sem ele
+            if G is None or len(G.nodes) == 0:
+                logger.info("Attempting to get graph without custom filter...")
+                try:
+                    # Tenta obter o grafo usando o nome da cidade
+                    G = ox.graph_from_place(
+                        origin,
+                        network_type=network_type
+                    )
+                    logger.info(f"Graph obtained without custom filter: {len(G.nodes) if G else 0} nodes")
+                except Exception as e:
+                    logger.error(f"Failed to get graph without custom filter: {str(e)}")
+                    # Tenta uma última vez com a cidade de destino
+                    try:
+                        logger.info("Attempting with destination city...")
+                        G = ox.graph_from_place(
+                            destination,
+                            network_type=network_type
+                        )
+                        logger.info(f"Graph obtained with destination city: {len(G.nodes) if G else 0} nodes")
+                    except Exception as e2:
+                        logger.error(f"Failed to get graph with destination city: {str(e2)}")
+                        # Última tentativa: tenta obter o grafo usando as coordenadas
+                        try:
+                            logger.info("Attempting with coordinates...")
+                            G = ox.graph_from_point(
+                                (origin_lat, origin_lon),
+                                dist=50000,  # 50km radius
+                                network_type=network_type
+                            )
+                            logger.info(f"Graph obtained with coordinates: {len(G.nodes) if G else 0} nodes")
+                        except Exception as e3:
+                            logger.error(f"Failed to get graph with coordinates: {str(e3)}")
+                            raise ValueError(f"Não foi possível obter dados da rede viária para a região especificada: {str(e)}")
+            
+            if G is None or len(G.nodes) == 0:
+                raise ValueError("Não foi possível obter dados da rede viária para a região especificada")
+                
+            logger.info(f"Graph obtained successfully with {len(G.nodes)} nodes and {len(G.edges)} edges")
+            
         except Exception as e:
             logger.error(f"Error getting graph from origin: {str(e)}")
-            # Try with a larger radius
-            G = ox.graph_from_point((origin_lat, origin_lon), dist=50000, network_type=network_type)
+            raise ValueError(f"Não foi possível obter o grafo da rede para a rota entre {origin} e {destination}: {str(e)}")
+        
+        if G is None:
+            raise ValueError(f"Não foi possível obter o grafo da rede para a rota entre {origin} e {destination}")
         
         # Find nearest nodes to origin and destination
-        origin_node = ox.distance.nearest_nodes(G, origin_lon, origin_lat)
-        
         try:
-            # Check if destination is within the graph bounds
-            G_dest = ox.graph_from_point((dest_lat, dest_lon), dist=10000, network_type=network_type,
-                                         custom_filter=custom_filter)
-            
-            try:
-                # Merge graphs usando pandas.concat em vez de append (deprecado)
-                G_nodes = ox.graph_to_gdfs(G, nodes=True, edges=False)
-                G_edges = ox.graph_to_gdfs(G, nodes=False, edges=True)
-                G_dest_edges = ox.graph_to_gdfs(G_dest, nodes=False, edges=True)
-                
-                # Concatenar os dataframes de edges
-                merged_edges = pd.concat([G_edges, G_dest_edges], ignore_index=True)
-                
-                # Criar grafo do osmnx a partir dos gdfs
-                G = ox.graph_from_gdfs(G_nodes, merged_edges)
-            except Exception as merge_error:
-                logger.warning(f"Could not merge graphs, using extended origin graph: {str(merge_error)}")
-                # Aumentar o raio do grafo para incluir o destino
-                try:
-                    # Calcular distância aproximada entre os pontos
-                    from geopy.distance import geodesic
-                    dist_km = geodesic((origin_lat, origin_lon), (dest_lat, dest_lon)).kilometers
-                    # Acrescentar 20% à distância para garantir que cubra bem a área
-                    radius_m = (dist_km * 1.2) * 1000  # Converter para metros
-                    G = ox.graph_from_point((origin_lat, origin_lon), dist=radius_m, network_type=network_type)
-                except Exception as e:
-                    logger.warning(f"Could not create extended graph: {str(e)}. Using original graph.")
+            origin_node = ox.distance.nearest_nodes(G, origin_lon, origin_lat)
+            dest_node = ox.distance.nearest_nodes(G, dest_lon, dest_lat)
         except Exception as e:
-            logger.warning(f"Could not get graph for destination, using extended origin graph: {str(e)}")
-        
-        dest_node = ox.distance.nearest_nodes(G, dest_lon, dest_lat)
+            logger.error(f"Error finding nearest nodes: {str(e)}")
+            raise ValueError(f"Não foi possível encontrar os nós mais próximos para {origin} e {destination}")
         
         # Get the shortest path
         try:
-            route = ox.shortest_path(G, origin_node, dest_node, weight='length')
+            route = nx.shortest_path(G, origin_node, dest_node, weight='length')
         except Exception as e:
             logger.error(f"Error finding shortest path: {str(e)}")
             raise ValueError(f"Não foi possível encontrar uma rota entre {origin} e {destination}")

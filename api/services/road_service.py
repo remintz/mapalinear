@@ -60,8 +60,6 @@ logger = setup_logging()
 class RoadService:
     def __init__(self):
         self.osm_service = OSMService()
-        # In a real implementation, you would have a database connection here
-        self.saved_maps = {}  # Simple in-memory storage for now
     
     def _save_debug_info(self, osm_response, linear_segments, all_milestones):
         """
@@ -482,9 +480,6 @@ class RoadService:
             osm_road_id=road_id
         )
         
-        # Save the map for later retrieval
-        self.saved_maps[linear_map.id] = linear_map
-        
         return linear_map
     
     def _process_road_segments(self, osm_segments: List[Any]) -> List[LinearRoadSegment]:
@@ -527,66 +522,5 @@ class RoadService:
         Obtém marcos importantes ao longo de uma estrada.
         """
         # In a real implementation, this would query the database for milestones
-        # For now, we'll generate some milestones if we have the road in memory
-        
-        # Look for the road in saved maps
-        for map_id, map_data in self.saved_maps.items():
-            if map_data.osm_road_id == road_id:
-                # Filter milestones by type if requested
-                milestones = map_data.milestones
-                if milestone_type:
-                    milestones = [m for m in milestones if m.type.value == milestone_type]
-                
-                # Convert to response format
-                return [
-                    RoadMilestoneResponse(
-                        id=milestone.id,
-                        name=milestone.name,
-                        type=milestone.type,
-                        coordinates=milestone.coordinates,
-                        distance_from_origin_km=milestone.distance_from_origin_km,
-                        road_id=road_id,
-                        road_name=None,  # Would come from database in real implementation
-                        road_ref=None  # Would come from database in real implementation
-                    )
-                    for milestone in milestones
-                ]
-        
-        # If road not found in saved maps, return empty list
+        # For now, we'll return an empty list since we're not caching anymore
         return []
-    
-    def get_saved_maps(self) -> List[SavedMapResponse]:
-        """
-        Obtém todos os mapas salvos anteriormente.
-        """
-        return [
-            SavedMapResponse(
-                id=map_id,
-                name=None,  # User-provided names would be stored in a real implementation
-                origin=map_data.origin,
-                destination=map_data.destination,
-                total_length_km=map_data.total_length_km,
-                creation_date=map_data.creation_date,
-                road_refs=[segment.ref for segment in map_data.segments if segment.ref],
-                milestone_count=len(map_data.milestones)
-            )
-            for map_id, map_data in self.saved_maps.items()
-        ]
-    
-    def get_saved_map(self, map_id: str) -> Optional[SavedMapResponse]:
-        """
-        Obtém um mapa salvo pelo seu ID.
-        """
-        if map_id in self.saved_maps:
-            map_data = self.saved_maps[map_id]
-            return SavedMapResponse(
-                id=map_id,
-                name=None,  # User-provided names would be stored in a real implementation
-                origin=map_data.origin,
-                destination=map_data.destination,
-                total_length_km=map_data.total_length_km,
-                creation_date=map_data.creation_date,
-                road_refs=[segment.ref for segment in map_data.segments if segment.ref],
-                milestone_count=len(map_data.milestones)
-            )
-        return None
