@@ -206,18 +206,21 @@ class RoadService:
         """
         logger.info(f"Iniciando busca de marcos: tipos={milestone_types}, distância máxima={max_distance}m")
         milestones = []
+        seen_coordinates = set()  # Set to track seen coordinates
         
         # Get all coordinates from road segments
         all_coordinates = []
         for segment in road_segments:
             all_coordinates.extend(segment.geometry)
         
-        # Calculate total road length
-        total_length_km = sum(segment.length_meters for segment in road_segments) / 1000
-        logger.info(f"Comprimento total da estrada: {total_length_km:.2f}km")
+        # Calculate total road length and accumulated distances
+        total_length_km = 0
+        segment_distances = []
+        for segment in road_segments:
+            segment_distances.append(total_length_km)
+            total_length_km += segment.length_meters / 1000
         
-        # Segment the road into smaller chunks
-        road_chunks = self._segment_road(road_segments, segment_length_km)
+        logger.info(f"Comprimento total da estrada: {total_length_km:.2f}km")
         
         # Process cities first (start and end points)
         if any(t in ["city", "town", "village"] for t in milestone_types) and all_coordinates:
@@ -234,6 +237,7 @@ class RoadService:
                 tags={}
             )
             milestones.append(start_milestone)
+            seen_coordinates.add((all_coordinates[0].lat, all_coordinates[0].lon))
             
             # End city
             end_milestone = RoadMilestone(
@@ -247,58 +251,96 @@ class RoadService:
                 tags={}
             )
             milestones.append(end_milestone)
+            seen_coordinates.add((all_coordinates[-1].lat, all_coordinates[-1].lon))
         
-        # Query OSM for all other milestone types in each chunk
-        logger.info(f"Iniciando busca de POIs em {len(road_chunks)} trechos")
-        for i, chunk in enumerate(road_chunks):
-            logger.info(f"Processando trecho {i+1}/{len(road_chunks)}")
+        # Process each road segment to find POIs
+        logger.info(f"Iniciando busca de POIs em {len(road_segments)} segmentos")
+        for i, segment in enumerate(road_segments):
+            logger.info(f"Processando segmento {i+1}/{len(road_segments)}")
             try:
-                # Build Overpass query for this chunk
-                lat, lon = chunk['center_point'].lat, chunk['center_point'].lon
-                radius = max_distance  # in meters
-                
-                # Build query based on milestone types
-                node_queries = []
-                if "gas_station" in milestone_types:
-                    node_queries.append(f'node["amenity"="fuel"](around:{radius},{lat},{lon})')
-                if "toll_booth" in milestone_types:
-                    node_queries.append(f'node["barrier"="toll_booth"](around:{radius},{lat},{lon})')
-                if "restaurant" in milestone_types:
-                    node_queries.append(f'node["amenity"="restaurant"](around:{radius},{lat},{lon})')
-                
-                if not node_queries:
+                # Get all nodes from this segment
+                segment_nodes = segment.geometry
+                if not segment_nodes:
                     continue
                 
-                # Build the complete query
-                query = f"""[out:json];
-(
-    {';'.join(node_queries)};
-);
-out body;"""
+                # Calculate segment length
+                segment_length = 0
+                for j in range(len(segment_nodes) - 1):
+                    segment_length += geopy.distance.geodesic(
+                        (segment_nodes[j].lat, segment_nodes[j].lon),
+                        (segment_nodes[j + 1].lat, segment_nodes[j + 1].lon)
+                    ).meters
                 
-                logger.debug(f"Query Overpass para trecho {i+1}: {query}")
+                # Generate search points
+                search_points = []
+                
+                # Add all nodes
+                search_points.extend(segment_nodes)
+                
+                # For segments longer than 2km, add intermediate points every 1km
+                if segment_length > 2000:
+                    logger.info(f"Segmento {i+1} tem {segment_length/1000:.2f}km, adicionando pontos intermediários")
+                    current_distance = 0
+                    target_distance = 1000  # 1km
+                    
+                    for j in range(len(segment_nodes) - 1):
+                        start = segment_nodes[j]
+                        end = segment_nodes[j + 1]
+                        segment_dist = geopy.distance.geodesic(
+                            (start.lat, start.lon),
+                            (end.lat, end.lon)
+                        ).meters
+                        
+                        # Add intermediate points
+                        while current_distance + segment_dist > target_distance:
+                            # Calculate fraction of the segment to reach target distance
+                            fraction = (target_distance - current_distance) / segment_dist
+                            
+                            # Calculate intermediate point
+                            inter_lat = start.lat + fraction * (end.lat - start.lat)
+                            inter_lon = start.lon + fraction * (end.lon - start.lon)
+                            
+                            search_points.append(Coordinates(lat=inter_lat, lon=inter_lon))
+                            target_distance += 1000  # Next 1km point
+                        
+                        current_distance += segment_dist
+                
+                logger.info(f"Segmento {i+1}: {len(search_points)} pontos de busca")
+                
+                # Build POI types to search
+                poi_types = []
+                if "gas_station" in milestone_types:
+                    poi_types.append({"amenity": "fuel"})
+                if "toll_booth" in milestone_types:
+                    poi_types.append({"barrier": "toll_booth"})
+                if "restaurant" in milestone_types:
+                    poi_types.append({"amenity": "restaurant"})
+                
+                if not poi_types:
+                    continue
                 
                 try:
-                    # Execute query using the new method
-                    result = self.osm_service.query_overpass(query)
-                    
-                    if not result:
-                        logger.warning(f"Resposta vazia do Overpass API para o trecho {i+1}")
-                        continue
-                        
-                    if 'elements' not in result:
-                        logger.warning(f"Nenhum elemento encontrado na resposta do Overpass API para o trecho {i+1}")
-                        continue
+                    # Search for POIs using the new method
+                    elements = self.osm_service.search_pois_around_coordinates(
+                        coordinates=search_points,
+                        radius_meters=max_distance,
+                        poi_types=poi_types
+                    )
                     
                     # Process results
                     nodes_processed = 0
                     milestones_found = 0
                     
-                    for element in result['elements']:
+                    for element in elements:
                         nodes_processed += 1
                         
                         # Skip elements without coordinates
                         if 'lat' not in element or 'lon' not in element:
+                            continue
+                        
+                        # Skip if we've already seen these coordinates
+                        coord_key = (element['lat'], element['lon'])
+                        if coord_key in seen_coordinates:
                             continue
                         
                         # Determine milestone type and create milestone if applicable
@@ -315,11 +357,8 @@ out body;"""
                                         lat=element['lat'],
                                         lon=element['lon']
                                     ),
-                                    distance_from_origin_km=chunk['start_distance'] / 1000,
-                                    distance_from_road_meters=geopy.distance.geodesic(
-                                        (chunk['center_point'].lat, chunk['center_point'].lon),
-                                        (element['lat'], element['lon'])
-                                    ).meters,
+                                    distance_from_origin_km=segment_distances[i],
+                                    distance_from_road_meters=0.0,  # Will be calculated below
                                     side="right",  # Default to right side
                                     tags=element.get('tags', {})
                                 )
@@ -334,11 +373,8 @@ out body;"""
                                     lat=element['lat'],
                                     lon=element['lon']
                                 ),
-                                distance_from_origin_km=chunk['start_distance'] / 1000,
-                                distance_from_road_meters=geopy.distance.geodesic(
-                                    (chunk['center_point'].lat, chunk['center_point'].lon),
-                                    (element['lat'], element['lon'])
-                                ).meters,
+                                distance_from_origin_km=segment_distances[i],
+                                distance_from_road_meters=0.0,  # Will be calculated below
                                 side="center",
                                 tags=element.get('tags', {})
                             )
@@ -354,29 +390,37 @@ out body;"""
                                         lat=element['lat'],
                                         lon=element['lon']
                                     ),
-                                    distance_from_origin_km=chunk['start_distance'] / 1000,
-                                    distance_from_road_meters=geopy.distance.geodesic(
-                                        (chunk['center_point'].lat, chunk['center_point'].lon),
-                                        (element['lat'], element['lon'])
-                                    ).meters,
+                                    distance_from_origin_km=segment_distances[i],
+                                    distance_from_road_meters=0.0,  # Will be calculated below
                                     side="right",  # Default to right side
                                     tags=element.get('tags', {})
                                 )
                         
                         # Add milestone if created
                         if milestone:
+                            # Calculate distance from road
+                            min_distance = float('inf')
+                            for node in segment_nodes:
+                                dist = geopy.distance.geodesic(
+                                    (node.lat, node.lon),
+                                    (element['lat'], element['lon'])
+                                ).meters
+                                min_distance = min(min_distance, dist)
+                            
+                            milestone.distance_from_road_meters = min_distance
                             milestones_found += 1
                             milestones.append(milestone)
+                            seen_coordinates.add(coord_key)
                     
-                    logger.info(f"Trecho {i+1}: processados {nodes_processed} nós, encontrados {milestones_found} marcos")
+                    logger.info(f"Segmento {i+1}: processados {nodes_processed} nós, encontrados {milestones_found} marcos")
                     
                 except Exception as e:
-                    logger.error(f"Erro ao executar query Overpass para o trecho {i+1}: {str(e)}")
+                    logger.error(f"Erro ao buscar POIs para o segmento {i+1}: {str(e)}")
                     continue
                         
             except Exception as e:
-                logger.error(f"Erro ao processar trecho {i+1}: {str(e)}")
-                continue  # Continue with next chunk even if this one fails
+                logger.error(f"Erro ao processar segmento {i+1}: {str(e)}")
+                continue  # Continue with next segment even if this one fails
         
         logger.info(f"Busca de marcos concluída: {len(milestones)} marcos encontrados no total")
         return milestones

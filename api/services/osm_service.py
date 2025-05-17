@@ -228,21 +228,84 @@ class OSMService:
         # Placeholder implementation
         return []
     
+    def search_pois_around_coordinates(
+        self,
+        coordinates: List[Coordinates],
+        radius_meters: float,
+        poi_types: List[Dict[str, str]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Busca pontos de interesse ao redor de uma lista de coordenadas.
+        
+        Args:
+            coordinates: Lista de coordenadas para buscar POIs
+            radius_meters: Raio de busca em metros
+            poi_types: Lista de dicionários com os tipos de POI a buscar
+                      Exemplo: [{"amenity": "fuel"}, {"barrier": "toll_booth"}]
+        
+        Returns:
+            Lista de elementos encontrados
+        """
+        try:
+            # Build query parts for each POI type
+            node_queries = []
+            for poi_type in poi_types:
+                tag_key = list(poi_type.keys())[0]
+                tag_value = poi_type[tag_key]
+                node_queries.append(f'node["{tag_key}"="{tag_value}"]')
+            
+            # Build around clauses for each coordinate
+            around_clauses = []
+            for coord in coordinates:
+                around_clauses.append(f'(around:{radius_meters},{coord.lat},{coord.lon})')
+            
+            # Build the complete query
+            query_parts = []
+            for node_query in node_queries:
+                for around_clause in around_clauses:
+                    query_parts.append(f'{node_query}{around_clause}')
+            
+            # Combine all parts into the final query
+            query = f"""(
+    {';'.join(query_parts)};
+)"""
+            
+            # Execute the query
+            result = self.query_overpass(query)
+            
+            if not result or 'elements' not in result:
+                logger.warning("Nenhum elemento encontrado na resposta do Overpass API")
+                return []
+            
+            return result['elements']
+            
+        except Exception as e:
+            logger.error(f"Erro ao buscar POIs: {str(e)}")
+            return []
+    
     def query_overpass(self, query: str) -> Dict:
         """
         Executa uma query no Overpass API.
         """
         try:
-            # Remove any duplicate query parts
-            if query.count('[out:json];') > 1:
-                query = query.split('[out:json];')[-1]
-                query = '[out:json];' + query
+            # Normalize line endings and remove extra whitespace
+            query = ' '.join(query.split())
             
-            if query.count('out body;') > 1:
-                query = query.split('out body;')[0] + 'out body;'
+            # Remove any extra spaces around parentheses
+            query = query.replace('( ', '(').replace(' )', ')')
             
             logger.debug(f"Query Overpass final: {query}")
-            return self.overpass_api.get(query)
+            
+            # Execute the query directly using the API
+            result = self.overpass_api.get(query, responseformat="json")
+            
+            # Log the result for debugging
+            if result and 'elements' in result:
+                logger.debug(f"Query retornou {len(result['elements'])} elementos")
+            else:
+                logger.debug("Query retornou resultado vazio")
+            
+            return result
         except Exception as e:
             logger.error(f"Erro na query Overpass: {str(e)}")
             raise 
