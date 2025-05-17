@@ -304,6 +304,7 @@ class OSMService:
     ) -> List[Dict[str, Any]]:
         """
         Busca pontos de interesse ao redor de uma lista de coordenadas usando processamento paralelo.
+        As coordenadas são agrupadas por quilômetro acumulado desde a origem.
         
         Args:
             coordinates: Lista de coordenadas para buscar POIs
@@ -317,6 +318,11 @@ class OSMService:
             Lista de elementos encontrados
         """
         try:
+            # Log das coordenadas de entrada
+            logger.info(f"Coordenadas de entrada ({len(coordinates)} pontos):")
+            for i, coord in enumerate(coordinates):
+                logger.info(f"  {i+1}. ({coord.lat}, {coord.lon})")
+            
             # Build query parts for each POI type
             node_queries = []
             for poi_type in poi_types:
@@ -353,8 +359,45 @@ class OSMService:
                     logger.error(f"Erro ao processar batch de coordenadas: {str(e)}")
                     return []
             
+            # Agrupa coordenadas por quilômetro acumulado
+            km_coordinates = []
+            current_km = 0
+            accumulated_distance = 0
+            
+            # Primeira coordenada sempre é incluída
+            km_coordinates.append(coordinates[0])
+            logger.info(f"Adicionando coordenada inicial: ({coordinates[0].lat}, {coordinates[0].lon}) - km acumulado: {current_km}")
+            current_km += 1
+            
+            # Processa o resto das coordenadas
+            for i in range(1, len(coordinates)):
+                # Calcula distância entre coordenadas consecutivas
+                prev_coord = coordinates[i-1]
+                curr_coord = coordinates[i]
+                distance = geopy.distance.geodesic(
+                    (prev_coord.lat, prev_coord.lon),
+                    (curr_coord.lat, curr_coord.lon)
+                ).kilometers
+                
+                accumulated_distance += distance
+                
+                # Se passou de 1km, adiciona ao grupo
+                if accumulated_distance >= 1.0:
+                    km_coordinates.append(coordinates[i])
+                    logger.info(f"Adicionando coordenada a cada 1km: ({coordinates[i].lat}, {coordinates[i].lon}) - km acumulado: {current_km}")
+                    accumulated_distance = 0  # Reseta o contador
+                    current_km += 1
+            
+            # Adiciona a última coordenada se ainda não foi incluída
+            if coordinates[-1] != km_coordinates[-1]:
+                km_coordinates.append(coordinates[-1])
+                logger.info(f"Adicionando coordenada final: ({coordinates[-1].lat}, {coordinates[-1].lon}) - km acumulado: {current_km}")
+            
+            logger.info(f"Total de coordenadas após agrupamento por km: {len(km_coordinates)}")
+            
             # Split coordinates into smaller batches
-            coord_batches = [coordinates[i:i + max_coords_per_batch] for i in range(0, len(coordinates), max_coords_per_batch)]
+            coord_batches = [km_coordinates[i:i + max_coords_per_batch] for i in range(0, len(km_coordinates), max_coords_per_batch)]
+            logger.info(f"Total de batches para processamento: {len(coord_batches)}")
             
             # Process batches in parallel
             with ThreadPoolExecutor(max_workers=max_concurrent_requests) as executor:
