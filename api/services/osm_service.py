@@ -7,6 +7,12 @@ from geopy.geocoders import Nominatim
 import logging
 from datetime import datetime
 import pandas as pd
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from itertools import product
+from threading import Lock
+import time
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import requests.exceptions
 
 from api.models.osm_models import (
     OSMSearchResponse,
@@ -22,10 +28,32 @@ logger = logging.getLogger(__name__)
 
 class OSMService:
     def __init__(self):
-        self.overpass_api = overpass.API()
+        # Usando o servidor Kumi Systems que é mais estável
+        self.overpass_api = overpass.API(
+            endpoint='https://overpass.kumi.systems/api/interpreter',
+            timeout=600  # 10 minutos de timeout
+        )
         self.geolocator = Nominatim(user_agent="mapalinear/1.0")
         self.cache = {}  # Simple cache for geocoding results
+        self._osm_call_counter = 0
+        self._osm_counter_lock = Lock()
+        self._last_query_time = 0
+        self._query_delay = 1.0  # Delay between queries in seconds
         
+    def _get_next_osm_call_number(self) -> int:
+        """Thread-safe way to get the next OSM call number."""
+        with self._osm_counter_lock:
+            self._osm_call_counter += 1
+            return self._osm_call_counter
+    
+    def _wait_before_query(self):
+        """Ensure minimum delay between queries."""
+        current_time = time.time()
+        time_since_last_query = current_time - self._last_query_time
+        if time_since_last_query < self._query_delay:
+            time.sleep(self._query_delay - time_since_last_query)
+        self._last_query_time = time.time()
+    
     def _geocode_location(self, location_name: str) -> Tuple[float, float]:
         """Convert a location name to coordinates (latitude, longitude)."""
         if location_name in self.cache:
@@ -228,20 +256,62 @@ class OSMService:
         # Placeholder implementation
         return []
     
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10),
+        retry=retry_if_exception_type((requests.exceptions.RequestException, overpass.errors.OverpassError))
+    )
+    def query_overpass(self, query: str) -> Dict:
+        """
+        Executa uma query no Overpass API com retry em caso de falha.
+        """
+        try:
+            # Get sequential call number
+            call_number = self._get_next_osm_call_number()
+            
+            # Normalize line endings and remove extra whitespace
+            query = ' '.join(query.split())
+            
+            # Remove any extra spaces around parentheses
+            query = query.replace('( ', '(').replace(' )', ')')
+            
+            logger.debug(f"Query Overpass #{call_number}: {query}")
+            
+            # Ensure minimum delay between queries
+            self._wait_before_query()
+            
+            # Execute the query directly using the API
+            result = self.overpass_api.get(query, responseformat="json")
+            
+            # Log the result for debugging
+            if result and 'elements' in result:
+                logger.debug(f"Query #{call_number} retornou {len(result['elements'])} elementos")
+            else:
+                logger.debug(f"Query #{call_number} retornou resultado vazio")
+            
+            return result
+        except Exception as e:
+            logger.error(f"Erro na query Overpass #{call_number}: {str(e)}")
+            raise
+    
     def search_pois_around_coordinates(
         self,
         coordinates: List[Coordinates],
         radius_meters: float,
-        poi_types: List[Dict[str, str]]
+        poi_types: List[Dict[str, str]],
+        max_concurrent_requests: int = 5,
+        max_coords_per_batch: int = 3  # Limite de coordenadas por batch
     ) -> List[Dict[str, Any]]:
         """
-        Busca pontos de interesse ao redor de uma lista de coordenadas.
+        Busca pontos de interesse ao redor de uma lista de coordenadas usando processamento paralelo.
         
         Args:
             coordinates: Lista de coordenadas para buscar POIs
             radius_meters: Raio de busca em metros
             poi_types: Lista de dicionários com os tipos de POI a buscar
                       Exemplo: [{"amenity": "fuel"}, {"barrier": "toll_booth"}]
+            max_concurrent_requests: Número máximo de requisições simultâneas (default: 5)
+            max_coords_per_batch: Número máximo de coordenadas por batch (default: 3)
         
         Returns:
             Lista de elementos encontrados
@@ -254,58 +324,48 @@ class OSMService:
                 tag_value = poi_type[tag_key]
                 node_queries.append(f'node["{tag_key}"="{tag_value}"]')
             
-            # Build around clauses for each coordinate
-            around_clauses = []
-            for coord in coordinates:
-                around_clauses.append(f'(around:{radius_meters},{coord.lat},{coord.lon})')
+            all_results = []
             
-            # Build the complete query
-            query_parts = []
-            for node_query in node_queries:
-                for around_clause in around_clauses:
-                    query_parts.append(f'{node_query}{around_clause}')
-            
-            # Combine all parts into the final query
-            query = f"""(
+            def process_coordinates_batch(coords_batch):
+                try:
+                    # Build around clauses for each coordinate in the batch
+                    around_clauses = []
+                    for coord in coords_batch:
+                        around_clauses.append(f'(around:{radius_meters},{coord.lat},{coord.lon})')
+                    
+                    # Build query for this batch using union
+                    query_parts = []
+                    for node_query in node_queries:
+                        for around_clause in around_clauses:
+                            query_parts.append(f'{node_query}{around_clause}')
+                    
+                    query = f"""(
     {';'.join(query_parts)};
 )"""
+                    
+                    # Execute the query
+                    result = self.query_overpass(query)
+                    
+                    if result and 'elements' in result:
+                        return result['elements']
+                    return []
+                except Exception as e:
+                    logger.error(f"Erro ao processar batch de coordenadas: {str(e)}")
+                    return []
             
-            # Execute the query
-            result = self.query_overpass(query)
+            # Split coordinates into smaller batches
+            coord_batches = [coordinates[i:i + max_coords_per_batch] for i in range(0, len(coordinates), max_coords_per_batch)]
             
-            if not result or 'elements' not in result:
-                logger.warning("Nenhum elemento encontrado na resposta do Overpass API")
-                return []
+            # Process batches in parallel
+            with ThreadPoolExecutor(max_workers=max_concurrent_requests) as executor:
+                future_to_batch = {executor.submit(process_coordinates_batch, batch): batch for batch in coord_batches}
+                
+                for future in as_completed(future_to_batch):
+                    batch_results = future.result()
+                    all_results.extend(batch_results)
             
-            return result['elements']
+            return all_results
             
         except Exception as e:
             logger.error(f"Erro ao buscar POIs: {str(e)}")
-            return []
-    
-    def query_overpass(self, query: str) -> Dict:
-        """
-        Executa uma query no Overpass API.
-        """
-        try:
-            # Normalize line endings and remove extra whitespace
-            query = ' '.join(query.split())
-            
-            # Remove any extra spaces around parentheses
-            query = query.replace('( ', '(').replace(' )', ')')
-            
-            logger.debug(f"Query Overpass final: {query}")
-            
-            # Execute the query directly using the API
-            result = self.overpass_api.get(query, responseformat="json")
-            
-            # Log the result for debugging
-            if result and 'elements' in result:
-                logger.debug(f"Query retornou {len(result['elements'])} elementos")
-            else:
-                logger.debug("Query retornou resultado vazio")
-            
-            return result
-        except Exception as e:
-            logger.error(f"Erro na query Overpass: {str(e)}")
-            raise 
+            return [] 
