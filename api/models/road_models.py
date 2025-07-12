@@ -43,6 +43,16 @@ class RoadMilestone(BaseModel):
     distance_from_road_meters: float = Field(..., description="Distância da estrada em metros")
     side: str = Field(..., description="Lado da estrada (left, right, center)")
     tags: Dict[str, Any] = Field(default_factory=dict, description="Tags adicionais do OSM")
+    
+    # Metadados enriquecidos
+    operator: Optional[str] = Field(None, description="Operadora do estabelecimento (ex: 'Petrobras', 'Shell')")
+    brand: Optional[str] = Field(None, description="Marca do estabelecimento")
+    opening_hours: Optional[str] = Field(None, description="Horário de funcionamento (formato OSM)")
+    phone: Optional[str] = Field(None, description="Telefone de contato")
+    website: Optional[str] = Field(None, description="Website do estabelecimento")
+    cuisine: Optional[str] = Field(None, description="Tipo de culinária (para restaurantes)")
+    amenities: List[str] = Field(default_factory=list, description="Comodidades disponíveis (ex: 'wi-fi', 'estacionamento')")
+    quality_score: Optional[float] = Field(None, description="Score de qualidade (0.0 a 1.0) baseado na completude dos dados")
 
 
 class LinearRoadSegment(BaseModel):
@@ -89,6 +99,32 @@ class SavedMapResponse(BaseModel):
     creation_date: datetime = Field(..., description="Data e hora de criação")
     road_refs: List[str] = Field(default_factory=list, description="Referências das estradas (ex: ['BR-101', 'SP-070'])")
     milestone_count: int = Field(..., description="Número total de marcos no mapa")
+
+
+class POIStatistics(BaseModel):
+    """Estatísticas de POIs por tipo."""
+    type: str = Field(..., description="Tipo de POI")
+    total_count: int = Field(..., description="Número total de POIs deste tipo")
+    average_distance_km: float = Field(..., description="Distância média entre POIs deste tipo")
+    density_per_100km: float = Field(..., description="Densidade de POIs por 100km")
+
+
+class RouteStopRecommendation(BaseModel):
+    """Recomendação de parada estratégica."""
+    distance_km: float = Field(..., description="Distância da origem em km")
+    reason: str = Field(..., description="Motivo da recomendação")
+    available_services: List[str] = Field(..., description="Serviços disponíveis nesta parada")
+    recommended_duration_minutes: int = Field(..., description="Duração recomendada da parada")
+
+
+class RouteStatisticsResponse(BaseModel):
+    """Estatísticas completas de uma rota."""
+    route_info: Dict[str, Any] = Field(..., description="Informações básicas da rota")
+    total_length_km: float = Field(..., description="Distância total da rota")
+    estimated_travel_time_hours: float = Field(..., description="Tempo estimado de viagem em horas")
+    poi_statistics: List[POIStatistics] = Field(..., description="Estatísticas por tipo de POI")
+    recommendations: List[RouteStopRecommendation] = Field(..., description="Recomendações de paradas")
+    quality_metrics: Dict[str, Any] = Field(..., description="Métricas de qualidade dos dados")
 
 
 class OperationStatus(str, Enum):

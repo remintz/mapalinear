@@ -6,6 +6,7 @@ from api.models.road_models import (
     LinearMapResponse,
     RoadMilestoneResponse,
     SavedMapResponse,
+    RouteStatisticsResponse,
 )
 from api.services.road_service import RoadService
 
@@ -68,6 +69,32 @@ async def get_saved_map(map_id: str):
         result = road_service.get_saved_map(map_id)
         if not result:
             raise HTTPException(status_code=404, detail="Mapa não encontrado")
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/stats", response_model=RouteStatisticsResponse)
+async def get_route_statistics(
+    origin: str = Query(..., description="Ponto de origem (ex: 'São Paulo, SP')"),
+    destination: str = Query(..., description="Ponto de destino (ex: 'Rio de Janeiro, RJ')"),
+    include_gas_stations: bool = Query(True, description="Incluir postos de gasolina nas estatísticas"),
+    include_restaurants: bool = Query(True, description="Incluir restaurantes nas estatísticas"),
+    include_toll_booths: bool = Query(True, description="Incluir pedágios nas estatísticas"),
+    max_distance_from_road: float = Query(1000, description="Distância máxima em metros da estrada para considerar POIs")
+):
+    """
+    Obtém estatísticas detalhadas de uma rota incluindo densidade de POIs,
+    tempo estimado de viagem e recomendações de paradas estratégicas.
+    """
+    try:
+        result = road_service.get_route_statistics(
+            origin=origin,
+            destination=destination,
+            include_gas_stations=include_gas_stations,
+            include_restaurants=include_restaurants,
+            include_toll_booths=include_toll_booths,
+            max_distance_from_road=max_distance_from_road
+        )
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) 

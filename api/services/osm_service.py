@@ -336,11 +336,12 @@ class OSMService:
         radius_meters: float,
         poi_types: List[Dict[str, str]],
         max_concurrent_requests: int = 5,
-        max_coords_per_batch: int = 3  # Limite de coordenadas por batch
+        max_coords_per_batch: int = 3,  # Limite de coordenadas por batch
+        timeout: int = 120  # Timeout personalizado para queries complexas
     ) -> List[Dict[str, Any]]:
         """
         Busca pontos de interesse ao redor de uma lista de coordenadas usando processamento paralelo.
-        As coordenadas são agrupadas por quilômetro acumulado desde a origem.
+        Agora inclui nodes, ways e relations para melhor cobertura de POIs.
         
         Args:
             coordinates: Lista de coordenadas para buscar POIs
@@ -349,6 +350,7 @@ class OSMService:
                       Exemplo: [{"amenity": "fuel"}, {"barrier": "toll_booth"}]
             max_concurrent_requests: Número máximo de requisições simultâneas (default: 5)
             max_coords_per_batch: Número máximo de coordenadas por batch (default: 3)
+            timeout: Timeout em segundos para cada query (default: 120)
         
         Returns:
             Lista de elementos encontrados
@@ -359,12 +361,27 @@ class OSMService:
             for i, coord in enumerate(coordinates):
                 logger.info(f"  {i+1}. ({coord.lat}, {coord.lon})")
             
-            # Build query parts for each POI type
-            node_queries = []
+            # Build unified query using regex for better performance
+            poi_filters = []
             for poi_type in poi_types:
                 tag_key = list(poi_type.keys())[0]
                 tag_value = poi_type[tag_key]
-                node_queries.append(f'node["{tag_key}"="{tag_value}"]')
+                poi_filters.append(f'"{tag_key}"="{tag_value}"')
+            
+            # Combine all POI types into a single regex if possible
+            amenity_values = []
+            barrier_values = []
+            other_filters = []
+            
+            for poi_type in poi_types:
+                tag_key = list(poi_type.keys())[0]
+                tag_value = poi_type[tag_key]
+                if tag_key == "amenity":
+                    amenity_values.append(tag_value)
+                elif tag_key == "barrier":
+                    barrier_values.append(tag_value)
+                else:
+                    other_filters.append(f'["{tag_key}"="{tag_value}"]')
             
             all_results = []
             
@@ -375,21 +392,60 @@ class OSMService:
                     for coord in coords_batch:
                         around_clauses.append(f'(around:{radius_meters},{coord.lat},{coord.lon})')
                     
-                    # Build query for this batch using union
+                    # Build unified query parts
                     query_parts = []
-                    for node_query in node_queries:
-                        for around_clause in around_clauses:
-                            query_parts.append(f'{node_query}{around_clause}')
                     
-                    query = f"""(
+                    # Add amenity-based POIs if any
+                    if amenity_values:
+                        amenity_regex = "|".join(amenity_values)
+                        for around_clause in around_clauses:
+                            # Nodes
+                            query_parts.append(f'node["amenity"~"^({amenity_regex})$"]{around_clause}')
+                            # Ways (for larger establishments)
+                            query_parts.append(f'way["amenity"~"^({amenity_regex})$"]{around_clause}')
+                            # Relations (for franchises/chains)
+                            query_parts.append(f'rel["amenity"~"^({amenity_regex})$"]{around_clause}')
+                    
+                    # Add barrier-based POIs if any
+                    if barrier_values:
+                        barrier_regex = "|".join(barrier_values)
+                        for around_clause in around_clauses:
+                            query_parts.append(f'node["barrier"~"^({barrier_regex})$"]{around_clause}')
+                            query_parts.append(f'way["barrier"~"^({barrier_regex})$"]{around_clause}')
+                    
+                    # Add other filter types
+                    for filter_str in other_filters:
+                        for around_clause in around_clauses:
+                            query_parts.append(f'node{filter_str}{around_clause}')
+                            query_parts.append(f'way{filter_str}{around_clause}')
+                    
+                    # Build complete query with proper output format
+                    query = f"""[out:json][timeout:{timeout}];
+(
     {';'.join(query_parts)};
-)"""
+);
+out geom;"""
                     
                     # Execute the query
                     result = self.query_overpass(query)
                     
                     if result and 'elements' in result:
-                        return result['elements']
+                        processed_elements = []
+                        for element in result['elements']:
+                            # For ways and relations, extract centroid coordinates
+                            if element['type'] in ['way', 'relation'] and 'geometry' in element:
+                                # Calculate centroid from geometry
+                                if element['geometry']:
+                                    lats = [point['lat'] for point in element['geometry'] if 'lat' in point]
+                                    lons = [point['lon'] for point in element['geometry'] if 'lon' in point]
+                                    if lats and lons:
+                                        element['lat'] = sum(lats) / len(lats)
+                                        element['lon'] = sum(lons) / len(lons)
+                                        processed_elements.append(element)
+                            elif element['type'] == 'node' and 'lat' in element and 'lon' in element:
+                                processed_elements.append(element)
+                        
+                        return processed_elements
                     return []
                 except Exception as e:
                     logger.error(f"Erro ao processar batch de coordenadas: {str(e)}")

@@ -329,31 +329,54 @@ class RoadService:
                     if coord_key in seen_coordinates:
                         continue
                     
+                    # Aplicar filtros de qualidade
+                    element_tags = element.get('tags', {})
+                    
+                    # Excluir POIs abandonados ou fora de uso
+                    if self._is_poi_abandoned(element_tags):
+                        continue
+                    
+                    # Priorizar POIs com informações mais completas
+                    quality_score = self._calculate_poi_quality_score(element_tags)
+                    
+                    # Pular POIs de baixa qualidade (sem nome para alguns tipos)
+                    if not self._meets_quality_threshold(element_tags, quality_score):
+                        continue
+                    
                     # Determina o tipo de marco e cria se aplicável
                     milestone = None
                     
                     # Verifica postos de gasolina
                     if "gas_station" in milestone_types and element.get('tags', {}).get('amenity') == 'fuel':
-                        if 'name' in element.get('tags', {}):
-                            milestone = RoadMilestone(
-                                id=str(uuid.uuid4()),
-                                name=element['tags']['name'],
-                                type=MilestoneType.GAS_STATION,
-                                coordinates=Coordinates(
-                                    lat=element['lat'],
-                                    lon=element['lon']
-                                ),
-                                distance_from_origin_km=0.0,  # Será calculado abaixo
-                                distance_from_road_meters=0.0,  # Será calculado abaixo
-                                side="right",  # Default to right side
-                                tags=element.get('tags', {})
-                            )
+                        name = element_tags.get('name') or element_tags.get('brand') or element_tags.get('operator') or 'Posto de Combustível'
+                        milestone = RoadMilestone(
+                            id=str(uuid.uuid4()),
+                            name=name,
+                            type=MilestoneType.GAS_STATION,
+                            coordinates=Coordinates(
+                                lat=element['lat'],
+                                lon=element['lon']
+                            ),
+                            distance_from_origin_km=0.0,  # Será calculado abaixo
+                            distance_from_road_meters=0.0,  # Será calculado abaixo
+                            side="right",  # Default to right side
+                            tags=element_tags,
+                            # Metadados enriquecidos
+                            operator=element_tags.get('operator'),
+                            brand=element_tags.get('brand'),
+                            opening_hours=element_tags.get('opening_hours'),
+                            phone=element_tags.get('phone') or element_tags.get('contact:phone'),
+                            website=element_tags.get('website') or element_tags.get('contact:website'),
+                            amenities=self._extract_amenities(element_tags),
+                            quality_score=quality_score
+                        )
                     
                     # Verifica pedágios
                     elif "toll_booth" in milestone_types and element.get('tags', {}).get('barrier') == 'toll_booth':
+                        name = element_tags.get('name') or element_tags.get('operator') or 'Pedágio'
                         milestone = RoadMilestone(
                             id=str(uuid.uuid4()),
-                            name=element.get('tags', {}).get('name', 'Pedágio'),
+                            name=name,
                             type=MilestoneType.TOLL_BOOTH,
                             coordinates=Coordinates(
                                 lat=element['lat'],
@@ -362,25 +385,42 @@ class RoadService:
                             distance_from_origin_km=0.0,  # Será calculado abaixo
                             distance_from_road_meters=0.0,  # Será calculado abaixo
                             side="center",
-                            tags=element.get('tags', {})
+                            tags=element_tags,
+                            # Metadados enriquecidos
+                            operator=element_tags.get('operator'),
+                            brand=element_tags.get('brand'),
+                            opening_hours=element_tags.get('opening_hours'),
+                            phone=element_tags.get('phone') or element_tags.get('contact:phone'),
+                            website=element_tags.get('website') or element_tags.get('contact:website'),
+                            amenities=self._extract_amenities(element_tags),
+                            quality_score=quality_score
                         )
                     
                     # Verifica restaurantes
                     elif "restaurant" in milestone_types and element.get('tags', {}).get('amenity') == 'restaurant':
-                        if 'name' in element.get('tags', {}):
-                            milestone = RoadMilestone(
-                                id=str(uuid.uuid4()),
-                                name=element['tags']['name'],
-                                type=MilestoneType.RESTAURANT,
-                                coordinates=Coordinates(
-                                    lat=element['lat'],
-                                    lon=element['lon']
-                                ),
-                                distance_from_origin_km=0.0,  # Será calculado abaixo
-                                distance_from_road_meters=0.0,  # Será calculado abaixo
-                                side="right",  # Default to right side
-                                tags=element.get('tags', {})
-                            )
+                        name = element_tags.get('name') or element_tags.get('brand') or 'Restaurante'
+                        milestone = RoadMilestone(
+                            id=str(uuid.uuid4()),
+                            name=name,
+                            type=MilestoneType.RESTAURANT,
+                            coordinates=Coordinates(
+                                lat=element['lat'],
+                                lon=element['lon']
+                            ),
+                            distance_from_origin_km=0.0,  # Será calculado abaixo
+                            distance_from_road_meters=0.0,  # Será calculado abaixo
+                            side="right",  # Default to right side
+                            tags=element_tags,
+                            # Metadados enriquecidos
+                            operator=element_tags.get('operator'),
+                            brand=element_tags.get('brand'),
+                            opening_hours=element_tags.get('opening_hours'),
+                            phone=element_tags.get('phone') or element_tags.get('contact:phone'),
+                            website=element_tags.get('website') or element_tags.get('contact:website'),
+                            cuisine=element_tags.get('cuisine'),
+                            amenities=self._extract_amenities(element_tags),
+                            quality_score=quality_score
+                        )
                     
                     # Adiciona o marco se criado
                     if milestone:
@@ -571,3 +611,401 @@ class RoadService:
         # In a real implementation, this would query the database for milestones
         # For now, we'll return an empty list since we're not caching anymore
         return []
+    
+    def _is_poi_abandoned(self, tags: Dict[str, Any]) -> bool:
+        """
+        Verifica se um POI está abandonado ou fora de uso.
+        
+        Args:
+            tags: Tags do elemento OSM
+            
+        Returns:
+            True se o POI deve ser excluído por estar abandonado
+        """
+        abandonment_indicators = [
+            'abandoned', 'disused', 'demolished', 'razed', 'removed', 
+            'ruins', 'former', 'closed', 'destroyed'
+        ]
+        
+        # Verifica tags diretas de abandono
+        for indicator in abandonment_indicators:
+            if tags.get(indicator) in ['yes', 'true', '1']:
+                return True
+            # Verifica prefixos (ex: abandoned:amenity=fuel)
+            for key in tags.keys():
+                if key.startswith(f"{indicator}:"):
+                    return True
+        
+        # Verifica status específicos
+        if tags.get('opening_hours') in ['closed', 'no']:
+            return True
+            
+        return False
+    
+    def _calculate_poi_quality_score(self, tags: Dict[str, Any]) -> float:
+        """
+        Calcula um score de qualidade para um POI baseado na completude dos dados.
+        
+        Args:
+            tags: Tags do elemento OSM
+            
+        Returns:
+            Score de 0.0 a 1.0, onde 1.0 é melhor qualidade
+        """
+        score = 0.0
+        max_score = 7.0  # Número de critérios de qualidade
+        
+        # Critério 1: Tem nome
+        if tags.get('name'):
+            score += 1.0
+        
+        # Critério 2: Tem operator ou brand
+        if tags.get('operator') or tags.get('brand'):
+            score += 1.0
+        
+        # Critério 3: Tem telefone
+        if tags.get('phone') or tags.get('contact:phone'):
+            score += 1.0
+        
+        # Critério 4: Tem horário de funcionamento
+        if tags.get('opening_hours'):
+            score += 1.0
+        
+        # Critério 5: Tem website
+        if tags.get('website') or tags.get('contact:website'):
+            score += 1.0
+        
+        # Critério 6: Para restaurantes, tem tipo de culinária
+        if tags.get('amenity') == 'restaurant' and tags.get('cuisine'):
+            score += 1.0
+        elif tags.get('amenity') != 'restaurant':
+            score += 1.0  # Não penalizar não-restaurantes
+            
+        # Critério 7: Tem endereço estruturado
+        if any(tags.get(f'addr:{field}') for field in ['street', 'housenumber', 'city']):
+            score += 1.0
+        
+        return score / max_score
+    
+    def _meets_quality_threshold(self, tags: Dict[str, Any], quality_score: float) -> bool:
+        """
+        Verifica se um POI atende ao threshold mínimo de qualidade.
+        
+        Args:
+            tags: Tags do elemento OSM
+            quality_score: Score de qualidade calculado
+            
+        Returns:
+            True se o POI deve ser incluído
+        """
+        amenity = tags.get('amenity')
+        barrier = tags.get('barrier')
+        
+        # Para postos de gasolina, exigir nome OU brand OU operator
+        if amenity == 'fuel':
+            if not (tags.get('name') or tags.get('brand') or tags.get('operator')):
+                return False
+            return quality_score >= 0.3  # Threshold mais baixo para postos
+        
+        # Para restaurantes, exigir nome
+        if amenity == 'restaurant':
+            if not tags.get('name'):
+                return False
+            return quality_score >= 0.4  # Threshold médio para restaurantes
+        
+        # Para pedágios, sempre incluir (mesmo sem nome)
+        if barrier == 'toll_booth':
+            return True
+        
+        # Para outros tipos, threshold padrão
+        return quality_score >= 0.3
+    
+    def _extract_amenities(self, tags: Dict[str, Any]) -> List[str]:
+        """
+        Extrai lista de comodidades/amenidades de um POI baseado nas tags OSM.
+        
+        Args:
+            tags: Tags do elemento OSM
+            
+        Returns:
+            Lista de amenidades encontradas
+        """
+        amenities = []
+        
+        # Mapeamento de tags OSM para amenidades legíveis
+        amenity_mappings = {
+            # Conectividade
+            'internet_access': {'wifi', 'internet'},
+            'wifi': {'wifi'},
+            
+            # Estacionamento
+            'parking': {'estacionamento'},
+            'parking:fee': {'estacionamento pago'},
+            
+            # Acessibilidade
+            'wheelchair': {'acessível'},
+            
+            # Pagamento
+            'payment:cash': {'dinheiro'},
+            'payment:cards': {'cartão'},
+            'payment:contactless': {'contactless'},
+            'payment:credit_cards': {'cartão de crédito'},
+            'payment:debit_cards': {'cartão de débito'},
+            
+            # Combustível específico
+            'fuel:diesel': {'diesel'},
+            'fuel:octane_91': {'gasolina comum'},
+            'fuel:octane_95': {'gasolina aditivada'},
+            'fuel:lpg': {'GNV'},
+            'fuel:ethanol': {'etanol'},
+            
+            # Serviços
+            'toilets': {'banheiro'},
+            'shower': {'chuveiro'},
+            'restaurant': {'restaurante'},
+            'cafe': {'café'},
+            'shop': {'loja'},
+            'atm': {'caixa eletrônico'},
+            'car_wash': {'lava-jato'},
+            'compressed_air': {'calibragem'},
+            'vacuum_cleaner': {'aspirador'},
+            
+            # Outros
+            'outdoor_seating': {'área externa'},
+            'air_conditioning': {'ar condicionado'},
+            'takeaway': {'delivery'},
+            'delivery': {'delivery'},
+            'drive_through': {'drive-thru'},
+        }
+        
+        # Verifica cada tag e adiciona as amenidades correspondentes
+        for tag_key, tag_value in tags.items():
+            # Normaliza o valor da tag
+            if isinstance(tag_value, str):
+                tag_value = tag_value.lower()
+            
+            # Verifica se a tag indica presença da amenidade
+            if tag_value in ['yes', 'true', '1', 'available']:
+                if tag_key in amenity_mappings:
+                    amenities.extend(amenity_mappings[tag_key])
+                elif tag_key.startswith('payment:') and tag_key in amenity_mappings:
+                    amenities.extend(amenity_mappings[tag_key])
+        
+        # Amenidades especiais baseadas no tipo
+        amenity_type = tags.get('amenity')
+        if amenity_type == 'fuel':
+            # Para postos, assumir algumas amenidades básicas se não especificadas
+            if not any('banheiro' in a for a in amenities) and tags.get('toilets') != 'no':
+                amenities.append('banheiro')
+        
+        # Amenidades baseadas em horário
+        opening_hours = tags.get('opening_hours', '')
+        if '24/7' in opening_hours or 'Mo-Su 00:00-24:00' in opening_hours:
+            amenities.append('24h')
+        
+        # Remove duplicatas e ordena
+        amenities = sorted(list(set(amenities)))
+        
+        return amenities
+    
+    def get_route_statistics(
+        self,
+        origin: str,
+        destination: str,
+        include_gas_stations: bool = True,
+        include_restaurants: bool = True,
+        include_toll_booths: bool = True,
+        max_distance_from_road: float = 1000
+    ) -> 'RouteStatisticsResponse':
+        """
+        Gera estatísticas detalhadas de uma rota.
+        
+        Args:
+            origin: Ponto de origem
+            destination: Ponto de destino
+            include_gas_stations: Incluir postos nas estatísticas
+            include_restaurants: Incluir restaurantes nas estatísticas
+            include_toll_booths: Incluir pedágios nas estatísticas
+            max_distance_from_road: Distância máxima da estrada para considerar POIs
+            
+        Returns:
+            Estatísticas completas da rota
+        """
+        from api.models.road_models import (
+            RouteStatisticsResponse, POIStatistics, RouteStopRecommendation
+        )
+        
+        # Gerar mapa linear para obter dados
+        linear_map = self.generate_linear_map(
+            origin=origin,
+            destination=destination,
+            include_cities=True,
+            include_gas_stations=include_gas_stations,
+            include_restaurants=include_restaurants,
+            include_toll_booths=include_toll_booths,
+            max_distance_from_road=max_distance_from_road
+        )
+        
+        # Calcular estatísticas por tipo de POI
+        poi_stats = []
+        all_milestones = []
+        
+        # Coletar todos os milestones de todos os segmentos
+        for segment in linear_map.segments:
+            all_milestones.extend(segment.milestones)
+        
+        # Agrupar por tipo
+        poi_types = {}
+        for milestone in all_milestones:
+            if milestone.type.value not in poi_types:
+                poi_types[milestone.type.value] = []
+            poi_types[milestone.type.value].append(milestone)
+        
+        # Calcular estatísticas para cada tipo
+        for poi_type, milestones in poi_types.items():
+            if poi_type == "city":  # Pular cidades nas estatísticas
+                continue
+                
+            if len(milestones) > 1:
+                # Calcular distância média entre POIs
+                distances = []
+                sorted_milestones = sorted(milestones, key=lambda m: m.distance_from_origin_km)
+                for i in range(1, len(sorted_milestones)):
+                    distance = sorted_milestones[i].distance_from_origin_km - sorted_milestones[i-1].distance_from_origin_km
+                    distances.append(distance)
+                
+                avg_distance = sum(distances) / len(distances) if distances else 0
+            else:
+                avg_distance = linear_map.total_length_km
+            
+            # Calcular densidade por 100km
+            density = (len(milestones) / linear_map.total_length_km) * 100 if linear_map.total_length_km > 0 else 0
+            
+            poi_stats.append(POIStatistics(
+                type=poi_type,
+                total_count=len(milestones),
+                average_distance_km=avg_distance,
+                density_per_100km=density
+            ))
+        
+        # Gerar recomendações de paradas
+        recommendations = self._generate_stop_recommendations(all_milestones, linear_map.total_length_km)
+        
+        # Calcular tempo estimado (assumindo 80 km/h de média)
+        estimated_time = linear_map.total_length_km / 80.0
+        
+        # Métricas de qualidade dos dados
+        quality_metrics = self._calculate_quality_metrics(all_milestones)
+        
+        return RouteStatisticsResponse(
+            route_info={
+                "origin": origin,
+                "destination": destination,
+                "road_refs": [seg.ref for seg in linear_map.segments if seg.ref],
+                "segment_count": len(linear_map.segments)
+            },
+            total_length_km=linear_map.total_length_km,
+            estimated_travel_time_hours=estimated_time,
+            poi_statistics=poi_stats,
+            recommendations=recommendations,
+            quality_metrics=quality_metrics
+        )
+    
+    def _generate_stop_recommendations(
+        self, 
+        milestones: List['RoadMilestone'], 
+        total_length_km: float
+    ) -> List['RouteStopRecommendation']:
+        """
+        Gera recomendações de paradas estratégicas baseadas nos POIs disponíveis.
+        """
+        from api.models.road_models import RouteStopRecommendation
+        
+        recommendations = []
+        
+        # Filtrar apenas POIs úteis para paradas
+        useful_milestones = [m for m in milestones if m.type.value in ['gas_station', 'restaurant']]
+        useful_milestones.sort(key=lambda m: m.distance_from_origin_km)
+        
+        # Recomendações baseadas em distância (a cada 200km aproximadamente)
+        last_recommended_km = 0
+        for milestone in useful_milestones:
+            distance_from_last = milestone.distance_from_origin_km - last_recommended_km
+            
+            # Se passou mais de 150km desde a última recomendação, considerar esta parada
+            if distance_from_last >= 150:
+                services = []
+                reason = ""
+                duration = 15  # minutos padrão
+                
+                if milestone.type.value == 'gas_station':
+                    services.append("Combustível")
+                    reason = "Reabastecimento recomendado"
+                    duration = 10
+                    
+                if milestone.type.value == 'restaurant':
+                    services.append("Alimentação")
+                    reason = "Parada para refeição"
+                    duration = 30
+                
+                # Verificar se há outros POIs próximos (até 5km)
+                nearby_pois = [
+                    m for m in useful_milestones 
+                    if abs(m.distance_from_origin_km - milestone.distance_from_origin_km) <= 5
+                    and m != milestone
+                ]
+                
+                for nearby in nearby_pois:
+                    if nearby.type.value == 'gas_station' and "Combustível" not in services:
+                        services.append("Combustível")
+                    elif nearby.type.value == 'restaurant' and "Alimentação" not in services:
+                        services.append("Alimentação")
+                
+                if len(services) > 1:
+                    reason = "Parada estratégica - múltiplos serviços"
+                    duration = 20
+                
+                # Adicionar amenidades do POI principal
+                if milestone.amenities:
+                    services.extend(milestone.amenities[:3])  # Limitar a 3 amenidades extras
+                
+                recommendations.append(RouteStopRecommendation(
+                    distance_km=milestone.distance_from_origin_km,
+                    reason=reason,
+                    available_services=list(set(services)),  # Remove duplicatas
+                    recommended_duration_minutes=duration
+                ))
+                
+                last_recommended_km = milestone.distance_from_origin_km
+        
+        return recommendations[:5]  # Limitar a 5 recomendações
+    
+    def _calculate_quality_metrics(self, milestones: List['RoadMilestone']) -> Dict[str, Any]:
+        """
+        Calcula métricas de qualidade dos dados dos POIs.
+        """
+        if not milestones:
+            return {"overall_quality": 0.0, "data_completeness": 0.0}
+        
+        total_quality = sum(m.quality_score or 0 for m in milestones)
+        average_quality = total_quality / len(milestones)
+        
+        # Calcular completude dos dados
+        fields_to_check = ['phone', 'opening_hours', 'website', 'operator', 'brand']
+        completeness_scores = []
+        
+        for milestone in milestones:
+            filled_fields = sum(1 for field in fields_to_check if getattr(milestone, field, None))
+            completeness = filled_fields / len(fields_to_check)
+            completeness_scores.append(completeness)
+        
+        average_completeness = sum(completeness_scores) / len(completeness_scores)
+        
+        return {
+            "overall_quality": round(average_quality, 2),
+            "data_completeness": round(average_completeness, 2),
+            "total_pois_analyzed": len(milestones),
+            "pois_with_phone": len([m for m in milestones if m.phone]),
+            "pois_with_hours": len([m for m in milestones if m.opening_hours]),
+            "pois_with_website": len([m for m in milestones if m.website])
+        }

@@ -65,11 +65,12 @@ app.middleware("http")(error_handler_middleware)
 setup_error_handlers(app)
 
 # Import routers
-from api.routers import osm_router, road_router, test_router, operations_router
+from api.routers import osm_router, road_router, test_router, operations_router, pois_router
 
 # Include routers
 app.include_router(osm_router.router, prefix="/api/osm", tags=["OpenStreetMap"])
 app.include_router(road_router.router, prefix="/api/roads", tags=["Roads"])
+app.include_router(pois_router.router, prefix="/api/pois", tags=["Points of Interest"])
 app.include_router(operations_router.router, prefix="/api/operations", tags=["Operations"])
 app.include_router(test_router.router, prefix="/api/test", tags=["Testes"])
 
