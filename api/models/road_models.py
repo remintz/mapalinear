@@ -52,6 +52,7 @@ class LinearRoadSegment(BaseModel):
     length_km: float = Field(..., description="Comprimento do segmento em quilômetros")
     name: Optional[str] = Field(None, description="Nome da estrada neste segmento")
     ref: Optional[str] = Field(None, description="Referência da estrada neste segmento (ex: 'BR-101')")
+    highway_type: Optional[str] = Field(None, description="Tipo de estrada (motorway, trunk, etc.)")
     start_milestone: Optional[RoadMilestone] = Field(None, description="Marco no início do segmento")
     end_milestone: Optional[RoadMilestone] = Field(None, description="Marco no fim do segmento")
     milestones: List[RoadMilestone] = Field(default_factory=list, description="Marcos ao longo do segmento")

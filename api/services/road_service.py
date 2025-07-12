@@ -484,31 +484,78 @@ class RoadService:
     
     def _process_road_segments(self, osm_segments: List[Any]) -> List[LinearRoadSegment]:
         """
-        Process OSM road segments into linear road segments.
+        Process OSM road segments into linear road segments using improved segmentation logic.
         """
         linear_segments = []
         current_distance = 0
+        current_name = None
+        current_length = 0
+        current_ref = None
+        current_highway_type = None
+        current_way_id = None
         
         for i, segment in enumerate(osm_segments):
-            start_distance = current_distance
+            # Get segment metadata
+            name = segment.name
+            ref = segment.ref
+            highway_type = segment.highway_type
+            way_id = segment.tags.get('way_id', str(uuid.uuid4()))
             length_km = segment.length_meters / 1000
-            end_distance = start_distance + length_km
             
-            linear_segment = LinearRoadSegment(
-                id=str(uuid.uuid4()),
-                start_distance_km=start_distance,
-                end_distance_km=end_distance,
-                length_km=length_km,
-                name=segment.name,
-                ref=segment.ref,
-                start_milestone=None,
-                end_milestone=None,
-                milestones=[]
+            # Check if this is a new road segment (different name or way_id)
+            is_new_segment = (
+                i == 0 or  # First segment
+                name != current_name or  # Different name
+                ref != current_ref or  # Different reference
+                way_id != current_way_id  # Different way
             )
             
-            linear_segments.append(linear_segment)
-            current_distance = end_distance
+            if is_new_segment:
+                # If we have a previous segment, add it to the list
+                if i > 0:
+                    linear_segment = LinearRoadSegment(
+                        id=str(uuid.uuid4()),
+                        start_distance_km=current_distance - current_length,
+                        end_distance_km=current_distance,
+                        length_km=current_length,
+                        name=current_name,
+                        ref=current_ref,
+                        highway_type=current_highway_type,
+                        start_milestone=None,
+                        end_milestone=None,
+                        milestones=[]
+                    )
+                    linear_segments.append(linear_segment)
+                
+                # Start new segment
+                current_name = name
+                current_ref = ref
+                current_highway_type = highway_type
+                current_way_id = way_id
+                current_length = length_km
+            else:
+                # Continue current segment
+                current_length += length_km
+            
+            current_distance += length_km
+            
+            # If this is the last segment, add it to the list
+            if i == len(osm_segments) - 1:
+                linear_segment = LinearRoadSegment(
+                    id=str(uuid.uuid4()),
+                    start_distance_km=current_distance - current_length,
+                    end_distance_km=current_distance,
+                    length_km=current_length,
+                    name=current_name,
+                    ref=current_ref,
+                    highway_type=current_highway_type,
+                    start_milestone=None,
+                    end_milestone=None,
+                    milestones=[]
+                )
+                linear_segments.append(linear_segment)
         
+        logger.info(f"Processed {len(osm_segments)} OSM segments into {len(linear_segments)} linear segments")
         return linear_segments
     
     def get_road_milestones(
