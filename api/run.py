@@ -95,6 +95,8 @@ def main():
         host=host,
         port=port,
         reload=True,
+        reload_dirs=["api/", "mapalinear/"],
+        reload_includes=["*.py"],
         log_config=log_config
     )
 

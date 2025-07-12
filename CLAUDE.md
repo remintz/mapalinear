@@ -33,18 +33,27 @@ poetry shell
 
 ### Running the Application
 ```bash
-# Start the API server (using mprocs)
+# Start both API and Frontend (using mprocs) - RECOMMENDED
 mprocs
 
-# Or start the API server directly
-python -m api.run
+# This will start:
+# - Frontend dev server on http://localhost:8000 (with hot reload)
+# - API server on http://localhost:8001 (with auto restart)
+# - Both services restart automatically on code changes
+
+# Or start services individually:
+# API server only (on port 8001)
+MAPALINEAR_PORT=8001 poetry run python -m api.run
+
+# Frontend only (on port 8000)
+cd frontend && npm run dev -- --port 8000
 
 # Run CLI commands (in another terminal with poetry shell activated)
 mapalinear search "Origin, UF" "Destination, UF"
 mapalinear generate-map "Origin, UF" "Destination, UF"
 ```
 
-### Frontend Development (PWA)
+### Frontend Development (POC)
 ```bash
 # Setup frontend (first time only)
 cd frontend
@@ -112,13 +121,13 @@ npm run lighthouse
 mapalinear search "Belo Horizonte, MG" "Ouro Preto, MG" --output-file test-result.json
 
 # Check API directly
-curl http://localhost:8000/api/health
+curl http://localhost:8001/api/health
 
 # Test new POI search endpoint
-curl "http://localhost:8000/api/pois/search?lat=-23.5505&lon=-46.6333&radius=1000&types=gas_station,restaurant"
+curl "http://localhost:8001/api/pois/search?lat=-23.5505&lon=-46.6333&radius=1000&types=gas_station,restaurant"
 
 # Test route statistics
-curl "http://localhost:8000/api/roads/stats?origin=São Paulo, SP&destination=Rio de Janeiro, RJ"
+curl "http://localhost:8001/api/roads/stats?origin=São Paulo, SP&destination=Rio de Janeiro, RJ"
 ```
 
 #### Frontend/PWA Testing
@@ -139,12 +148,12 @@ npm run lighthouse:perf
 ## Environment Variables
 
 ### Backend (API)
-- `MAPALINEAR_API_URL`: API endpoint (default: http://localhost:8000/api)
+- `MAPALINEAR_API_URL`: API endpoint (default: http://localhost:8001/api)
 - `MAPALINEAR_HOST`: API host (default: 0.0.0.0)
-- `MAPALINEAR_PORT`: API port (default: 8000)
+- `MAPALINEAR_PORT`: API port (default: 8001)
 
 ### Frontend (PWA)
-- `NEXT_PUBLIC_API_URL`: API endpoint for frontend (default: http://localhost:8000/api)
+- `NEXT_PUBLIC_API_URL`: API endpoint for frontend (default: http://localhost:8001/api)
 - `NEXT_PUBLIC_MAP_TILES_URL`: Map tiles provider (default: OpenStreetMap)
 - `NEXT_PUBLIC_APP_NAME`: App name for PWA manifest (default: MapaLinear)
 - `NEXT_PUBLIC_APP_VERSION`: App version for cache busting
@@ -176,3 +185,8 @@ npm run lighthouse:perf
 - Service worker caches map data and route information for offline use
 - Background sync updates cached data when connection is restored
 - Push notifications can alert users about recommended stops (requires user permission)
+
+### Express instructions from developer
+- Just commit code under my request
+- Consider the backend and frontend are always running and restarting automatically on code changes
+- 

@@ -1,21 +1,17 @@
 procs:
   api:
-    cmd: ["python", "-m", "api.run"]
+    cmd: ["poetry", "run", "python", "-m", "api.run"]
     env:
       MAPALINEAR_HOST: "0.0.0.0"
-      MAPALINEAR_PORT: "8000"
+      MAPALINEAR_PORT: "8001"
     cwd: .
     autostart: true
     color: green
     
-  docs:
-    cmd: ["python", "-c", "import time; import webbrowser; time.sleep(2); webbrowser.open(\"http://localhost:8000/docs\")"]
-    autostart: false
-    cwd: .
-    color: cyan
-    
-  open-browser:
-    cmd: ["python", "-c", "import time; import webbrowser; time.sleep(2); webbrowser.open(\"http://localhost:8000\")"]
-    autostart: false
-    cwd: .
+  frontend:
+    cmd: ["npm", "run", "dev", "--", "--port", "8000"]
+    env:
+      NEXT_PUBLIC_API_URL: "http://localhost:8001/api"
+    cwd: ./frontend
+    autostart: true
     color: blue 
