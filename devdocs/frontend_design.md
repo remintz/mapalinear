@@ -1,24 +1,38 @@
-# Design do Frontend - MapaLinear
+# Design do Frontend PWA - MapaLinear
 
 ## Visão Geral
 
-O MapaLinear é uma aplicação web destinada a auxiliar motoristas e passageiros durante viagens rodoviárias, oferecendo uma visão antecipada dos pontos de interesse que encontrarão ao longo do percurso. Diferentemente de aplicações de navegação como Waze ou Google Maps, o foco não está em instruções turn-by-turn, mas sim em fornecer informação contextual sobre o que está à frente na viagem.
+O MapaLinear é uma **Progressive Web App (PWA)** destinada a auxiliar motoristas e passageiros durante viagens rodoviárias, oferecendo uma visão antecipada dos pontos de interesse que encontrarão ao longo do percurso. Como PWA, a aplicação:
+
+- **Instala como app nativo** no celular do usuário
+- **Funciona offline** durante viagens sem conexão
+- **Oferece experiência mobile-first** otimizada para uso durante viagens
+- **Envia notificações contextuais** sobre paradas recomendadas
+
+Diferentemente de aplicações de navegação como Waze ou Google Maps, o foco não está em instruções turn-by-turn, mas sim em fornecer informação contextual sobre o que está à frente na viagem, mesmo sem conexão com a internet.
 
 ## Conceito Central
 
-### Proposta de Valor
+### Proposta de Valor PWA
 - **Planejamento de Paradas**: Permitir que viajantes vejam onde estão os próximos postos de combustível, restaurantes e cidades importantes
 - **Visão Linear da Rota**: Apresentar a viagem como uma linha temporal com marcos distribuídos por distância
 - **Informação Contextual**: Fornecer detalhes relevantes sobre estabelecimentos e pontos de parada
 - **Complemento à Navegação**: Funcionar como ferramenta de apoio a apps de navegação tradicionais
+- **Acesso Offline**: Mapas e rotas funcionam sem internet, essencial em áreas com cobertura limitada
+- **Instalação Simples**: Instala diretamente do navegador, sem precisar de app store
+- **Notificações Contextuais**: Alertas sobre paradas recomendadas baseadas na localização atual
 
-### Diferencial Competitivo
-| MapaLinear | Apps de Navegação Tradicionais |
-|------------|-------------------------------|
+### Diferencial Competitivo PWA
+| MapaLinear PWA | Apps de Navegação Tradicionais |
+|----------------|-------------------------------|
 | Foco em pontos de interesse à frente | Foco em próxima instrução de navegação |
 | Visão linear/temporal da viagem | Visão espacial/geográfica |
 | Planejamento de paradas | Orientação para chegada |
 | Informação antecipada | Informação just-in-time |
+| **Funciona offline em estradas** | **Requer conexão constante** |
+| **Instala sem app store** | **Requer download de apps** |
+| **Notificações contextuais** | **Alertas de trânsito em tempo real** |
+| **Leve e rápido** | **Apps pesados com muitas features** |
 
 ## Personas e Casos de Uso
 
@@ -491,27 +505,49 @@ analytics.track('poi_action', {
 });
 ```
 
-## Considerações Técnicas
+## Considerações Técnicas PWA
 
-### Stack Tecnológico Recomendado
+### Stack Tecnológico PWA
 - **Framework**: Next.js 14 com App Router
-- **Styling**: TailwindCSS + CSS Modules para componentes específicos
-- **Maps**: Leaflet + OpenStreetMap tiles
-- **State**: Zustand para estado global, React Query para server state
+- **PWA**: next-pwa + Workbox para Service Worker
+- **Styling**: TailwindCSS mobile-first + CSS Modules
+- **Maps**: Leaflet + offline tile caching
+- **State**: Zustand + React Query com persistence
+- **Storage**: IndexedDB (idb) para dados offline
 - **Forms**: React Hook Form + Zod validation
-- **Icons**: Lucide React + emojis para POI types
+- **Icons**: Lucide React + custom PWA icons
 
-### Integração com Backend
-- **API Calls**: Axios com interceptors
+### Integração com Backend e Offline
+- **API Calls**: Axios com interceptors e retry logic
+- **Offline Queue**: Fila de requests para sync quando online
+- **Background Sync**: Service Worker para sincronização automática
 - **Real-time**: WebSockets para progress updates
-- **Caching**: React Query com stale-while-revalidate
-- **Error Handling**: Toast notifications + retry logic
+- **Caching**: React Query com persistence + IndexedDB
+- **Error Handling**: Toast notifications + offline fallbacks
 
-### Browser Support
-- **Modern Browsers**: Chrome 90+, Firefox 88+, Safari 14+, Edge 90+
-- **Progressive Enhancement**: Funcionalidade básica em browsers antigos
-- **Polyfills**: Para features modernas quando necessário
+### Funcionalidades PWA Específicas
+- **Manifest**: App manifest com ícones e splash screens
+- **Service Worker**: Cache strategies para mapas e dados
+- **Install Prompt**: A2HS (Add to Home Screen) personalizado
+- **Offline Fallbacks**: Páginas e funcionalidades offline
+- **Push Notifications**: Alertas contextuais durante viagem
+- **Background Tasks**: Sync automático quando volta online
+
+### Browser Support PWA
+- **PWA Features**: Chrome 90+, Firefox 88+, Safari 14+, Edge 90+
+- **Service Worker**: Suporte completo em browsers modernos
+- **Install Prompt**: Chrome/Edge (completo), Safari (limitado), Firefox (experimental)
+- **Push Notifications**: Chrome/Edge/Firefox (completo), Safari (limitado)
+- **Progressive Enhancement**: Funcionalidade básica como web app em browsers antigos
+- **Polyfills**: Para Web APIs quando necessário
+
+### Métricas de Sucesso PWA
+- **Install Rate**: % de usuários que instalam o app
+- **Engagement**: Tempo médio de sessão vs web
+- **Offline Usage**: % de uso offline vs online
+- **Performance**: Core Web Vitals scores 90+
+- **Retention**: Usuários que retornam via PWA vs web
 
 ---
 
-Este documento de design serve como referência principal para o desenvolvimento do frontend, estabelecendo a visão, padrões e especificações técnicas necessárias para criar uma experiência consistente e útil para os usuários do MapaLinear.
+Este documento de design PWA serve como referência principal para o desenvolvimento do frontend, estabelecendo a visão mobile-first, padrões offline e especificações técnicas necessárias para criar uma experiência nativa e útil para os usuários do MapaLinear em suas viagens.
