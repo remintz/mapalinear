@@ -864,7 +864,7 @@ class RoadService:
         origin: str,
         destination: str,
         include_gas_stations: bool = True,
-        include_restaurants: bool = True,
+        include_food: bool = True,
         include_toll_booths: bool = True,
         max_distance_from_road: float = 1000
     ) -> 'RouteStatisticsResponse':
@@ -875,7 +875,7 @@ class RoadService:
             origin: Ponto de origem
             destination: Ponto de destino
             include_gas_stations: Incluir postos nas estatísticas
-            include_restaurants: Incluir restaurantes nas estatísticas
+            include_food: Incluir estabelecimentos de alimentação nas estatísticas
             include_toll_booths: Incluir pedágios nas estatísticas
             max_distance_from_road: Distância máxima da estrada para considerar POIs
             
@@ -892,7 +892,7 @@ class RoadService:
             destination=destination,
             include_cities=True,
             include_gas_stations=include_gas_stations,
-            include_restaurants=include_restaurants,
+            include_food=include_food,
             include_toll_booths=include_toll_booths,
             max_distance_from_road=max_distance_from_road
         )

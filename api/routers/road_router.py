@@ -79,7 +79,7 @@ async def get_route_statistics(
     origin: str = Query(..., description="Ponto de origem (ex: 'São Paulo, SP')"),
     destination: str = Query(..., description="Ponto de destino (ex: 'Rio de Janeiro, RJ')"),
     include_gas_stations: bool = Query(True, description="Incluir postos de gasolina nas estatísticas"),
-    include_restaurants: bool = Query(True, description="Incluir restaurantes nas estatísticas"),
+    include_food: bool = Query(True, description="Incluir estabelecimentos de alimentação nas estatísticas"),
     include_toll_booths: bool = Query(True, description="Incluir pedágios nas estatísticas"),
     max_distance_from_road: float = Query(1000, description="Distância máxima em metros da estrada para considerar POIs")
 ):
@@ -92,7 +92,7 @@ async def get_route_statistics(
             origin=origin,
             destination=destination,
             include_gas_stations=include_gas_stations,
-            include_restaurants=include_restaurants,
+            include_food=include_food,
             include_toll_booths=include_toll_booths,
             max_distance_from_road=max_distance_from_road
         )
