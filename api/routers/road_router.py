@@ -25,7 +25,7 @@ async def generate_linear_map(request: LinearMapRequest):
             road_id=request.road_id,
             include_cities=request.include_cities,
             include_gas_stations=request.include_gas_stations,
-            include_restaurants=request.include_restaurants,
+            include_food=request.include_food,
             include_toll_booths=request.include_toll_booths,
             max_distance_from_road=request.max_distance_from_road,
             min_distance_from_origin_km=request.min_distance_from_origin_km
