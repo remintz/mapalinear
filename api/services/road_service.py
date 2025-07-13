@@ -197,6 +197,7 @@ class RoadService:
         road_segments: List[Any], 
         milestone_types: List[str], 
         max_distance: float,
+        min_distance_from_origin_km: float = 5.0,
         segment_length_km: float = 10.0
     ) -> List[RoadMilestone]:
         """
@@ -297,12 +298,20 @@ class RoadService:
         
         # Build POI types to search
         poi_types = []
+        commercial_needed = False
+        
         if "gas_station" in milestone_types:
             poi_types.append({"amenity": "fuel"})
+            commercial_needed = True
         if "toll_booth" in milestone_types:
             poi_types.append({"barrier": "toll_booth"})
         if "restaurant" in milestone_types:
             poi_types.append({"amenity": "restaurant"})
+            commercial_needed = True
+        
+        # Add commercial landuse search only once if needed
+        if commercial_needed:
+            poi_types.append({"landuse": "commercial"})
         
         if poi_types:
             try:
@@ -347,7 +356,13 @@ class RoadService:
                     milestone = None
                     
                     # Verifica postos de gasolina
-                    if "gas_station" in milestone_types and element.get('tags', {}).get('amenity') == 'fuel':
+                    is_fuel_amenity = element.get('tags', {}).get('amenity') == 'fuel'
+                    is_commercial_gas_station = (
+                        element.get('tags', {}).get('landuse') == 'commercial' and 
+                        'posto' in element_tags.get('name', '').lower()
+                    )
+                    
+                    if "gas_station" in milestone_types and (is_fuel_amenity or is_commercial_gas_station):
                         name = element_tags.get('name') or element_tags.get('brand') or element_tags.get('operator') or 'Posto de Combustível'
                         milestone = RoadMilestone(
                             id=str(uuid.uuid4()),
@@ -397,7 +412,13 @@ class RoadService:
                         )
                     
                     # Verifica restaurantes
-                    elif "restaurant" in milestone_types and element.get('tags', {}).get('amenity') == 'restaurant':
+                    is_restaurant_amenity = element.get('tags', {}).get('amenity') == 'restaurant'
+                    is_commercial_restaurant = (
+                        element.get('tags', {}).get('landuse') == 'commercial' and 
+                        'restaurante' in element_tags.get('name', '').lower()
+                    )
+                    
+                    elif "restaurant" in milestone_types and (is_restaurant_amenity or is_commercial_restaurant):
                         name = element_tags.get('name') or element_tags.get('brand') or 'Restaurante'
                         milestone = RoadMilestone(
                             id=str(uuid.uuid4()),
@@ -439,9 +460,12 @@ class RoadService:
                         
                         milestone.distance_from_road_meters = min_distance
                         milestone.distance_from_origin_km = accumulated_distances[min_distance_idx]
-                        milestones_found += 1
-                        milestones.append(milestone)
-                        seen_coordinates.add(coord_key)
+                        
+                        # Filter out POIs too close to origin
+                        if milestone.distance_from_origin_km >= min_distance_from_origin_km:
+                            milestones_found += 1
+                            milestones.append(milestone)
+                            seen_coordinates.add(coord_key)
                 
                 logger.info(f"Processados {nodes_processed} nós, encontrados {milestones_found} marcos")
                 
@@ -461,6 +485,7 @@ class RoadService:
         include_restaurants: bool = False,
         include_toll_booths: bool = True,
         max_distance_from_road: float = 1000,
+        min_distance_from_origin_km: float = 5.0,
         progress_callback: Optional[Callable[[float], None]] = None,
         segment_length_km: float = 10.0
     ) -> LinearMapResponse:
@@ -497,6 +522,7 @@ class RoadService:
             osm_response.road_segments,
             milestone_types,
             max_distance_from_road,
+            min_distance_from_origin_km,
             segment_length_km
         )
         
@@ -702,13 +728,25 @@ class RoadService:
         barrier = tags.get('barrier')
         
         # Para postos de gasolina, exigir nome OU brand OU operator
-        if amenity == 'fuel':
+        is_fuel_amenity = amenity == 'fuel'
+        is_commercial_gas_station = (
+            tags.get('landuse') == 'commercial' and 
+            'posto' in tags.get('name', '').lower()
+        )
+        
+        if is_fuel_amenity or is_commercial_gas_station:
             if not (tags.get('name') or tags.get('brand') or tags.get('operator')):
                 return False
             return quality_score >= 0.3  # Threshold mais baixo para postos
         
         # Para restaurantes, exigir nome
-        if amenity == 'restaurant':
+        is_restaurant_amenity = amenity == 'restaurant'
+        is_commercial_restaurant = (
+            tags.get('landuse') == 'commercial' and 
+            'restaurante' in tags.get('name', '').lower()
+        )
+        
+        if is_restaurant_amenity or is_commercial_restaurant:
             if not tags.get('name'):
                 return False
             return quality_score >= 0.4  # Threshold médio para restaurantes
@@ -793,7 +831,12 @@ class RoadService:
         
         # Amenidades especiais baseadas no tipo
         amenity_type = tags.get('amenity')
-        if amenity_type == 'fuel':
+        is_gas_station = (
+            amenity_type == 'fuel' or 
+            (tags.get('landuse') == 'commercial' and 'posto' in tags.get('name', '').lower())
+        )
+        
+        if is_gas_station:
             # Para postos, assumir algumas amenidades básicas se não especificadas
             if not any('banheiro' in a for a in amenities) and tags.get('toilets') != 'no':
                 amenities.append('banheiro')

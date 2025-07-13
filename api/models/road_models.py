@@ -32,6 +32,7 @@ class LinearMapRequest(BaseModel):
     include_restaurants: bool = Field(False, description="Incluir restaurantes como marcos")
     include_toll_booths: bool = Field(True, description="Incluir pedágios como marcos")
     max_distance_from_road: float = Field(1000, description="Distância máxima em metros da estrada para considerar pontos de interesse")
+    min_distance_from_origin_km: float = Field(5.0, description="Distância mínima em km da origem para incluir POIs (evita POIs na cidade de origem)")
 
 
 class RoadMilestone(BaseModel):
@@ -63,6 +64,7 @@ class LinearRoadSegment(BaseModel):
     name: Optional[str] = Field(None, description="Nome da estrada neste segmento")
     ref: Optional[str] = Field(None, description="Referência da estrada neste segmento (ex: 'BR-101')")
     highway_type: Optional[str] = Field(None, description="Tipo de estrada (motorway, trunk, etc.)")
+    geometry: List[Coordinates] = Field(default_factory=list, description="Coordenadas geográficas do segmento")
     start_milestone: Optional[RoadMilestone] = Field(None, description="Marco no início do segmento")
     end_milestone: Optional[RoadMilestone] = Field(None, description="Marco no fim do segmento")
     milestones: List[RoadMilestone] = Field(default_factory=list, description="Marcos ao longo do segmento")

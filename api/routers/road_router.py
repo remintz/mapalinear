@@ -27,7 +27,8 @@ async def generate_linear_map(request: LinearMapRequest):
             include_gas_stations=request.include_gas_stations,
             include_restaurants=request.include_restaurants,
             include_toll_booths=request.include_toll_booths,
-            max_distance_from_road=request.max_distance_from_road
+            max_distance_from_road=request.max_distance_from_road,
+            min_distance_from_origin_km=request.min_distance_from_origin_km
         )
         return result
     except Exception as e:
