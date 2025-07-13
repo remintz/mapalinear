@@ -319,18 +319,21 @@ class OSMService:
         
         # Function to classify road type by highway tag and reference
         def is_major_highway(highway_type, ref=None):
-            """Returns True if the highway type is a major intercity road or has BR reference"""
-            # First priority: Federal highways (BR references)
+            """Returns True if the highway type is a major intercity road"""
+            # Priority 1: Any highway with references (BR-, state highways, etc.)
             if ref and isinstance(ref, str):
-                if 'BR-' in ref:
+                # Any numbered highway reference indicates intercity road
+                if any(prefix in ref for prefix in ['BR-', 'SP-', 'RJ-', 'MG-', 'PR-', 'SC-', 'RS-', 'GO-', 'MT-', 'MS-', 'ES-', 'BA-', 'SE-', 'AL-', 'PE-', 'PB-', 'RN-', 'CE-', 'PI-', 'MA-', 'TO-', 'PA-', 'AP-', 'AM-', 'RR-', 'AC-', 'RO-', 'DF-']):
                     return True
             
             if not highway_type:
                 return False
             
+            # Priority 2: Highway types typically used for intercity travel
             major_types = {
                 'motorway', 'motorway_link',
-                'trunk', 'trunk_link'
+                'trunk', 'trunk_link',
+                'primary', 'primary_link'  # Include primary roads as they can be intercity
             }
             
             # Handle lists (when multiple highway types)
@@ -339,14 +342,19 @@ class OSMService:
             
             return highway_type in major_types
         
-        def is_urban_road(highway_type):
-            """Returns True if the highway type is typically urban/local"""
+        def is_urban_road(highway_type, ref=None):
+            """Returns True if the highway type is typically urban/local and has no highway reference"""
             if not highway_type:
                 return False
+            
+            # If it has a highway reference (BR-, state codes), it's likely intercity even if urban type
+            if ref and isinstance(ref, str):
+                if any(prefix in ref for prefix in ['BR-', 'SP-', 'RJ-', 'MG-', 'PR-', 'SC-', 'RS-', 'GO-', 'MT-', 'MS-', 'ES-', 'BA-', 'SE-', 'AL-', 'PE-', 'PB-', 'RN-', 'CE-', 'PI-', 'MA-', 'TO-', 'PA-', 'AP-', 'AM-', 'RR-', 'AC-', 'RO-', 'DF-']):
+                    return False  # Not urban if it has highway reference
                 
             urban_types = {
                 'residential', 'living_street', 'service', 'unclassified',
-                'tertiary', 'tertiary_link', 'secondary', 'secondary_link'
+                'tertiary', 'tertiary_link'
             }
             
             # Handle lists
@@ -411,7 +419,7 @@ class OSMService:
                 all_segments.append({
                     'segment': segment,
                     'is_major': is_major_highway(highway_type, edge.get('ref')),
-                    'is_urban': is_urban_road(highway_type),
+                    'is_urban': is_urban_road(highway_type, edge.get('ref')),
                     'highway_type': highway_type
                 })
         
