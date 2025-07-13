@@ -39,6 +39,7 @@ class OSMRoadSegment(BaseModel):
 class OSMSearchResponse(BaseModel):
     road_segments: List[OSMRoadSegment] = Field(..., description="Segmentos de estrada encontrados")
     total_length_km: float = Field(..., description="Comprimento total da rota em quilômetros")
+    straight_line_distance_km: float = Field(..., description="Distância em linha reta entre origem e destino")
     origin_coordinates: Coordinates = Field(..., description="Coordenadas do ponto de origem")
     destination_coordinates: Coordinates = Field(..., description="Coordenadas do ponto de destino")
     road_id: str = Field(..., description="ID da estrada completa")

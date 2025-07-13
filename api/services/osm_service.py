@@ -317,16 +317,20 @@ class OSMService:
         road_segments = []
         total_length = 0
         
-        # Function to classify road type by highway tag
-        def is_major_highway(highway_type):
-            """Returns True if the highway type is a major intercity road"""
+        # Function to classify road type by highway tag and reference
+        def is_major_highway(highway_type, ref=None):
+            """Returns True if the highway type is a major intercity road or has BR reference"""
+            # First priority: Federal highways (BR references)
+            if ref and isinstance(ref, str):
+                if 'BR-' in ref:
+                    return True
+            
             if not highway_type:
                 return False
             
             major_types = {
                 'motorway', 'motorway_link',
-                'trunk', 'trunk_link', 
-                'primary', 'primary_link'
+                'trunk', 'trunk_link'
             }
             
             # Handle lists (when multiple highway types)
@@ -406,7 +410,7 @@ class OSMService:
                 
                 all_segments.append({
                     'segment': segment,
-                    'is_major': is_major_highway(highway_type),
+                    'is_major': is_major_highway(highway_type, edge.get('ref')),
                     'is_urban': is_urban_road(highway_type),
                     'highway_type': highway_type
                 })
@@ -420,7 +424,8 @@ class OSMService:
             for i, seg_info in enumerate(all_segments):
                 if seg_info['is_major']:
                     first_major_idx = i
-                    logger.info(f"First major highway found at segment {i}: {seg_info['segment'].highway_type}")
+                    ref_info = f" (ref: {seg_info['segment'].ref})" if seg_info['segment'].ref else ""
+                    logger.info(f"First major highway found at segment {i}: {seg_info['segment'].highway_type}{ref_info}")
                     break
             
             # Find last major highway (skip urban roads at end)  
@@ -428,11 +433,12 @@ class OSMService:
             for i in range(len(all_segments) - 1, -1, -1):
                 if all_segments[i]['is_major']:
                     last_major_idx = i
-                    logger.info(f"Last major highway found at segment {i}: {all_segments[i]['segment'].highway_type}")
+                    ref_info = f" (ref: {all_segments[i]['segment'].ref})" if all_segments[i]['segment'].ref else ""
+                    logger.info(f"Last major highway found at segment {i}: {all_segments[i]['segment'].highway_type}{ref_info}")
                     break
             
-            # Include some context around major highways
-            context_segments = 5  # Include 5 segments before first major and after last major
+            # Include minimal context around major highways for intercity routes
+            context_segments = 2  # Only 2 segments before first major and after last major  
             start_idx = max(0, first_major_idx - context_segments)
             end_idx = min(len(all_segments), last_major_idx + context_segments + 1)
             

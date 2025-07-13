@@ -3,6 +3,8 @@ import logging
 import os
 import sys
 import warnings
+import signal
+import threading
 
 # Suprimir o warning específico do overpass
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="overpass.api")
@@ -53,6 +55,22 @@ if not error_logger.handlers:
     handler.setFormatter(formatter)
     error_logger.addHandler(handler)
 
+def setup_signal_handlers():
+    """Configura handlers para shutdown graceful."""
+    def signal_handler(signum, frame):
+        print(f"\n🛑 Recebido sinal {signum}. Encerrando servidor...")
+        
+        # Limpar threads ativas se necessário
+        active_threads = threading.active_count()
+        if active_threads > 1:
+            print(f"📝 {active_threads} threads ativas sendo finalizadas...")
+        
+        # Force exit se necessário
+        os._exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
 def main():
     """Inicia o servidor da API localmente."""
     host = os.environ.get("MAPALINEAR_HOST", "127.0.0.1")
@@ -60,6 +78,9 @@ def main():
     
     print(f"Iniciando API em http://{host}:{port}")
     print("Pressione CTRL+C para sair.")
+    
+    # Configurar handlers de sinal para shutdown graceful
+    setup_signal_handlers()
     
     # Configuração unificada de logs para evitar duplicação
     log_config = {
