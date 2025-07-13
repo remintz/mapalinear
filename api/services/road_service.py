@@ -387,7 +387,7 @@ class RoadService:
                         )
                     
                     # Verifica pedágios
-                    elif "toll_booth" in milestone_types and element.get('tags', {}).get('barrier') == 'toll_booth':
+                    if "toll_booth" in milestone_types and element.get('tags', {}).get('barrier') == 'toll_booth':
                         name = element_tags.get('name') or element_tags.get('operator') or 'Pedágio'
                         milestone = RoadMilestone(
                             id=str(uuid.uuid4()),
@@ -418,7 +418,7 @@ class RoadService:
                         'restaurante' in element_tags.get('name', '').lower()
                     )
                     
-                    elif "restaurant" in milestone_types and (is_restaurant_amenity or is_commercial_restaurant):
+                    if "restaurant" in milestone_types and (is_restaurant_amenity or is_commercial_restaurant):
                         name = element_tags.get('name') or element_tags.get('brand') or 'Restaurante'
                         milestone = RoadMilestone(
                             id=str(uuid.uuid4()),
