@@ -226,3 +226,7 @@ When working with geographic data:
 4. Leverage the unified cache system for performance
 5. Test with multiple providers when implementing new features
 6. Maintain >90% test coverage for provider-related code
+
+- IMPORTANTE: Implemente usando Test Driven Development (TDD)
+- os testes automáticos devem sempre passar 100%
+- se um teste automático está falhando descubra a causa raiz. O objetivo não é simplesmente passar nos testes mas assegurar que o sistema está funcionando conforme desejado
