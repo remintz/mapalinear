@@ -37,11 +37,10 @@ def build_overpass_query(
             tag_filter += f'["{key}"="{value}"]'
     
     query = f"""
-    [out:json];
     (
         {way_or_node}{tag_filter}({min_lat},{min_lon},{max_lat},{max_lon});
     );
-    out body geom;
+    out geom;
     """
     
     return query

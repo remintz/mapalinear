@@ -3,6 +3,7 @@ import osmnx as ox
 import networkx as nx
 import geopy.distance
 import uuid
+import requests
 from typing import Dict, List, Optional, Any, Tuple
 from geopy.geocoders import Nominatim
 import logging
@@ -13,7 +14,6 @@ from itertools import product
 from threading import Lock
 import time
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-import requests.exceptions
 
 from api.models.osm_models import (
     OSMSearchResponse,
@@ -100,10 +100,29 @@ class OSMService:
         logger.info(f"Origin coordinates: {origin_lat}, {origin_lon}")
         logger.info(f"Destination coordinates: {dest_lat}, {dest_lon}")
         
-        north = max(origin_lat, dest_lat) + 0.2
-        south = min(origin_lat, dest_lat) - 0.2
-        east = max(origin_lon, dest_lon) + 0.2
-        west = min(origin_lon, dest_lon) - 0.2
+        # Calculate straight-line distance to determine if this is an intercity route
+        straight_distance_km = geopy.distance.distance(
+            (origin_lat, origin_lon), 
+            (dest_lat, dest_lon)
+        ).kilometers
+        
+        logger.info(f"Straight-line distance: {straight_distance_km:.1f} km")
+        is_intercity_route = straight_distance_km > 50  # More than 50km = intercity
+        
+        if is_intercity_route:
+            logger.info("Detected intercity route - expanding search area for highways")
+            # For intercity routes, use a more conservative padding to avoid huge areas
+            padding = min(0.3, max(0.1, straight_distance_km / 2000))  # 0.1 to 0.3 degrees max
+        else:
+            logger.info("Detected local route - using standard search area")
+            padding = 0.2
+        
+        north = max(origin_lat, dest_lat) + padding
+        south = min(origin_lat, dest_lat) - padding
+        east = max(origin_lon, dest_lon) + padding
+        west = min(origin_lon, dest_lon) - padding
+        
+        logger.info(f"Search bounding box: ({south:.3f}, {west:.3f}) to ({north:.3f}, {east:.3f})")
         
         # Get the shortest path using OSMnx
         # Determine network type based on road_type
@@ -119,54 +138,116 @@ class OSMService:
             logger.info(f"Attempting to get graph for area between {origin} and {destination}")
             logger.info(f"Network type: {network_type}, Custom filter: {custom_filter}")
             
-            # Primeiro tenta com o filtro customizado
-            if custom_filter:
+            # For intercity routes, try optimized approach but with quick fallback
+            if is_intercity_route:
+                logger.info("Detected intercity route - attempting optimized graph acquisition...")
+                
+                # For very large intercity routes, use highway-only filter to reduce data size
+                if straight_distance_km > 150:  # Routes longer than 150km
+                    intercity_filter = '["highway"~"^(motorway|trunk|primary)"]'
+                    logger.info("Using highway-only filter for long intercity route")
+                else:
+                    intercity_filter = custom_filter
+                
+                # Try bounding box approach for full corridor coverage
                 try:
-                    # Tenta obter o grafo usando o nome da cidade
-                    G = ox.graph_from_place(
-                        origin,
+                    logger.info(f"Trying bounding box approach for full {straight_distance_km:.0f}km corridor...")
+                    
+                    G = ox.graph_from_bbox(
+                        bbox=(west, south, east, north),
                         network_type=network_type,
-                        custom_filter=custom_filter
+                        custom_filter=intercity_filter,
+                        truncate_by_edge=True
                     )
-                    logger.info(f"Graph obtained with custom filter: {len(G.nodes) if G else 0} nodes")
+                    logger.info(f"Graph obtained with bounding box approach: {len(G.nodes) if G else 0} nodes")
+                    
+                except Exception as bbox_error:
+                    logger.warning(f"Bounding box approach failed: {str(bbox_error)}")
+                    
+                    # Fallback to point-based approach
+                    logger.info("Falling back to point-based approach...")
+                    
+                    # Use a moderate radius that balances coverage vs. performance
+                    if straight_distance_km > 200:
+                        radius = 100000  # 100km radius for very long routes
+                        logger.warning(f"Long route ({straight_distance_km:.0f}km) detected. Using limited radius ({radius/1000:.0f}km) - route may be incomplete.")
+                    else:
+                        radius = min(int(straight_distance_km * 800), 150000)  # 0.8x distance, cap at 150km
+                    
+                    logger.info(f"Trying point-based approach with {radius/1000:.0f}km radius...")
+                    
+                    # Try from midpoint to get better coverage
+                    mid_lat = (origin_lat + dest_lat) / 2
+                    mid_lon = (origin_lon + dest_lon) / 2
+                    
+                    G = ox.graph_from_point(
+                        (mid_lat, mid_lon),
+                        dist=radius,
+                        network_type=network_type,
+                        custom_filter=intercity_filter
+                    )
+                    logger.info(f"Graph obtained with point-based approach: {len(G.nodes) if G else 0} nodes")
+                    
                 except Exception as e:
-                    logger.warning(f"Failed to get graph with custom filter: {str(e)}")
+                    logger.warning(f"Intercity approach failed: {str(e)}")
+                    logger.info("Falling back to place-based approach...")
                     G = None
             
-            # Se não conseguiu com o filtro customizado ou não há filtro, tenta sem ele
+            # For local routes or if intercity approach failed, use the original place-based approach
             if G is None or len(G.nodes) == 0:
-                logger.info("Attempting to get graph without custom filter...")
-                try:
-                    # Tenta obter o grafo usando o nome da cidade
-                    G = ox.graph_from_place(
-                        origin,
-                        network_type=network_type
-                    )
-                    logger.info(f"Graph obtained without custom filter: {len(G.nodes) if G else 0} nodes")
-                except Exception as e:
-                    logger.error(f"Failed to get graph without custom filter: {str(e)}")
-                    # Tenta uma última vez com a cidade de destino
+                logger.info("Using place-based approach...")
+                
+                # Primeiro tenta com o filtro customizado
+                if custom_filter:
                     try:
-                        logger.info("Attempting with destination city...")
+                        # Tenta obter o grafo usando o nome da cidade
                         G = ox.graph_from_place(
-                            destination,
+                            origin,
+                            network_type=network_type,
+                            custom_filter=custom_filter
+                        )
+                        logger.info(f"Graph obtained with custom filter: {len(G.nodes) if G else 0} nodes")
+                    except Exception as e:
+                        logger.warning(f"Failed to get graph with custom filter: {str(e)}")
+                        G = None
+                
+                # Se não conseguiu com o filtro customizado ou não há filtro, tenta sem ele
+                if G is None or len(G.nodes) == 0:
+                    logger.info("Attempting to get graph without custom filter...")
+                    try:
+                        # Tenta obter o grafo usando o nome da cidade
+                        G = ox.graph_from_place(
+                            origin,
                             network_type=network_type
                         )
-                        logger.info(f"Graph obtained with destination city: {len(G.nodes) if G else 0} nodes")
-                    except Exception as e2:
-                        logger.error(f"Failed to get graph with destination city: {str(e2)}")
-                        # Última tentativa: tenta obter o grafo usando as coordenadas
+                        logger.info(f"Graph obtained without custom filter: {len(G.nodes) if G else 0} nodes")
+                    except Exception as e:
+                        logger.error(f"Failed to get graph without custom filter: {str(e)}")
+                        # Tenta uma última vez com a cidade de destino
                         try:
-                            logger.info("Attempting with coordinates...")
-                            G = ox.graph_from_point(
-                                (origin_lat, origin_lon),
-                                dist=50000,  # 50km radius
+                            logger.info("Attempting with destination city...")
+                            G = ox.graph_from_place(
+                                destination,
                                 network_type=network_type
                             )
-                            logger.info(f"Graph obtained with coordinates: {len(G.nodes) if G else 0} nodes")
-                        except Exception as e3:
-                            logger.error(f"Failed to get graph with coordinates: {str(e3)}")
-                            raise ValueError(f"Não foi possível obter dados da rede viária para a região especificada: {str(e)}")
+                            logger.info(f"Graph obtained with destination city: {len(G.nodes) if G else 0} nodes")
+                        except Exception as e2:
+                            logger.error(f"Failed to get graph with destination city: {str(e2)}")
+                            # Última tentativa: tenta obter o grafo usando as coordenadas
+                            try:
+                                logger.info("Attempting with coordinates...")
+                                # Use larger radius for intercity routes
+                                radius = 200000 if is_intercity_route else 50000  # 200km vs 50km
+                                logger.info(f"Using radius: {radius/1000:.0f}km for {'intercity' if is_intercity_route else 'local'} route")
+                                G = ox.graph_from_point(
+                                    (origin_lat, origin_lon),
+                                    dist=radius,
+                                    network_type=network_type
+                                )
+                                logger.info(f"Graph obtained with coordinates: {len(G.nodes) if G else 0} nodes")
+                            except Exception as e3:
+                                logger.error(f"Failed to get graph with coordinates: {str(e3)}")
+                                raise ValueError(f"Não foi possível obter dados da rede viária para a região especificada: {str(e)}")
             
             if G is None or len(G.nodes) == 0:
                 raise ValueError("Não foi possível obter dados da rede viária para a região especificada")
@@ -184,6 +265,43 @@ class OSMService:
         try:
             origin_node = ox.distance.nearest_nodes(G, origin_lon, origin_lat)
             dest_node = ox.distance.nearest_nodes(G, dest_lon, dest_lat)
+            
+            # Validate that the nearest nodes are actually close to the intended locations
+            origin_node_coords = (G.nodes[origin_node]['y'], G.nodes[origin_node]['x'])
+            dest_node_coords = (G.nodes[dest_node]['y'], G.nodes[dest_node]['x'])
+            
+            origin_distance = geopy.distance.distance(
+                (origin_lat, origin_lon), 
+                origin_node_coords
+            ).kilometers
+            
+            dest_distance = geopy.distance.distance(
+                (dest_lat, dest_lon), 
+                dest_node_coords
+            ).kilometers
+            
+            logger.info(f"Origin node distance from target: {origin_distance:.1f} km")
+            logger.info(f"Destination node distance from target: {dest_distance:.1f} km")
+            
+            # For intercity routes, allow larger distances (up to 50km from city center)
+            # For local routes, be more strict (up to 10km)
+            max_distance = 50 if is_intercity_route else 10
+            
+            if origin_distance > max_distance:
+                logger.warning(f"Origin node is {origin_distance:.1f}km from {origin}, may indicate incomplete graph coverage")
+            
+            if dest_distance > max_distance:
+                logger.warning(f"Destination node is {dest_distance:.1f}km from {destination}, may indicate incomplete graph coverage")
+                
+                # For intercity routes, if destination is too far, the graph doesn't cover the full route
+                if is_intercity_route and dest_distance > 50:
+                    error_msg = (f"Route calculation incomplete: destination node is {dest_distance:.1f}km from {destination}. "
+                               f"This indicates the road network data doesn't cover the full {straight_distance_km:.0f}km route. "
+                               f"The returned route covers only a portion of the journey.")
+                    logger.error(error_msg)
+                    # For now, continue with partial route but log the issue
+                    # In the future, this could trigger a multi-segment approach
+                
         except Exception as e:
             logger.error(f"Error finding nearest nodes: {str(e)}")
             raise ValueError(f"Não foi possível encontrar os nós mais próximos para {origin} e {destination}")
@@ -199,6 +317,55 @@ class OSMService:
         road_segments = []
         total_length = 0
         
+        # Function to classify road type by highway tag and reference
+        def is_major_highway(highway_type, ref=None):
+            """Returns True if the highway type is a major intercity road"""
+            # Priority 1: Any highway with references (BR-, state highways, etc.)
+            if ref and isinstance(ref, str):
+                # Any numbered highway reference indicates intercity road
+                if any(prefix in ref for prefix in ['BR-', 'SP-', 'RJ-', 'MG-', 'PR-', 'SC-', 'RS-', 'GO-', 'MT-', 'MS-', 'ES-', 'BA-', 'SE-', 'AL-', 'PE-', 'PB-', 'RN-', 'CE-', 'PI-', 'MA-', 'TO-', 'PA-', 'AP-', 'AM-', 'RR-', 'AC-', 'RO-', 'DF-']):
+                    return True
+            
+            if not highway_type:
+                return False
+            
+            # Priority 2: Highway types typically used for intercity travel
+            major_types = {
+                'motorway', 'motorway_link',
+                'trunk', 'trunk_link',
+                'primary', 'primary_link'  # Include primary roads as they can be intercity
+            }
+            
+            # Handle lists (when multiple highway types)
+            if isinstance(highway_type, list):
+                return any(ht in major_types for ht in highway_type)
+            
+            return highway_type in major_types
+        
+        def is_urban_road(highway_type, ref=None):
+            """Returns True if the highway type is typically urban/local and has no highway reference"""
+            if not highway_type:
+                return False
+            
+            # If it has a highway reference (BR-, state codes), it's likely intercity even if urban type
+            if ref and isinstance(ref, str):
+                if any(prefix in ref for prefix in ['BR-', 'SP-', 'RJ-', 'MG-', 'PR-', 'SC-', 'RS-', 'GO-', 'MT-', 'MS-', 'ES-', 'BA-', 'SE-', 'AL-', 'PE-', 'PB-', 'RN-', 'CE-', 'PI-', 'MA-', 'TO-', 'PA-', 'AP-', 'AM-', 'RR-', 'AC-', 'RO-', 'DF-']):
+                    return False  # Not urban if it has highway reference
+                
+            urban_types = {
+                'residential', 'living_street', 'service', 'unclassified',
+                'tertiary', 'tertiary_link'
+            }
+            
+            # Handle lists
+            if isinstance(highway_type, list):
+                return any(ht in urban_types for ht in highway_type)
+                
+            return highway_type in urban_types
+        
+        # First pass: collect all segments with classification
+        all_segments = []
+        
         for i in range(len(route) - 1):
             current_node = route[i]
             next_node = route[i + 1]
@@ -212,6 +379,7 @@ class OSMService:
             
             for edge in edge_data:
                 length_meters = edge.get('length', 0)
+                highway_type = edge.get('highway', 'unknown')
                 total_length += length_meters
                 
                 # Extract coordinates from edge geometry if available
@@ -239,7 +407,7 @@ class OSMService:
                 segment = OSMRoadSegment(
                     id=str(uuid.uuid4()),
                     name=self._format_name(edge.get('name', None)),
-                    highway_type=self._format_name(edge.get('highway', 'unknown')),
+                    highway_type=self._format_name(highway_type),
                     ref=self._format_name(edge.get('ref', None)),
                     geometry=geometry,
                     length_meters=length_meters,
@@ -248,13 +416,77 @@ class OSMService:
                     tags=tags
                 )
                 
-                road_segments.append(segment)
+                all_segments.append({
+                    'segment': segment,
+                    'is_major': is_major_highway(highway_type, edge.get('ref')),
+                    'is_urban': is_urban_road(highway_type, edge.get('ref')),
+                    'highway_type': highway_type
+                })
+        
+        # Filter segments for intercity routes
+        if is_intercity_route and len(all_segments) > 10:  # Only filter if we have enough segments
+            logger.info(f"Original route has {len(all_segments)} segments")
+            
+            # Find first major highway (skip urban roads at start)
+            first_major_idx = 0
+            for i, seg_info in enumerate(all_segments):
+                if seg_info['is_major']:
+                    first_major_idx = i
+                    ref_info = f" (ref: {seg_info['segment'].ref})" if seg_info['segment'].ref else ""
+                    logger.info(f"First major highway found at segment {i}: {seg_info['segment'].highway_type}{ref_info}")
+                    break
+            
+            # Find last major highway (skip urban roads at end)  
+            last_major_idx = len(all_segments) - 1
+            for i in range(len(all_segments) - 1, -1, -1):
+                if all_segments[i]['is_major']:
+                    last_major_idx = i
+                    ref_info = f" (ref: {all_segments[i]['segment'].ref})" if all_segments[i]['segment'].ref else ""
+                    logger.info(f"Last major highway found at segment {i}: {all_segments[i]['segment'].highway_type}{ref_info}")
+                    break
+            
+            # Include minimal context around major highways for intercity routes
+            context_segments = 2  # Only 2 segments before first major and after last major  
+            start_idx = max(0, first_major_idx - context_segments)
+            end_idx = min(len(all_segments), last_major_idx + context_segments + 1)
+            
+            filtered_segments = all_segments[start_idx:end_idx]
+            
+            logger.info(f"Filtered route: segments {start_idx} to {end_idx-1} ({len(filtered_segments)} segments)")
+            logger.info(f"Removed {len(all_segments) - len(filtered_segments)} urban segments")
+            
+            # Use filtered segments
+            road_segments = [seg_info['segment'] for seg_info in filtered_segments]
+        else:
+            # For local routes or short routes, use all segments
+            road_segments = [seg_info['segment'] for seg_info in all_segments]
+            logger.info(f"Using all {len(road_segments)} segments (local route or insufficient segments)")
+        
+        # Recalculate total length from selected segments
+        total_length = sum(segment.length_meters for segment in road_segments)
+        route_distance_km = total_length / 1000
+        
+        # Validate route distance for intercity routes
+        if is_intercity_route:
+            route_ratio = route_distance_km / straight_distance_km
+            logger.info(f"Route validation - Distance: {route_distance_km:.1f}km, Straight-line: {straight_distance_km:.1f}km, Ratio: {route_ratio:.2f}x")
+            
+            # Expected ratio for highways is 1.2-1.5x straight distance
+            if route_ratio < 0.8:
+                logger.warning(f"⚠️  Route appears incomplete! Distance ratio {route_ratio:.2f}x is too low for intercity route")
+                logger.warning(f"   Expected: ~{straight_distance_km * 1.3:.0f}km, Got: {route_distance_km:.1f}km")
+                logger.warning(f"   This likely indicates partial road network coverage")
+            elif route_ratio > 3.0:
+                logger.warning(f"⚠️  Route may include unnecessary detours! Distance ratio {route_ratio:.2f}x is unusually high")
+            else:
+                logger.info(f"✅ Route distance appears reasonable for intercity travel")
         
         # Create response
         road_id = str(uuid.uuid4())
         response = OSMSearchResponse(
             road_segments=road_segments,
             total_length_km=total_length / 1000,  # Convert to kilometers
+            straight_line_distance_km=straight_distance_km,  # Add straight-line distance
             origin_coordinates=Coordinates(lat=origin_lat, lon=origin_lon),
             destination_coordinates=Coordinates(lat=dest_lat, lon=dest_lon),
             road_id=road_id,
@@ -301,6 +533,8 @@ class OSMService:
         """
         Executa uma query no Overpass API com retry em caso de falha.
         """
+        import requests
+        
         try:
             # Get sequential call number
             call_number = self._get_next_osm_call_number()
@@ -311,21 +545,63 @@ class OSMService:
             # Remove any extra spaces around parentheses
             query = query.replace('( ', '(').replace(' )', ')')
             
-            logger.debug(f"Query Overpass #{call_number}: {query}")
+            # Add output format manually for direct HTTP requests
+            full_query = f"[out:json]{query}"
+            
+            logger.debug(f"Query Overpass #{call_number}: {full_query}")
             
             # Ensure minimum delay between queries
             self._wait_before_query()
             
-            # Execute the query directly using the API
-            result = self.overpass_api.get(query, responseformat="json")
+            # Use direct HTTP request instead of overpass library to avoid automatic modifications
+            overpass_servers = [
+                "https://overpass-api.de/api/interpreter",  # More stable primary server
+                "https://overpass.openstreetmap.ru/api/interpreter",  # Backup server
+                "https://overpass.kumi.systems/api/interpreter"  # Additional backup
+            ]
             
-            # Log the result for debugging
-            if result and 'elements' in result:
-                logger.debug(f"Query #{call_number} retornou {len(result['elements'])} elementos")
+            last_error = None
+            for i, server_url in enumerate(overpass_servers):
+                try:
+                    logger.debug(f"Tentando servidor {i+1}/{len(overpass_servers)}: {server_url}")
+                    response = requests.post(
+                        server_url,
+                        data={'data': full_query},
+                        timeout=(30, 130),  # (connect_timeout, read_timeout)
+                        headers={'User-Agent': 'MapaLinear/1.0'}
+                    )
+                    response.raise_for_status()
+                    result = response.json()
+                    
+                    # Log successful server
+                    logger.debug(f"Query #{call_number} executada com sucesso em {server_url}")
+                    
+                    # Log the result for debugging
+                    if result and 'elements' in result:
+                        logger.debug(f"Query #{call_number} retornou {len(result['elements'])} elementos")
+                    else:
+                        logger.debug(f"Query #{call_number} retornou resultado vazio")
+                    
+                    return result
+                    
+                except requests.exceptions.RequestException as server_error:
+                    last_error = server_error
+                    logger.warning(f"Erro no servidor {server_url}: {server_error}")
+                    
+                    # If it's the last server, raise the error
+                    if i == len(overpass_servers) - 1:
+                        logger.error(f"Todos os servidores Overpass falharam. Último erro: {server_error}")
+                        raise server_error
+                    
+                    # Wait a bit before trying next server
+                    time.sleep(1)
+                    continue
+            
+            # This should not be reached, but just in case
+            if last_error:
+                raise last_error
             else:
-                logger.debug(f"Query #{call_number} retornou resultado vazio")
-            
-            return result
+                raise Exception("Nenhum servidor Overpass disponível")
         except Exception as e:
             logger.error(f"Erro na query Overpass #{call_number}: {str(e)}")
             raise
@@ -357,9 +633,17 @@ class OSMService:
         """
         try:
             # Log das coordenadas de entrada
-            logger.info(f"Coordenadas de entrada ({len(coordinates)} pontos):")
-            for i, coord in enumerate(coordinates):
-                logger.info(f"  {i+1}. ({coord.lat}, {coord.lon})")
+            logger.debug(f"Coordenadas de entrada ({len(coordinates)} pontos):")
+            # Only log first few and last few coordinates to avoid spam
+            if len(coordinates) <= 10:
+                for i, coord in enumerate(coordinates):
+                    logger.debug(f"  {i+1}. ({coord.lat}, {coord.lon})")
+            else:
+                for i in range(3):
+                    logger.debug(f"  {i+1}. ({coordinates[i].lat}, {coordinates[i].lon})")
+                logger.debug(f"  ... ({len(coordinates)-6} more coordinates) ...")
+                for i in range(len(coordinates)-3, len(coordinates)):
+                    logger.debug(f"  {i+1}. ({coordinates[i].lat}, {coordinates[i].lon})")
             
             # Build unified query using regex for better performance
             poi_filters = []
@@ -420,7 +704,8 @@ class OSMService:
                             query_parts.append(f'way{filter_str}{around_clause}')
                     
                     # Build complete query with proper output format
-                    query = f"""[out:json][timeout:{timeout}];
+                    # Note: [out:json] is automatically added by overpass library
+                    query = f"""[timeout:{timeout}];
 (
     {';'.join(query_parts)};
 );

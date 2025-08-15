@@ -40,7 +40,6 @@ def get_route_overpass(origem, destino):
     
     # Montar a consulta Overpass para obter as estradas na área
     overpass_query = f"""
-    [out:json];
     (
       way["highway"~"motorway|trunk|primary|secondary|tertiary|residential|unclassified|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link"]
         ({min_lat},{min_lng},{max_lat},{max_lng});

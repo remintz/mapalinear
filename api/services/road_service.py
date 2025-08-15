@@ -197,6 +197,7 @@ class RoadService:
         road_segments: List[Any], 
         milestone_types: List[str], 
         max_distance: float,
+        min_distance_from_origin_km: float = 5.0,
         segment_length_km: float = 10.0
     ) -> List[RoadMilestone]:
         """
@@ -301,8 +302,20 @@ class RoadService:
             poi_types.append({"amenity": "fuel"})
         if "toll_booth" in milestone_types:
             poi_types.append({"barrier": "toll_booth"})
-        if "restaurant" in milestone_types:
-            poi_types.append({"amenity": "restaurant"})
+        
+        # Add all food-related POI types
+        food_types = ["restaurant", "fast_food", "cafe", "bar", "pub", "food_court", "bakery", "ice_cream"]
+        if any(food_type in milestone_types for food_type in food_types):
+            poi_types.extend([
+                {"amenity": "restaurant"},
+                {"amenity": "fast_food"},
+                {"amenity": "cafe"},
+                {"amenity": "bar"},
+                {"amenity": "pub"},
+                {"amenity": "food_court"},
+                {"shop": "bakery"},
+                {"amenity": "ice_cream"}
+            ])
         
         if poi_types:
             try:
@@ -372,7 +385,7 @@ class RoadService:
                         )
                     
                     # Verifica pedágios
-                    elif "toll_booth" in milestone_types and element.get('tags', {}).get('barrier') == 'toll_booth':
+                    if "toll_booth" in milestone_types and element.get('tags', {}).get('barrier') == 'toll_booth':
                         name = element_tags.get('name') or element_tags.get('operator') or 'Pedágio'
                         milestone = RoadMilestone(
                             id=str(uuid.uuid4()),
@@ -396,13 +409,43 @@ class RoadService:
                             quality_score=quality_score
                         )
                     
-                    # Verifica restaurantes
-                    elif "restaurant" in milestone_types and element.get('tags', {}).get('amenity') == 'restaurant':
-                        name = element_tags.get('name') or element_tags.get('brand') or 'Restaurante'
+                    # Verifica estabelecimentos de alimentação
+                    food_milestone_type = None
+                    amenity = element.get('tags', {}).get('amenity')
+                    shop = element.get('tags', {}).get('shop')
+                    
+                    # Mapear amenity/shop para milestone type
+                    if amenity == 'restaurant' and "restaurant" in milestone_types:
+                        food_milestone_type = MilestoneType.RESTAURANT
+                        default_name = 'Restaurante'
+                    elif amenity == 'fast_food' and "fast_food" in milestone_types:
+                        food_milestone_type = MilestoneType.FAST_FOOD
+                        default_name = 'Fast Food'
+                    elif amenity == 'cafe' and "cafe" in milestone_types:
+                        food_milestone_type = MilestoneType.CAFE
+                        default_name = 'Café'
+                    elif amenity == 'bar' and "bar" in milestone_types:
+                        food_milestone_type = MilestoneType.BAR
+                        default_name = 'Bar'
+                    elif amenity == 'pub' and "pub" in milestone_types:
+                        food_milestone_type = MilestoneType.PUB
+                        default_name = 'Pub'
+                    elif amenity == 'food_court' and "food_court" in milestone_types:
+                        food_milestone_type = MilestoneType.FOOD_COURT
+                        default_name = 'Praça de Alimentação'
+                    elif shop == 'bakery' and "bakery" in milestone_types:
+                        food_milestone_type = MilestoneType.BAKERY
+                        default_name = 'Padaria'
+                    elif amenity == 'ice_cream' and "ice_cream" in milestone_types:
+                        food_milestone_type = MilestoneType.ICE_CREAM
+                        default_name = 'Sorveteria'
+                    
+                    if food_milestone_type:
+                        name = element_tags.get('name') or element_tags.get('brand') or default_name
                         milestone = RoadMilestone(
                             id=str(uuid.uuid4()),
                             name=name,
-                            type=MilestoneType.RESTAURANT,
+                            type=food_milestone_type,
                             coordinates=Coordinates(
                                 lat=element['lat'],
                                 lon=element['lon']
@@ -439,9 +482,12 @@ class RoadService:
                         
                         milestone.distance_from_road_meters = min_distance
                         milestone.distance_from_origin_km = accumulated_distances[min_distance_idx]
-                        milestones_found += 1
-                        milestones.append(milestone)
-                        seen_coordinates.add(coord_key)
+                        
+                        # Filter out POIs too close to origin
+                        if milestone.distance_from_origin_km >= min_distance_from_origin_km:
+                            milestones_found += 1
+                            milestones.append(milestone)
+                            seen_coordinates.add(coord_key)
                 
                 logger.info(f"Processados {nodes_processed} nós, encontrados {milestones_found} marcos")
                 
@@ -458,9 +504,10 @@ class RoadService:
         road_id: Optional[str] = None,
         include_cities: bool = True,
         include_gas_stations: bool = True,
-        include_restaurants: bool = False,
+        include_food: bool = False,
         include_toll_booths: bool = True,
         max_distance_from_road: float = 1000,
+        min_distance_from_origin_km: float = 5.0,
         progress_callback: Optional[Callable[[float], None]] = None,
         segment_length_km: float = 10.0
     ) -> LinearMapResponse:
@@ -486,8 +533,8 @@ class RoadService:
             milestone_types.extend(["city", "town", "village"])
         if include_gas_stations:
             milestone_types.append("gas_station")
-        if include_restaurants:
-            milestone_types.append("restaurant")
+        if include_food:
+            milestone_types.extend(["restaurant", "fast_food", "cafe", "bar", "pub", "food_court", "bakery", "ice_cream"])
         if include_toll_booths:
             milestone_types.append("toll_booth")
         
@@ -497,6 +544,7 @@ class RoadService:
             osm_response.road_segments,
             milestone_types,
             max_distance_from_road,
+            min_distance_from_origin_km,
             segment_length_km
         )
         
@@ -707,11 +755,14 @@ class RoadService:
                 return False
             return quality_score >= 0.3  # Threshold mais baixo para postos
         
-        # Para restaurantes, exigir nome
-        if amenity == 'restaurant':
+        # Para estabelecimentos de alimentação, exigir nome
+        food_amenities = ['restaurant', 'fast_food', 'cafe', 'bar', 'pub', 'food_court', 'ice_cream']
+        food_shops = ['bakery']
+        
+        if amenity in food_amenities or tags.get('shop') in food_shops:
             if not tags.get('name'):
                 return False
-            return quality_score >= 0.4  # Threshold médio para restaurantes
+            return quality_score >= 0.4  # Threshold médio para estabelecimentos de alimentação
         
         # Para pedágios, sempre incluir (mesmo sem nome)
         if barrier == 'toll_booth':
@@ -813,7 +864,7 @@ class RoadService:
         origin: str,
         destination: str,
         include_gas_stations: bool = True,
-        include_restaurants: bool = True,
+        include_food: bool = True,
         include_toll_booths: bool = True,
         max_distance_from_road: float = 1000
     ) -> 'RouteStatisticsResponse':
@@ -824,7 +875,7 @@ class RoadService:
             origin: Ponto de origem
             destination: Ponto de destino
             include_gas_stations: Incluir postos nas estatísticas
-            include_restaurants: Incluir restaurantes nas estatísticas
+            include_food: Incluir estabelecimentos de alimentação nas estatísticas
             include_toll_booths: Incluir pedágios nas estatísticas
             max_distance_from_road: Distância máxima da estrada para considerar POIs
             
@@ -841,7 +892,7 @@ class RoadService:
             destination=destination,
             include_cities=True,
             include_gas_stations=include_gas_stations,
-            include_restaurants=include_restaurants,
+            include_food=include_food,
             include_toll_booths=include_toll_booths,
             max_distance_from_road=max_distance_from_road
         )
