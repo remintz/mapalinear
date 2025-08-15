@@ -107,7 +107,7 @@ class AsyncService:
         
         try:
             with open(operation_path, "w") as f:
-                json.dump(operation.dict(), f, indent=2, default=str)
+                json.dump(operation.model_dump(), f, indent=2, default=str)
         except Exception as e:
             logger.error(f"Erro ao salvar operação {operation.operation_id}: {str(e)}")
     

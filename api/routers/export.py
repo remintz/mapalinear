@@ -25,7 +25,7 @@ def create_linear_map_from_export_data(export_data: ExportRouteData):
         RoadMilestone,
         MilestoneType,
     )
-    from api.models.osm_models import Coordinates
+    from api.models.road_models import Coordinates
 
     # Converter POIs para milestones
     milestones = []
@@ -45,7 +45,7 @@ def create_linear_map_from_export_data(export_data: ExportRouteData):
             id=poi.id,
             name=poi.name,
             type=milestone_type,
-            coordinates=Coordinates(lat=poi.coordinates.lat, lon=poi.coordinates.lon),
+            coordinates=Coordinates(latitude=poi.coordinates.lat, longitude=poi.coordinates.lon),
             distance_from_origin_km=poi.distance_from_origin_km,
             distance_from_road_meters=0.0,
             side="right",
@@ -59,7 +59,7 @@ def create_linear_map_from_export_data(export_data: ExportRouteData):
     # Converter segmentos
     segments = []
     for i, seg in enumerate(export_data.segments):
-        geometry = [Coordinates(lat=coord.lat, lon=coord.lon) for coord in seg.geometry]
+        geometry = [Coordinates(latitude=coord.lat, longitude=coord.lon) for coord in seg.geometry]
         segment = LinearRoadSegment(
             id=seg.id,
             name=seg.name or f"Segmento {i+1}",
@@ -80,7 +80,7 @@ def create_linear_map_from_export_data(export_data: ExportRouteData):
         segments=segments,
         milestones=milestones,
         creation_date=datetime.now(),
-        osm_road_id="export-temp",
+        road_id="export-temp",
     )
 
 
@@ -149,7 +149,7 @@ async def export_route_gpx(route_data: ExportRouteData):
 @router.post("/web-urls")
 async def get_web_visualization_urls(route_data: ExportRouteData):
     """
-    Gera URLs para visualização da rota em ferramentas web baseadas em OSM.
+    Gera URLs para visualização da rota em ferramentas web de mapas.
     """
     try:
         linear_map_data = create_linear_map_from_export_data(route_data)

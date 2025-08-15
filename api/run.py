@@ -6,8 +6,8 @@ import warnings
 import signal
 import threading
 
-# Suprimir o warning específico do overpass
-warnings.filterwarnings("ignore", category=SyntaxWarning, module="overpass.api")
+# General warning suppressions if needed
+# warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 # Remover manipuladores existentes para evitar duplicação
 root_logger = logging.getLogger()

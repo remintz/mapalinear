@@ -47,7 +47,7 @@ async def start_async_linear_map(request: LinearMapRequest, background_tasks: Ba
             )
             
             # Converter para dicionário para armazenamento
-            return result.dict()
+            return result.model_dump()
         except Exception as e:
             # Em caso de erro, falhar a operação
             AsyncService.fail_operation(operation.operation_id, str(e))

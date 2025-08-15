@@ -36,7 +36,7 @@ Este documento estabelece os padrões de desenvolvimento para o projeto MapaLine
 #### Convenções de Nome
 ```python
 # Classes: PascalCase
-class OSMService:
+class GeoProvider:
 class LinearMapRequest:
 
 # Funções e variáveis: snake_case
@@ -102,7 +102,7 @@ from pydantic import BaseModel, Field
 
 # 3. Local imports
 from api.models.osm_models import Coordinates
-from api.services.osm_service import OSMService
+from api.providers import create_provider
 ```
 
 ### Modelos Pydantic
@@ -502,7 +502,7 @@ api/
 ├── services/              # Business logic
 │   ├── __init__.py
 │   ├── base.py            # Base service class
-│   ├── osm_service.py     # OpenStreetMap API integration
+│   ├── [REMOVED] geo_provider.py     # Legacy OSM service - migrated to providers/osm/
 │   ├── road_service.py    # Route processing logic
 │   ├── cache_service.py   # Caching logic
 │   └── async_service.py   # Async operations management
@@ -656,23 +656,23 @@ release/v1.2.0
 ### Backend (Python)
 
 ```python
-# tests/test_services/test_osm_service.py
+# tests/test_services/test_geo_provider.py
 import pytest
 from unittest.mock import Mock, patch
 
-from api.services.osm_service import OSMService
+from api.providers import create_provider
 from api.models.osm_models import Coordinates
 
-class TestOSMService:
+class TestGeoProvider:
     @pytest.fixture
-    def osm_service(self):
-        return OSMService()
+    def geo_provider(self):
+        return GeoProvider()
     
     @pytest.fixture
     def sample_coordinates(self):
         return Coordinates(lat=-19.9167, lon=-43.9345)
     
-    def test_search_pois_success(self, osm_service, sample_coordinates):
+    def test_search_pois_success(self, geo_provider, sample_coordinates):
         """Testa busca bem-sucedida de POIs."""
         # Arrange
         expected_pois = [
@@ -680,9 +680,9 @@ class TestOSMService:
         ]
         
         # Act
-        with patch.object(osm_service, '_query_overpass') as mock_query:
+        with patch.object(geo_provider, '_query_overpass') as mock_query:
             mock_query.return_value = expected_pois
-            result = osm_service.search_pois_around_coordinates(
+            result = geo_provider.search_pois_around_coordinates(
                 coordinates=[sample_coordinates],
                 radius_meters=1000,
                 poi_types=[{"amenity": "fuel"}]
@@ -693,11 +693,11 @@ class TestOSMService:
         assert result[0]["name"] == "Posto BR"
         mock_query.assert_called_once()
     
-    def test_search_pois_empty_result(self, osm_service, sample_coordinates):
+    def test_search_pois_empty_result(self, geo_provider, sample_coordinates):
         """Testa comportamento quando nenhum POI é encontrado."""
-        with patch.object(osm_service, '_query_overpass') as mock_query:
+        with patch.object(geo_provider, '_query_overpass') as mock_query:
             mock_query.return_value = []
-            result = osm_service.search_pois_around_coordinates(
+            result = geo_provider.search_pois_around_coordinates(
                 coordinates=[sample_coordinates],
                 radius_meters=1000,
                 poi_types=[{"amenity": "fuel"}]
@@ -705,13 +705,13 @@ class TestOSMService:
         
         assert result == []
     
-    def test_search_pois_api_error(self, osm_service, sample_coordinates):
+    def test_search_pois_api_error(self, geo_provider, sample_coordinates):
         """Testa tratamento de erro da API Overpass."""
-        with patch.object(osm_service, '_query_overpass') as mock_query:
+        with patch.object(geo_provider, '_query_overpass') as mock_query:
             mock_query.side_effect = Exception("API Error")
             
             with pytest.raises(Exception, match="API Error"):
-                osm_service.search_pois_around_coordinates(
+                geo_provider.search_pois_around_coordinates(
                     coordinates=[sample_coordinates],
                     radius_meters=1000,
                     poi_types=[{"amenity": "fuel"}]
