@@ -127,3 +127,6 @@ dmypy.json
 Thumbs.db 
 cache/
 debug_outputs/
+
+# Serena (AI coding assistant) configuration
+.serena/
