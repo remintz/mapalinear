@@ -120,6 +120,7 @@ class ProviderSettings(BaseSettings):
         "env_file_encoding": "utf-8",
         "case_sensitive": False,
         "env_prefix": "",
+        "extra": "ignore",  # Allow extra fields from .env but ignore them
     }
     
     def get_provider_rate_limit(self, provider: str) -> float:
