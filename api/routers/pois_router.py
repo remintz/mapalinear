@@ -153,7 +153,8 @@ async def search_pois(
         
         # Ordenar resultados
         if sort_by == SortBy.DISTANCE:
-            pois.sort(key=lambda p: p.distance_from_road_meters)
+            # Ordenar por distância do centro de busca (distance_from_origin_km)
+            pois.sort(key=lambda p: p.distance_from_origin_km)
         elif sort_by == SortBy.NAME:
             pois.sort(key=lambda p: p.name.lower())
         elif sort_by == SortBy.QUALITY:

@@ -16,6 +16,7 @@ from api.models.road_models import (
 )
 from api.services.osm_service import OSMService
 from api.models.osm_models import Coordinates
+from api.providers.base import GeoProvider
 
 # Configuração do logging
 def setup_logging():
@@ -58,7 +59,15 @@ def setup_logging():
 logger = setup_logging()
 
 class RoadService:
-    def __init__(self):
+    def __init__(self, geo_provider: Optional[GeoProvider] = None):
+        """Initialize RoadService with a geographic data provider."""
+        if geo_provider is None:
+            # Use the default provider from the manager
+            from ..providers import create_provider
+            geo_provider = create_provider()
+        
+        self.geo_provider = geo_provider
+        # Keep the old osm_service for backward compatibility during transition
         self.osm_service = OSMService()
     
     def _save_debug_info(self, osm_response, linear_segments, all_milestones):
@@ -548,12 +557,17 @@ class RoadService:
             segment_length_km
         )
         
+        # Step 3.1: Sort milestones by distance from origin to ensure proper ordering
+        all_milestones.sort(key=lambda m: m.distance_from_origin_km)
+        
         # Step 4: Assign milestones to segments
         for segment in linear_segments:
             segment.milestones = [
                 milestone for milestone in all_milestones
                 if segment.start_distance_km <= milestone.distance_from_origin_km <= segment.end_distance_km
             ]
+            # Ensure milestones within each segment are also sorted by distance
+            segment.milestones.sort(key=lambda m: m.distance_from_origin_km)
         
         # Save debug information
         debug_file = self._save_debug_info(osm_response, linear_segments, all_milestones)
@@ -1060,3 +1074,88 @@ class RoadService:
             "pois_with_hours": len([m for m in milestones if m.opening_hours]),
             "pois_with_website": len([m for m in milestones if m.website])
         }
+
+    async def geocode_location_async(self, address: str) -> Optional[Tuple[float, float]]:
+        """
+        Geocode a location using the configured provider.
+        
+        Args:
+            address: Address string to geocode
+            
+        Returns:
+            Tuple of (latitude, longitude) or None if not found
+        """
+        try:
+            location = await self.geo_provider.geocode(address)
+            if location:
+                return (location.latitude, location.longitude)
+            return None
+        except Exception as e:
+            logger.error(f"Error geocoding '{address}': {e}")
+            return None
+    
+    async def search_pois_async(
+        self, 
+        location: Tuple[float, float], 
+        radius: float, 
+        categories: List[str]
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for POIs using the configured provider.
+        
+        Args:
+            location: (latitude, longitude) tuple
+            radius: Search radius in meters
+            categories: List of POI categories to search for
+            
+        Returns:
+            List of POI dictionaries
+        """
+        try:
+            from ..providers.models import GeoLocation, POICategory
+            
+            # Convert location to GeoLocation
+            geo_location = GeoLocation(latitude=location[0], longitude=location[1])
+            
+            # Convert category strings to POICategory enums
+            poi_categories = []
+            for category in categories:
+                try:
+                    poi_categories.append(POICategory(category))
+                except ValueError:
+                    # Skip unknown categories
+                    logger.warning(f"Unknown POI category: {category}")
+                    continue
+            
+            if not poi_categories:
+                return []
+            
+            # Search using the provider
+            pois = await self.geo_provider.search_pois(
+                location=geo_location,
+                radius=radius,
+                categories=poi_categories
+            )
+            
+            # Convert POIs back to dictionaries for compatibility
+            result = []
+            for poi in pois:
+                result.append({
+                    'id': poi.id,
+                    'name': poi.name,
+                    'lat': poi.location.latitude,
+                    'lon': poi.location.longitude,
+                    'category': poi.category.value,
+                    'amenities': poi.amenities,
+                    'rating': poi.rating,
+                    'is_open': poi.is_open,
+                    'phone': poi.phone,
+                    'website': poi.website,
+                    'tags': poi.provider_data.get('osm_tags', {})
+                })
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error searching POIs: {e}")
+            return []
