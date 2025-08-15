@@ -11,7 +11,7 @@ from api.utils.export_utils import (
     export_to_geojson,
     export_to_gpx,
     export_umap_url,
-    export_to_overpass_turbo_url
+    export_to_overpass_turbo_url,
 )
 
 router = APIRouter(prefix="/export", tags=["Export"])
@@ -19,9 +19,14 @@ router = APIRouter(prefix="/export", tags=["Export"])
 
 def create_linear_map_from_export_data(export_data: ExportRouteData):
     """Cria um objeto compatível com LinearMapResponse a partir dos dados de exportação."""
-    from api.models.road_models import LinearMapResponse, LinearRoadSegment, RoadMilestone, MilestoneType
+    from api.models.road_models import (
+        LinearMapResponse,
+        LinearRoadSegment,
+        RoadMilestone,
+        MilestoneType,
+    )
     from api.models.osm_models import Coordinates
-    
+
     # Converter POIs para milestones
     milestones = []
     for poi in export_data.pois:
@@ -35,7 +40,7 @@ def create_linear_map_from_export_data(export_data: ExportRouteData):
             milestone_type = MilestoneType.TOLL_BOOTH
         elif poi.type in ["city", "town", "village"]:
             milestone_type = MilestoneType.CITY
-        
+
         milestone = RoadMilestone(
             id=poi.id,
             name=poi.name,
@@ -47,10 +52,10 @@ def create_linear_map_from_export_data(export_data: ExportRouteData):
             tags={},
             operator=poi.operator,
             brand=poi.brand,
-            opening_hours=poi.opening_hours
+            opening_hours=poi.opening_hours,
         )
         milestones.append(milestone)
-    
+
     # Converter segmentos
     segments = []
     for i, seg in enumerate(export_data.segments):
@@ -60,13 +65,13 @@ def create_linear_map_from_export_data(export_data: ExportRouteData):
             name=seg.name or f"Segmento {i+1}",
             ref=None,
             start_distance_km=sum(s.length_km for s in export_data.segments[:i]),
-            end_distance_km=sum(s.length_km for s in export_data.segments[:i+1]),
+            end_distance_km=sum(s.length_km for s in export_data.segments[: i + 1]),
             length_km=seg.length_km,
             geometry=geometry,
-            milestones=[]
+            milestones=[],
         )
         segments.append(segment)
-    
+
     return LinearMapResponse(
         id="export-temp",
         origin=export_data.origin,
@@ -75,7 +80,7 @@ def create_linear_map_from_export_data(export_data: ExportRouteData):
         segments=segments,
         milestones=milestones,
         creation_date=datetime.now(),
-        osm_road_id="export-temp"
+        osm_road_id="export-temp",
     )
 
 
@@ -89,7 +94,9 @@ async def export_route_geojson(route_data: ExportRouteData):
         geojson_data = export_to_geojson(linear_map_data)
         return JSONResponse(content=geojson_data)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao exportar GeoJSON: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Erro ao exportar GeoJSON: {str(e)}"
+        )
 
 
 @router.post("/gpx")
@@ -98,18 +105,42 @@ async def export_route_gpx(route_data: ExportRouteData):
     Exporta rota e POIs para formato GPX.
     """
     try:
+        import re
+        import unicodedata
+
+        def sanitize_filename(text: str) -> str:
+            """
+            Sanitiza um texto para ser usado como nome de arquivo.
+            Remove ou substitui caracteres problemáticos.
+            """
+            # Normaliza unicode e remove acentos
+            text = unicodedata.normalize("NFD", text)
+            text = "".join(c for c in text if unicodedata.category(c) != "Mn")
+
+            # Remove caracteres especiais e substitui espaços por underscore
+            text = re.sub(r"[^\w\s-]", "", text).strip()
+            text = re.sub(r"[-\s]+", "_", text)
+
+            return text
+
         linear_map_data = create_linear_map_from_export_data(route_data)
         gpx_content = export_to_gpx(linear_map_data)
-        
-        filename = f"rota_{route_data.origin.replace(' ', '_')}_{route_data.destination.replace(' ', '_')}.gpx"
-        
+
+        # Gera filename sanitizado
+        origin_clean = sanitize_filename(route_data.origin)
+        destination_clean = sanitize_filename(route_data.destination)
+        filename = f"rota_{origin_clean}_{destination_clean}.gpx"
+
+        # Cria filename para o header Content-Disposition com encoding adequado
+        filename_encoded = filename.encode("ascii", "ignore").decode("ascii")
+
         return Response(
             content=f'<?xml version="1.0" encoding="UTF-8"?>\n{gpx_content}',
             media_type="application/gpx+xml",
             headers={
-                "Content-Disposition": f"attachment; filename={filename}",
-                "Content-Type": "application/gpx+xml"
-            }
+                "Content-Disposition": f'attachment; filename="{filename_encoded}"',
+                "Content-Type": "application/gpx+xml",
+            },
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao exportar GPX: {str(e)}")
@@ -130,8 +161,8 @@ async def get_web_visualization_urls(route_data: ExportRouteData):
             "instructions": {
                 "umap": "1. Clique no link do uMap\n2. Crie um novo mapa\n3. Clique em 'Importar dados'\n4. Carregue o arquivo GeoJSON baixado",
                 "overpass_turbo": "Visualize POIs existentes na região da rota para validação",
-                "gpx_tools": "Baixe o arquivo GPX e carregue em map.project-osrm.org ou outros visualizadores GPS"
-            }
+                "gpx_tools": "Baixe o arquivo GPX e carregue em map.project-osrm.org ou outros visualizadores GPS",
+            },
         }
         return JSONResponse(content=urls)
     except Exception as e:
