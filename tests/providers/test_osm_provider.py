@@ -232,7 +232,9 @@ class TestOSMProviderPOISearch:
                     'tags': {
                         'amenity': 'restaurant',
                         'cuisine': 'brazilian',
-                        'name': 'Restaurante Família'
+                        'name': 'Restaurante Família',
+                        'phone': '+55 11 1234-5678',
+                        'opening_hours': 'Mo-Su 11:00-23:00'
                     }
                 }
             ]
@@ -391,12 +393,13 @@ class TestOSMProviderInternalMethods:
                 'opening_hours': '24/7'
             }
         }
-        
+
         poi = osm_provider._parse_osm_element_to_poi(osm_element)
-        
+
         assert poi.id == "node/123456"
         assert poi.name == "Posto Shell Centro"
         assert poi.category == POICategory.GAS_STATION
         assert poi.location.latitude == -23.5505
         assert poi.location.longitude == -46.6333
-        assert 'Horário: 24/7' in poi.amenities
+        # Check for the new format '24h' instead of 'Horário: 24/7'
+        assert '24h' in poi.amenities
