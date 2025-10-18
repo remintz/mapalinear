@@ -27,6 +27,133 @@ class RoadService:
             geo_provider = create_provider()
         
         self.geo_provider = geo_provider
+
+    # ========================================================================
+    # UTILITY METHODS
+    # ========================================================================
+    
+    def _run_async_safe(self, coro):
+        """
+        Execute async coroutine safely, handling both running and non-running event loops.
+        
+        This helper allows calling async provider methods from sync contexts.
+        """
+        import asyncio
+        import concurrent.futures
+        
+        try:
+            # Try to get current event loop
+            loop = asyncio.get_running_loop()
+            # If there's a loop running, create a new task in thread pool
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(asyncio.run, coro)
+                return future.result()
+        except RuntimeError:
+            # No loop running, can use asyncio.run directly
+            return asyncio.run(coro)
+    
+    def _extract_city_name(self, location_string: str) -> str:
+        """
+        Extract city name from location string.
+        
+        Args:
+            location_string: Location in format "City, State" (e.g., "Belo Horizonte, MG")
+            
+        Returns:
+            City name (e.g., "Belo Horizonte")
+        """
+        return location_string.split(',')[0].strip() if ',' in location_string else location_string.strip()
+    
+    def _geocode_and_validate(self, address: str, address_type: str = "location") -> GeoLocation:
+        """
+        Geocode an address and validate the result.
+        
+        Args:
+            address: Address string to geocode
+            address_type: Type of address for error messages ("origin", "destination", etc.)
+            
+        Returns:
+            GeoLocation object
+            
+        Raises:
+            ValueError: If geocoding fails
+        """
+        logger.info(f"🛣️ Geocodificando {address_type}: {address}")
+        location = self._run_async_safe(self.geo_provider.geocode(address))
+        
+        if not location:
+            raise ValueError(f"Could not geocode {address_type}: {address}")
+        
+        logger.info(f"🛣️ {address_type.capitalize()}: {address} → "
+                   f"lat={location.latitude:.6f}, lon={location.longitude:.6f}")
+        
+        return location
+    
+    def _log_route_info(self, route: Route):
+        """Log detailed route information."""
+        logger.info(f"🛣️ Rota calculada:")
+        logger.info(f"🛣️ - Distância total: {route.total_distance:.1f} km")
+        logger.info(f"🛣️ - Nomes das estradas: {route.road_names}")
+        logger.info(f"🛣️ - Pontos na geometria: {len(route.geometry)}")
+        
+        if route.geometry:
+            logger.info(f"🛣️ - Primeiro ponto: lat={route.geometry[0][0]:.6f}, "
+                       f"lon={route.geometry[0][1]:.6f}")
+            logger.info(f"🛣️ - Último ponto: lat={route.geometry[-1][0]:.6f}, "
+                       f"lon={route.geometry[-1][1]:.6f}")
+    
+    def _build_milestone_categories(
+        self,
+        include_cities: bool,
+        include_gas_stations: bool,
+        include_food: bool,
+        include_toll_booths: bool
+    ) -> List[POICategory]:
+        """
+        Build list of milestone categories based on user preferences.
+        
+        Returns:
+            List of POICategory enums
+        """
+        categories = []
+        
+        if include_cities:
+            categories.extend([POICategory.SERVICES])
+        if include_gas_stations:
+            categories.extend([POICategory.GAS_STATION, POICategory.FUEL])
+        if include_food:
+            categories.extend([POICategory.RESTAURANT, POICategory.FOOD])
+        if include_toll_booths:
+            categories.extend([POICategory.SERVICES])
+        
+        return categories
+    
+    def _assign_milestones_to_segments(
+        self,
+        segments: List[LinearRoadSegment],
+        milestones: List[RoadMilestone]
+    ):
+        """
+        Assign milestones to their respective segments based on distance.
+        
+        Modifies segments in-place.
+        """
+        for segment in segments:
+            segment.milestones = [
+                milestone for milestone in milestones
+                if segment.start_distance_km <= milestone.distance_from_origin_km <= segment.end_distance_km
+            ]
+            segment.milestones.sort(key=lambda m: m.distance_from_origin_km)
+    
+    def _log_milestone_statistics(self, milestones: List[RoadMilestone]):
+        """Log statistics about found milestones."""
+        milestones_with_city = len([m for m in milestones if m.city])
+        logger.info(f"🏙️ Milestones com cidade: {milestones_with_city}/{len(milestones)}")
+        
+        for milestone in milestones:
+            city_info = f" ({milestone.city})" if milestone.city else ""
+            logger.info(f"🎯 Milestone: {milestone.name}{city_info} "
+                       f"({milestone.type.value}) - dist={milestone.distance_from_origin_km:.1f}km")
     
 
 
@@ -40,99 +167,71 @@ class RoadService:
         include_gas_stations: bool = True,
         include_food: bool = False,
         include_toll_booths: bool = True,
-        max_distance_from_road: float = 3000,  # Aumentado de 1000 para 3000 metros
-        min_distance_from_origin_km: float = 0.0,  # Não mais necessário - filtramos por cidade
+        max_distance_from_road: float = 3000,
+        min_distance_from_origin_km: float = 0.0,  # Deprecated - kept for backwards compatibility
         progress_callback: Optional[Callable[[float], None]] = None,
         segment_length_km: float = 1.0
     ) -> LinearMapResponse:
         """
-        Gera um mapa linear de uma estrada entre os pontos de origem e destino.
+        Generate a linear map of a route between origin and destination.
+        
+        This method:
+        1. Geocodes origin and destination
+        2. Calculates the route
+        3. Processes route into linear segments
+        4. Finds POI milestones along the route
+        5. Assigns milestones to segments
+        
+        Args:
+            min_distance_from_origin_km: DEPRECATED - No longer used. POIs are filtered by city name instead.
+        
+        Returns:
+            LinearMapResponse with segments and milestones
         """
         logger.info(f"🛣️ Iniciando geração de mapa linear: {origin} → {destination}")
         
-        # Extract origin city name from the origin string (e.g., "Belo Horizonte, MG" → "Belo Horizonte")
-        origin_city = origin.split(',')[0].strip() if ',' in origin else origin.strip()
+        # Extract origin city for POI filtering
+        origin_city = self._extract_city_name(origin)
         logger.info(f"🏙️ Cidade de origem extraída: {origin_city}")
         
         # Step 1: Geocode origin and destination
-        import asyncio
-        
-        def run_async_safe(coro):
-            try:
-                # Tenta obter o loop atual
-                loop = asyncio.get_running_loop()
-                # Se há um loop rodando, cria uma nova task
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, coro)
-                    return future.result()
-            except RuntimeError:
-                # Não há loop rodando, pode usar asyncio.run
-                return asyncio.run(coro)
-        
-        logger.info(f"🛣️ Geocodificando origem: {origin}")
-        origin_location = run_async_safe(self.geo_provider.geocode(origin))
-        if not origin_location:
-            raise ValueError(f"Could not geocode origin: {origin}")
-        logger.info(f"🛣️ Origem: {origin} → lat={origin_location.latitude:.6f}, lon={origin_location.longitude:.6f}")
-
-        logger.info(f"🛣️ Geocodificando destino: {destination}")
-        destination_location = run_async_safe(self.geo_provider.geocode(destination))
-        if not destination_location:
-            raise ValueError(f"Could not geocode destination: {destination}")
-        logger.info(f"🛣️ Destino: {destination} → lat={destination_location.latitude:.6f}, lon={destination_location.longitude:.6f}")
+        origin_location = self._geocode_and_validate(origin, "origem")
+        destination_location = self._geocode_and_validate(destination, "destino")
         
         # Step 2: Calculate route
         logger.info(f"🛣️ Calculando rota entre os pontos...")
-        route = run_async_safe(self.geo_provider.calculate_route(origin_location, destination_location))
+        route = self._run_async_safe(
+            self.geo_provider.calculate_route(origin_location, destination_location)
+        )
+        
         if not route:
             raise ValueError(f"Could not calculate route from {origin} to {destination}")
         
-        logger.info(f"🛣️ Rota calculada:")
-        logger.info(f"🛣️ - Distância total: {route.total_distance:.1f} km")
-        logger.info(f"🛣️ - Nomes das estradas: {route.road_names}")
-        logger.info(f"🛣️ - Pontos na geometria: {len(route.geometry)}")
-        if route.geometry:
-            logger.info(f"🛣️ - Primeiro ponto: lat={route.geometry[0][0]:.6f}, lon={route.geometry[0][1]:.6f}")
-            logger.info(f"🛣️ - Último ponto: lat={route.geometry[-1][0]:.6f}, lon={route.geometry[-1][1]:.6f}")
+        self._log_route_info(route)
         
         # Step 3: Process route into linear segments
         linear_segments = self._process_route_into_segments(route, segment_length_km)
         
         # Step 4: Find milestones along the route
-        milestone_categories = []
-        if include_cities:
-            milestone_categories.extend([POICategory.SERVICES])  # Cities/towns as services
-        if include_gas_stations:
-            milestone_categories.extend([POICategory.GAS_STATION, POICategory.FUEL])
-        if include_food:
-            milestone_categories.extend([POICategory.RESTAURANT, POICategory.FOOD])
-        if include_toll_booths:
-            milestone_categories.extend([POICategory.SERVICES])  # Toll booths as services
+        milestone_categories = self._build_milestone_categories(
+            include_cities, include_gas_stations, include_food, include_toll_booths
+        )
         
-        logger.info(f"🛣️ Categorias de milestone solicitadas: {[cat.value for cat in milestone_categories]}")
+        logger.info(f"🛣️ Categorias de milestone solicitadas: "
+                   f"{[cat.value for cat in milestone_categories]}")
 
-        # Não usamos mais min_distance_from_origin_km pois filtramos por cidade
-        all_milestones = run_async_safe(self._find_milestones_from_segments(
+        all_milestones = self._run_async_safe(self._find_milestones_from_segments(
             linear_segments,
             milestone_categories,
             max_distance_from_road,
-            min_distance_from_origin_km=0.0,  # Removido filtro de distância - filtramos por cidade
-            exclude_cities=[origin_city]  # Use cidade extraída do parâmetro origin
+            exclude_cities=[origin_city]
         ))
         
-        # Step 5: Sort milestones by distance from origin
+        # Step 5: Sort and assign milestones to segments
         all_milestones.sort(key=lambda m: m.distance_from_origin_km)
+        self._assign_milestones_to_segments(linear_segments, all_milestones)
         
-        # Step 6: Assign milestones to segments
-        for segment in linear_segments:
-            segment.milestones = [
-                milestone for milestone in all_milestones
-                if segment.start_distance_km <= milestone.distance_from_origin_km <= segment.end_distance_km
-            ]
-            segment.milestones.sort(key=lambda m: m.distance_from_origin_km)
-        
-        # Create linear map response
+        # Create response
         linear_map = LinearMapResponse(
             origin=origin,
             destination=destination,
@@ -142,10 +241,10 @@ class RoadService:
             road_id=road_id or f"route_{hash(origin + destination)}"
         )
         
-        # Log city statistics
-        milestones_with_city = len([m for m in all_milestones if m.city])
-        logger.info(f"🛣️ Mapa linear concluído: {len(linear_segments)} segmentos, {len(all_milestones)} milestones")
-        logger.info(f"🏙️ Milestones com cidade: {milestones_with_city}/{len(all_milestones)}")
+        # Log final statistics
+        logger.info(f"🛣️ Mapa linear concluído: {len(linear_segments)} segmentos, "
+                   f"{len(all_milestones)} milestones")
+        self._log_milestone_statistics(all_milestones)
 
         return linear_map
 
@@ -227,41 +326,23 @@ class RoadService:
         
         return (lat, lon)
 
-    async def _find_milestones_from_segments(
+    # ========================================================================
+    # POI/MILESTONE HELPER METHODS
+    # ========================================================================
+    
+    def _extract_search_points_from_segments(
         self,
-        segments: List[LinearRoadSegment],
-        categories: List[POICategory],
-        max_distance_from_road: float,
-        min_distance_from_origin_km: float,
-        exclude_cities: Optional[List[Optional[str]]] = None
-    ) -> List[RoadMilestone]:
+        segments: List[LinearRoadSegment]
+    ) -> List[Tuple[Tuple[float, float], float]]:
         """
-        Find milestones (POIs) along the route using segment start/end points.
+        Extract search points from segment start/end coordinates.
         
-        This method searches for POIs around the start and end coordinates of each 1km segment,
-        eliminating the need for arbitrary 5km sampling.
+        Returns:
+            List of tuples: ((lat, lon), distance_from_origin)
         """
-        logger.info(f"🔍 Iniciando busca de milestones usando {len(segments)} segmentos de 1km")
-        logger.info(f"🔍 Categorias: {[cat.value for cat in categories]}")
-        logger.info(f"🔍 Parâmetros: max_distance={max_distance_from_road}m, min_distance={min_distance_from_origin_km}km")
-
-        # Filter out None values from exclude_cities and normalize
-        exclude_cities_filtered = [city.strip().lower() for city in (exclude_cities or []) if city]
-        if exclude_cities_filtered:
-            logger.info(f"🚫 Cidades a excluir: {exclude_cities_filtered}")
-
-        milestones = []
-        total_errors = 0
-        total_requests = 0
-        consecutive_errors = 0
-        
-        # Extract search points from segment start/end coordinates
         search_points = []
+        
         for segment in segments:
-            # Skip segments before minimum distance
-            if segment.start_distance_km < min_distance_from_origin_km:
-                continue
-            
             # Add segment start point
             if segment.start_coordinates:
                 search_points.append((
@@ -269,8 +350,7 @@ class RoadService:
                     segment.start_distance_km
                 ))
             
-            # Add segment end point (avoid duplicates with next segment start)
-            # Only add end point if it's the last segment or to ensure coverage
+            # Add segment end point (only for last segment to avoid duplicates)
             if segment.end_coordinates and segment == segments[-1]:
                 search_points.append((
                     (segment.end_coordinates.latitude, segment.end_coordinates.longitude),
@@ -278,9 +358,184 @@ class RoadService:
                 ))
         
         logger.info(f"🔍 Gerados {len(search_points)} pontos de busca a partir dos segmentos")
+        return search_points
+    
+    def _create_milestone_from_poi(
+        self,
+        poi: POI,
+        distance_from_origin: float,
+        route_point: Tuple[float, float]
+    ) -> RoadMilestone:
+        """
+        Create a RoadMilestone from a POI object.
+        
+        Args:
+            poi: POI object from provider
+            distance_from_origin: Distance from route origin in km
+            route_point: (lat, lon) of the route point near this POI
+            
+        Returns:
+            RoadMilestone object
+        """
+        milestone_type = self._poi_category_to_milestone_type(poi.category)
+        
+        # Calculate distance from POI to route point
+        distance_from_road = self._calculate_distance_meters(
+            poi.location.latitude, poi.location.longitude,
+            route_point[0], route_point[1]
+        )
+        
+        # Extract city from POI tags (quick, no API call)
+        city = None
+        if poi.provider_data:
+            city = (poi.provider_data.get('addr:city') or
+                   poi.provider_data.get('address:city') or
+                   poi.provider_data.get('addr:municipality'))
+            if city:
+                logger.debug(f"🏙️ POI {poi.name}: cidade '{city}' extraída das tags OSM")
+        
+        return RoadMilestone(
+            id=poi.id,
+            name=poi.name,
+            type=milestone_type,
+            coordinates=Coordinates(
+                latitude=poi.location.latitude,
+                longitude=poi.location.longitude
+            ),
+            distance_from_origin_km=distance_from_origin,
+            distance_from_road_meters=distance_from_road,
+            side="center",
+            tags=poi.provider_data,
+            city=city,
+            operator=poi.subcategory,
+            brand=poi.subcategory,
+            opening_hours=self._format_opening_hours(poi.opening_hours),
+            phone=poi.phone,
+            website=poi.website,
+            amenities=poi.amenities,
+            quality_score=poi.rating
+        )
+    
+    async def _enrich_milestones_with_cities(self, milestones: List[RoadMilestone]):
+        """
+        Enrich milestones with city information via reverse geocoding.
+        
+        Only geocodes milestones that don't already have city information.
+        Modifies milestones in-place.
+        """
+        milestones_without_city = [m for m in milestones if not m.city]
+        logger.info(f"🌍 Fazendo reverse geocoding para obter cidades...")
+        logger.info(f"🌍 {len(milestones_without_city)} POIs precisam de reverse geocoding")
+        
+        for milestone in milestones_without_city:
+            try:
+                reverse_loc = await self.geo_provider.reverse_geocode(
+                    milestone.coordinates.latitude,
+                    milestone.coordinates.longitude
+                )
+                if reverse_loc and reverse_loc.city:
+                    milestone.city = reverse_loc.city
+                    logger.debug(f"🌍 {milestone.name}: {reverse_loc.city}")
+            except Exception as e:
+                logger.debug(f"Could not reverse geocode {milestone.name}: {e}")
+        
+        cities_found = len([m for m in milestones if m.city])
+        logger.info(f"🌍 Reverse geocoding concluído: "
+                   f"{cities_found}/{len(milestones)} POIs com cidade identificada")
+    
+    def _filter_excluded_cities(
+        self,
+        milestones: List[RoadMilestone],
+        exclude_cities_filtered: List[str]
+    ) -> List[RoadMilestone]:
+        """
+        Filter out milestones in excluded cities.
+        
+        Args:
+            milestones: List of milestones to filter
+            exclude_cities_filtered: List of normalized city names to exclude
+            
+        Returns:
+            Filtered list of milestones
+        """
+        if not exclude_cities_filtered:
+            return milestones
+        
+        milestones_before_filter = len(milestones)
+        
+        # Debug: log cities found in milestones
+        milestone_cities = set([m.city for m in milestones if m.city])
+        logger.debug(f"🏙️ Cidades únicas encontradas nos POIs: {milestone_cities}")
+        logger.debug(f"🚫 Cidade(s) a filtrar: {exclude_cities_filtered}")
+        
+        # Show some examples before filtering
+        examples_to_filter = [
+            m for m in milestones
+            if m.city and m.city.strip().lower() in exclude_cities_filtered
+        ][:3]
+        
+        if examples_to_filter:
+            logger.debug(f"📝 Exemplos de POIs que serão filtrados:")
+            for m in examples_to_filter:
+                logger.debug(f"   - {m.name} em {m.city}")
+        
+        # Filter
+        filtered_milestones = [
+            m for m in milestones
+            if not m.city or m.city.strip().lower() not in exclude_cities_filtered
+        ]
+        
+        filtered_count = milestones_before_filter - len(filtered_milestones)
+        if filtered_count > 0:
+            logger.info(f"🚫 Removidos {filtered_count} POIs da cidade de origem: "
+                       f"{exclude_cities_filtered}")
+        else:
+            logger.warning(f"⚠️ Nenhum POI foi filtrado. "
+                          f"Cidade de origem '{exclude_cities_filtered}' não encontrada nos POIs")
+        
+        return filtered_milestones
+
+    async def _find_milestones_from_segments(
+        self,
+        segments: List[LinearRoadSegment],
+        categories: List[POICategory],
+        max_distance_from_road: float,
+        exclude_cities: Optional[List[Optional[str]]] = None
+    ) -> List[RoadMilestone]:
+        """
+        Find POI milestones along the route using segment start/end points.
+        
+        This method:
+        1. Extracts search points from segments
+        2. Searches for POIs around each point
+        3. Converts POIs to milestones
+        4. Enriches with city information
+        5. Filters excluded cities
+        
+        Returns:
+            List of RoadMilestone objects
+        """
+        logger.info(f"🔍 Iniciando busca de milestones usando {len(segments)} segmentos")
+        logger.info(f"🔍 Categorias: {[cat.value for cat in categories]}")
+        logger.info(f"🔍 Parâmetros: max_distance={max_distance_from_road}m")
+        
+        # Normalize excluded cities
+        exclude_cities_filtered = [city.strip().lower() for city in (exclude_cities or []) if city]
+        if exclude_cities_filtered:
+            logger.info(f"🚫 Cidades a excluir: {exclude_cities_filtered}")
+        
+        # Extract search points from segments
+        search_points = self._extract_search_points_from_segments(segments)
+        
+        # Search for POIs and convert to milestones
+        milestones = []
+        total_errors = 0
+        total_requests = 0
+        consecutive_errors = 0
         
         for i, (point, distance_from_origin) in enumerate(search_points):
-            logger.debug(f"🔍 Ponto {i}: lat={point[0]:.6f}, lon={point[1]:.6f}, dist={distance_from_origin:.1f}km")
+            logger.debug(f"🔍 Ponto {i}: lat={point[0]:.6f}, lon={point[1]:.6f}, "
+                        f"dist={distance_from_origin:.1f}km")
             total_requests += 1
             
             try:
@@ -293,80 +548,39 @@ class RoadService:
                 )
                 
                 logger.info(f"📍 Ponto {i}: {len(pois)} POIs encontrados")
-                
-                # Reset consecutive error counter on success
-                consecutive_errors = 0
+                consecutive_errors = 0  # Reset on success
                 
                 # Convert POIs to milestones
                 converted_count = 0
                 for j, poi in enumerate(pois):
                     try:
-                        # Log POI details for debugging
-                        logger.debug(f"🔍 POI {j}: nome='{poi.name}', categoria='{poi.category}', tipo={type(poi.category)}")
-                        logger.debug(f"🔍 POI {j}: lat={poi.location.latitude:.6f}, lon={poi.location.longitude:.6f}")
-                        
-                        # Check category type
-                        if not isinstance(poi.category, POICategory):
-                            logger.error(f"🔍 POI {j}: categoria não é POICategory! Valor: {poi.category}, tipo: {type(poi.category)}")
-                            continue
-                        
-                        # Check if we already have a milestone for this POI (avoid duplicates)
+                        # Skip if already exists (avoid duplicates)
                         if any(m.id == poi.id for m in milestones):
-                            logger.debug(f"🔍 POI {poi.name} já existe como milestone, ignorando")
+                            logger.debug(f"🔍 POI {poi.name} já existe, ignorando")
                             continue
                         
-                        milestone_type = self._poi_category_to_milestone_type(poi.category)
+                        # Validate POI category
+                        if not isinstance(poi.category, POICategory):
+                            logger.error(f"🔍 POI {j}: categoria inválida! "
+                                       f"Valor: {poi.category}, tipo: {type(poi.category)}")
+                            continue
                         
-                        # Calculate distance from POI to current route point
-                        distance_from_road = self._calculate_distance_meters(
-                            poi.location.latitude, poi.location.longitude,
-                            point[0], point[1]
-                        )
-
-                        # Extract city from POI tags (quick, no API call)
-                        city = None
-                        if poi.provider_data:
-                            city = (poi.provider_data.get('addr:city') or
-                                   poi.provider_data.get('address:city') or
-                                   poi.provider_data.get('addr:municipality'))
-                            if city:
-                                logger.debug(f"🏙️ POI {poi.name}: cidade '{city}' extraída das tags OSM")
-
-                        milestone = RoadMilestone(
-                            id=poi.id,
-                            name=poi.name,
-                            type=milestone_type,
-                            coordinates=Coordinates(
-                                latitude=poi.location.latitude,
-                                longitude=poi.location.longitude
-                            ),
-                            distance_from_origin_km=distance_from_origin,
-                            distance_from_road_meters=distance_from_road,
-                            side="center",  # Default side
-                            tags=poi.provider_data,
-                            city=city,
-                            operator=poi.subcategory,
-                            brand=poi.subcategory,
-                            opening_hours=self._format_opening_hours(poi.opening_hours),
-                            phone=poi.phone,
-                            website=poi.website,
-                            amenities=poi.amenities,
-                            quality_score=poi.rating
-                        )
-                        
+                        # Create milestone
+                        milestone = self._create_milestone_from_poi(poi, distance_from_origin, point)
                         milestones.append(milestone)
                         converted_count += 1
                         logger.debug(f"✅ {milestone.name} ({milestone.type.value})")
                         
                     except Exception as e:
                         logger.error(f"🔍 Erro convertendo POI {j}: {e}")
-                        logger.error(f"🔍 POI detalhes: nome={getattr(poi, 'name', 'N/A')}, categoria={getattr(poi, 'category', 'N/A')}")
+                        logger.error(f"🔍 POI detalhes: nome={getattr(poi, 'name', 'N/A')}, "
+                                   f"categoria={getattr(poi, 'category', 'N/A')}")
                         import traceback
                         logger.error(f"🔍 Traceback: {traceback.format_exc()}")
                         continue
-                        
+                
                 logger.info(f"📍 Ponto {i}: {converted_count} milestones criados")
-                    
+                
             except Exception as e:
                 total_errors += 1
                 consecutive_errors += 1
@@ -374,14 +588,22 @@ class RoadService:
                 
                 # Fail fast criteria
                 if consecutive_errors >= 5:
-                    logger.error(f"Too many consecutive POI search failures ({consecutive_errors}). All endpoints may be down.")
-                    raise RuntimeError(f"POI search failed: {consecutive_errors} consecutive failures. All Overpass endpoints may be unavailable. Last error: {e}")
+                    logger.error(f"Too many consecutive POI search failures ({consecutive_errors}). "
+                               f"All endpoints may be down.")
+                    raise RuntimeError(
+                        f"POI search failed: {consecutive_errors} consecutive failures. "
+                        f"All Overpass endpoints may be unavailable. Last error: {e}"
+                    )
                 
                 if total_requests >= 5:
                     error_rate = total_errors / total_requests
                     if error_rate > 0.9:
-                        logger.error(f"POI search failure rate too high ({error_rate:.1%}). Systemic issue detected.")
-                        raise RuntimeError(f"POI search failed: {error_rate:.1%} of requests failed. Systemic issue detected. Last error: {e}")
+                        logger.error(f"POI search failure rate too high ({error_rate:.1%}). "
+                                   f"Systemic issue detected.")
+                        raise RuntimeError(
+                            f"POI search failed: {error_rate:.1%} of requests failed. "
+                            f"Systemic issue detected. Last error: {e}"
+                        )
                 
                 continue
         
@@ -389,62 +611,22 @@ class RoadService:
         if total_requests > 0:
             error_rate = total_errors / total_requests
             if error_rate > 0:
-                logger.warning(f"POI search completed with {error_rate:.1%} error rate ({total_errors}/{total_requests} failed)")
+                logger.warning(f"POI search completed with {error_rate:.1%} error rate "
+                             f"({total_errors}/{total_requests} failed)")
             if error_rate > 0.5:
                 logger.warning(f"High error rate detected. Consider checking Overpass API status.")
-
+        
         logger.info(f"🎯 RESULTADO FINAL: {len(milestones)} milestones encontrados ao longo da rota")
-
-        # OTIMIZAÇÃO: Fazer reverse geocoding apenas dos POIs finais que serão exibidos
-        logger.info(f"🌍 Fazendo reverse geocoding para obter cidades dos {len(milestones)} POIs finais...")
-        milestones_without_city = [m for m in milestones if not m.city]
-        logger.info(f"🌍 {len(milestones_without_city)} POIs precisam de reverse geocoding")
-
-        for milestone in milestones_without_city:
-            try:
-                reverse_loc = await self.geo_provider.reverse_geocode(
-                    milestone.coordinates.latitude,
-                    milestone.coordinates.longitude
-                )
-                if reverse_loc and reverse_loc.city:
-                    milestone.city = reverse_loc.city
-                    logger.debug(f"🌍 {milestone.name}: {reverse_loc.city}")
-            except Exception as e:
-                logger.debug(f"Could not reverse geocode {milestone.name}: {e}")
-
-        cities_found = len([m for m in milestones if m.city])
-        logger.info(f"🌍 Reverse geocoding concluído: {cities_found}/{len(milestones)} POIs com cidade identificada")
-
-        # Filter out POIs in excluded cities (origin city only)
-        if exclude_cities_filtered:
-            milestones_before_filter = len(milestones)
-
-            # Debug: log cities found in milestones
-            milestone_cities = set([m.city for m in milestones if m.city])
-            logger.debug(f"🏙️ Cidades únicas encontradas nos POIs: {milestone_cities}")
-            logger.debug(f"🚫 Cidade(s) a filtrar: {exclude_cities_filtered}")
-
-            # Show some examples before filtering
-            examples_to_filter = [m for m in milestones if m.city and m.city.strip().lower() in exclude_cities_filtered][:3]
-            if examples_to_filter:
-                logger.debug(f"📝 Exemplos de POIs que serão filtrados:")
-                for m in examples_to_filter:
-                    logger.debug(f"   - {m.name} em {m.city}")
-
-            milestones = [
-                m for m in milestones
-                if not m.city or m.city.strip().lower() not in exclude_cities_filtered
-            ]
-            filtered_count = milestones_before_filter - len(milestones)
-            if filtered_count > 0:
-                logger.info(f"🚫 Removidos {filtered_count} POIs da cidade de origem: {exclude_cities_filtered}")
-            else:
-                logger.warning(f"⚠️ Nenhum POI foi filtrado. Cidade de origem '{exclude_cities_filtered}' não encontrada nos POIs")
-
-        for milestone in milestones:
-            city_info = f" ({milestone.city})" if milestone.city else ""
-            logger.info(f"🎯 Milestone: {milestone.name}{city_info} ({milestone.type.value}) - dist={milestone.distance_from_origin_km:.1f}km")
-
+        
+        # Enrich milestones with cities (reverse geocoding)
+        await self._enrich_milestones_with_cities(milestones)
+        
+        # Filter out POIs in excluded cities
+        milestones = self._filter_excluded_cities(milestones, exclude_cities_filtered)
+        
+        # Log final results
+        self._log_milestone_statistics(milestones)
+        
         return milestones
 
     def _poi_category_to_milestone_type(self, category: POICategory) -> MilestoneType:
