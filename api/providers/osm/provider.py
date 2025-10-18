@@ -211,10 +211,10 @@ class OSMProvider(GeoProvider):
                 logger.warning(f"🗺️ Falha ao calcular rota - route_data vazio")
                 return None
             
-            logger.debug(f"🗺️ Dados da rota obtidos:")
-            logger.debug(f"🗺️ - Distância: {route_data['distance']/1000:.1f} km")
-            logger.debug(f"🗺️ - Duração: {route_data['duration']/60:.1f} min")
-            logger.debug(f"🗺️ - Pontos na geometria: {len(route_data['geometry'])}")
+            logger.info(f"🗺️ Dados da rota obtidos:")
+            logger.info(f"🗺️ - Distância: {route_data['distance']/1000:.1f} km")
+            logger.info(f"🗺️ - Duração: {route_data['duration']/60:.1f} min")
+            logger.info(f"🗺️ - Pontos na geometria: {len(route_data['geometry'])}")
             
             result = Route(
                 origin=origin,
@@ -234,7 +234,6 @@ class OSMProvider(GeoProvider):
                     data=result
                 )
             
-            logger.debug(f"🗺️ Rota criada com sucesso: {result.total_distance:.1f}km")
             return result
             
         except Exception as e:
@@ -249,8 +248,8 @@ class OSMProvider(GeoProvider):
         limit: int = 50
     ) -> List[POI]:
         """Search POIs using Overpass API."""
-        logger.debug(f"🔎 OSM POI Search: lat={location.latitude:.6f}, lon={location.longitude:.6f}, radius={radius}m")
-        logger.debug(f"🔎 Categorias solicitadas: {[cat.value for cat in categories]}")
+        # logger.debug(f"🔎 OSM POI Search: lat={location.latitude:.6f}, lon={location.longitude:.6f}, radius={radius}m")
+        # logger.debug(f"🔎 Categorias solicitadas: {[cat.value for cat in categories]}")
         
         # Check cache first
         cache_key_params = {
@@ -273,18 +272,18 @@ class OSMProvider(GeoProvider):
         
         try:
             query = self._generate_overpass_query(location, radius, categories)
-            logger.debug(f"🔎 Query Overpass gerada:\n{query}")
+            # logger.debug(f"🔎 Query Overpass gerada:\n{query}")
             
             overpass_data = await self._make_overpass_request(query)
             logger.debug(f"🔎 Overpass retornou {len(overpass_data.get('elements', []))} elementos")
             
             pois = []
             for i, element in enumerate(overpass_data.get('elements', [])):
-                logger.debug(f"🔎 Elemento {i}: {element.get('tags', {}).get('name', 'sem nome')} - {element.get('tags', {})}")
+                # logger.debug(f"🔎 Elemento {i}: {element.get('tags', {}).get('name', 'sem nome')} - {element.get('tags', {})}")
                 poi = self._parse_osm_element_to_poi(element)
                 if poi:
                     pois.append(poi)
-                    logger.debug(f"🔎 POI criado: {poi.name} ({poi.category.value})")
+                    # logger.debug(f"🔎 POI criado: {poi.name} ({poi.category.value})")
                     if len(pois) >= limit:
                         break
                 else:
@@ -372,16 +371,12 @@ class OSMProvider(GeoProvider):
             # Try OSRM first for real routing
             osrm_result = await self._calculate_osrm_api_route(origin, destination)
             if osrm_result:
-                logger.info(f"🗺️ Rota calculada via OSRM com sucesso")
                 return osrm_result
             
-            logger.warning(f"🗺️ OSRM falhou, usando fallback para linha reta")
-            
+            logger.warning(f"🗺️ OSRM falhou")
         except Exception as e:
-            logger.warning(f"🗺️ Erro no OSRM: {e}, usando fallback")
-        
-        # Fallback to straight line
-        return await self._calculate_straight_line_route(origin, destination)
+            logger.warning(f"🗺️ Erro no OSRM: {e}")
+        return None
 
     async def _calculate_osrm_api_route(
         self, 
@@ -437,59 +432,6 @@ class OSMProvider(GeoProvider):
             logger.warning(f"🗺️ Erro na requisição OSRM: {e}")
             return None
 
-    async def _calculate_straight_line_route(
-        self, 
-        origin: GeoLocation, 
-        destination: GeoLocation
-    ) -> Optional[dict]:
-        """Fallback: Calculate straight line route."""
-        logger.warning(f"🗺️ ATENÇÃO: Usando roteamento simplificado (linha reta)")
-        logger.warning(f"🗺️ Para produção, implementar roteamento real com OSRM ou GraphHopper")
-        
-        import math
-        
-        # Calculate straight-line distance as approximation
-        lat_diff = destination.latitude - origin.latitude
-        lon_diff = destination.longitude - origin.longitude
-        
-        # Haversine formula for distance
-        R = 6371  # Earth radius in km
-        lat1_rad = math.radians(origin.latitude)
-        lat2_rad = math.radians(destination.latitude)
-        delta_lat = math.radians(lat_diff)
-        delta_lon = math.radians(lon_diff)
-        
-        a = (math.sin(delta_lat/2) * math.sin(delta_lat/2) +
-             math.cos(lat1_rad) * math.cos(lat2_rad) *
-             math.sin(delta_lon/2) * math.sin(delta_lon/2))
-        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-        distance = R * c * 1000  # Convert to meters
-        
-        # Estimate duration (assuming 60 km/h average speed)
-        duration = (distance / 1000) / 60 * 3600  # seconds
-        
-        # Create simplified geometry with more intermediate points to simulate a road
-        logger.info(f"🗺️ Distância em linha reta: {distance/1000:.1f} km")
-        
-        # Create more points along the straight line to increase POI discovery chances
-        num_intermediate_points = max(5, int(distance / 5000))  # Um ponto a cada 5km
-        geometry = []
-        
-        for i in range(num_intermediate_points + 1):
-            ratio = i / num_intermediate_points
-            lat = origin.latitude + (destination.latitude - origin.latitude) * ratio
-            lon = origin.longitude + (destination.longitude - origin.longitude) * ratio
-            geometry.append((lat, lon))
-            logger.debug(f"🗺️ Ponto {i}: lat={lat:.6f}, lon={lon:.6f}")
-        
-        logger.info(f"🗺️ Geometria criada com {len(geometry)} pontos")
-        
-        return {
-            'distance': distance,
-            'duration': duration,
-            'geometry': geometry
-        }
-
     
     def _generate_overpass_query(self, location: GeoLocation, radius: float, categories: List[POICategory]) -> str:
         """Generate Overpass query for POI search."""
@@ -529,7 +471,7 @@ class OSMProvider(GeoProvider):
         query_parts.extend([');', 'out meta;'])
         
         final_query = '\n'.join(query_parts)
-        logger.debug(f"🔧 Query final:\n{final_query}")
+        # logger.debug(f"🔧 Query final:\n{final_query}")
         return final_query
     
     async def _make_overpass_request(self, query: str) -> dict:
@@ -544,7 +486,7 @@ class OSMProvider(GeoProvider):
             
             try:
                 logger.debug(f"Trying Overpass endpoint: {endpoint}")
-                logger.debug(f"🌐 Enviando query para {endpoint}")
+                # logger.debug(f"🌐 Enviando query para {endpoint}")
                 
                 response = await self._http_client.post(
                     endpoint,
@@ -552,23 +494,23 @@ class OSMProvider(GeoProvider):
                     headers={'Content-Type': 'application/x-www-form-urlencoded'}
                 )
                 
-                logger.debug(f"🌐 Response status: {response.status_code}")
+                # logger.debug(f"🌐 Response status: {response.status_code}")
                 response.raise_for_status()
                 
                 result = response.json()
                 logger.info(f"🌐 Overpass response: {len(result.get('elements', []))} elementos retornados")
                 
-                # Log alguns elementos para debug
-                elements = result.get('elements', [])
-                if elements:
-                    logger.debug(f"🌐 Primeiro elemento: {elements[0]}")
-                    if len(elements) > 1:
-                        logger.debug(f"🌐 Segundo elemento: {elements[1]}")
-                else:
-                    logger.warning(f"🌐 ATENÇÃO: Overpass retornou resposta vazia!")
-                    logger.debug(f"🌐 Resposta completa: {result}")
+                # # Log alguns elementos para debug
+                # elements = result.get('elements', [])
+                # if elements:
+                #     logger.debug(f"🌐 Primeiro elemento: {elements[0]}")
+                #     if len(elements) > 1:
+                #         logger.debug(f"🌐 Segundo elemento: {elements[1]}")
+                # else:
+                #     logger.warning(f"🌐 ATENÇÃO: Overpass retornou resposta vazia!")
+                #     logger.debug(f"🌐 Resposta completa: {result}")
                 
-                # Success - log and return
+                # # Success - log and return
                 logger.debug(f"Overpass request successful using {endpoint}")
                 return result
                 
