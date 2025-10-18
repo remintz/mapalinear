@@ -76,9 +76,9 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
           // Validate and sanitize the result data
           // Map API response fields to expected frontend fields
           
-          // Filter milestones to get only POIs (gas stations, restaurants, toll booths)
-          const poiTypes = ['gas_station', 'restaurant', 'toll_booth'];
-          const filteredMilestones = operation.result.milestones?.filter((milestone: any) => 
+          // Filter milestones to get only POIs (gas stations, restaurants, toll booths, etc.)
+          const poiTypes = ['gas_station', 'restaurant', 'fast_food', 'cafe', 'toll_booth', 'hotel', 'rest_area'];
+          const filteredMilestones = operation.result.milestones?.filter((milestone: any) =>
             poiTypes.includes(milestone.type)
           ) || [];
           
@@ -89,10 +89,17 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
             type: milestone.type as POIType, // Map to POIType enum
             coordinates: milestone.coordinates,
             distance_from_origin_km: milestone.distance_from_origin_km,
+            distance_from_road_meters: milestone.distance_from_road_meters,
+            side: milestone.side,
+            city: milestone.city,
             tags: milestone.tags || {},
             operator: milestone.operator,
             brand: milestone.brand,
             opening_hours: milestone.opening_hours,
+            phone: milestone.phone,
+            website: milestone.website,
+            cuisine: milestone.cuisine,
+            amenities: milestone.amenities || [],
             quality_score: milestone.quality_score
           }));
           

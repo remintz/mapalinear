@@ -41,7 +41,7 @@ class RoadService:
         include_food: bool = False,
         include_toll_booths: bool = True,
         max_distance_from_road: float = 3000,  # Aumentado de 1000 para 3000 metros
-        min_distance_from_origin_km: float = 5.0,
+        min_distance_from_origin_km: float = 0.0,  # Não mais necessário - filtramos por cidade
         progress_callback: Optional[Callable[[float], None]] = None,
         segment_length_km: float = 1.0
     ) -> LinearMapResponse:
@@ -49,6 +49,10 @@ class RoadService:
         Gera um mapa linear de uma estrada entre os pontos de origem e destino.
         """
         logger.info(f"🛣️ Iniciando geração de mapa linear: {origin} → {destination}")
+        
+        # Extract origin city name from the origin string (e.g., "Belo Horizonte, MG" → "Belo Horizonte")
+        origin_city = origin.split(',')[0].strip() if ',' in origin else origin.strip()
+        logger.info(f"🏙️ Cidade de origem extraída: {origin_city}")
         
         # Step 1: Geocode origin and destination
         import asyncio
@@ -71,7 +75,7 @@ class RoadService:
         if not origin_location:
             raise ValueError(f"Could not geocode origin: {origin}")
         logger.info(f"🛣️ Origem: {origin} → lat={origin_location.latitude:.6f}, lon={origin_location.longitude:.6f}")
-        
+
         logger.info(f"🛣️ Geocodificando destino: {destination}")
         destination_location = run_async_safe(self.geo_provider.geocode(destination))
         if not destination_location:
@@ -108,11 +112,13 @@ class RoadService:
         
         logger.info(f"🛣️ Categorias de milestone solicitadas: {[cat.value for cat in milestone_categories]}")
 
+        # Não usamos mais min_distance_from_origin_km pois filtramos por cidade
         all_milestones = run_async_safe(self._find_milestones_from_segments(
             linear_segments,
             milestone_categories,
             max_distance_from_road,
-            min_distance_from_origin_km
+            min_distance_from_origin_km=0.0,  # Removido filtro de distância - filtramos por cidade
+            exclude_cities=[origin_city]  # Use cidade extraída do parâmetro origin
         ))
         
         # Step 5: Sort milestones by distance from origin
@@ -136,8 +142,11 @@ class RoadService:
             road_id=road_id or f"route_{hash(origin + destination)}"
         )
         
+        # Log city statistics
+        milestones_with_city = len([m for m in all_milestones if m.city])
         logger.info(f"🛣️ Mapa linear concluído: {len(linear_segments)} segmentos, {len(all_milestones)} milestones")
-        
+        logger.info(f"🏙️ Milestones com cidade: {milestones_with_city}/{len(all_milestones)}")
+
         return linear_map
 
     def _process_route_into_segments(self, route: Route, segment_length_km: float) -> List[LinearRoadSegment]:
@@ -219,11 +228,12 @@ class RoadService:
         return (lat, lon)
 
     async def _find_milestones_from_segments(
-        self, 
-        segments: List[LinearRoadSegment], 
+        self,
+        segments: List[LinearRoadSegment],
         categories: List[POICategory],
         max_distance_from_road: float,
-        min_distance_from_origin_km: float
+        min_distance_from_origin_km: float,
+        exclude_cities: Optional[List[Optional[str]]] = None
     ) -> List[RoadMilestone]:
         """
         Find milestones (POIs) along the route using segment start/end points.
@@ -234,6 +244,11 @@ class RoadService:
         logger.info(f"🔍 Iniciando busca de milestones usando {len(segments)} segmentos de 1km")
         logger.info(f"🔍 Categorias: {[cat.value for cat in categories]}")
         logger.info(f"🔍 Parâmetros: max_distance={max_distance_from_road}m, min_distance={min_distance_from_origin_km}km")
+
+        # Filter out None values from exclude_cities and normalize
+        exclude_cities_filtered = [city.strip().lower() for city in (exclude_cities or []) if city]
+        if exclude_cities_filtered:
+            logger.info(f"🚫 Cidades a excluir: {exclude_cities_filtered}")
 
         milestones = []
         total_errors = 0
@@ -314,6 +329,8 @@ class RoadService:
                             city = (poi.provider_data.get('addr:city') or
                                    poi.provider_data.get('address:city') or
                                    poi.provider_data.get('addr:municipality'))
+                            if city:
+                                logger.debug(f"🏙️ POI {poi.name}: cidade '{city}' extraída das tags OSM")
 
                         milestone = RoadMilestone(
                             id=poi.id,
@@ -397,6 +414,32 @@ class RoadService:
 
         cities_found = len([m for m in milestones if m.city])
         logger.info(f"🌍 Reverse geocoding concluído: {cities_found}/{len(milestones)} POIs com cidade identificada")
+
+        # Filter out POIs in excluded cities (origin city only)
+        if exclude_cities_filtered:
+            milestones_before_filter = len(milestones)
+
+            # Debug: log cities found in milestones
+            milestone_cities = set([m.city for m in milestones if m.city])
+            logger.debug(f"🏙️ Cidades únicas encontradas nos POIs: {milestone_cities}")
+            logger.debug(f"🚫 Cidade(s) a filtrar: {exclude_cities_filtered}")
+
+            # Show some examples before filtering
+            examples_to_filter = [m for m in milestones if m.city and m.city.strip().lower() in exclude_cities_filtered][:3]
+            if examples_to_filter:
+                logger.debug(f"📝 Exemplos de POIs que serão filtrados:")
+                for m in examples_to_filter:
+                    logger.debug(f"   - {m.name} em {m.city}")
+
+            milestones = [
+                m for m in milestones
+                if not m.city or m.city.strip().lower() not in exclude_cities_filtered
+            ]
+            filtered_count = milestones_before_filter - len(milestones)
+            if filtered_count > 0:
+                logger.info(f"🚫 Removidos {filtered_count} POIs da cidade de origem: {exclude_cities_filtered}")
+            else:
+                logger.warning(f"⚠️ Nenhum POI foi filtrado. Cidade de origem '{exclude_cities_filtered}' não encontrada nos POIs")
 
         for milestone in milestones:
             city_info = f" ({milestone.city})" if milestone.city else ""

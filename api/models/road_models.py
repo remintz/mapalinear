@@ -43,7 +43,7 @@ class LinearMapRequest(BaseModel):
     include_food: bool = Field(False, description="Incluir estabelecimentos de alimentação como marcos (restaurantes, fast food, cafés, etc.)")
     include_toll_booths: bool = Field(True, description="Incluir pedágios como marcos")
     max_distance_from_road: float = Field(1000, description="Distância máxima em metros da estrada para considerar pontos de interesse")
-    min_distance_from_origin_km: float = Field(5.0, description="Distância mínima em km da origem para incluir POIs (evita POIs na cidade de origem)")
+    min_distance_from_origin_km: float = Field(0.0, description="Distância mínima em km da origem (não mais usado - filtramos por cidade de origem)")
 
 
 class RoadMilestone(BaseModel):

@@ -10,10 +10,17 @@ export interface POI {
   type: POIType;
   coordinates: Coordinates;
   distance_from_origin_km: number;
+  distance_from_road_meters?: number;
+  side?: 'left' | 'right' | 'center';
+  city?: string;
   tags: Record<string, unknown>;
   operator?: string;
   brand?: string;
   opening_hours?: string;
+  phone?: string;
+  website?: string;
+  cuisine?: string;
+  amenities?: string[];
   quality_score?: number;
 }
 
@@ -22,7 +29,11 @@ export enum POIType {
   CITY = 'city',
   GAS_STATION = 'gas_station',
   RESTAURANT = 'restaurant',
-  TOLL_BOOTH = 'toll_booth'
+  FAST_FOOD = 'fast_food',
+  CAFE = 'cafe',
+  TOLL_BOOTH = 'toll_booth',
+  HOTEL = 'hotel',
+  REST_AREA = 'rest_area'
 }
 
 // Export types
@@ -32,6 +43,7 @@ export interface ExportPOI {
   type: string;
   coordinates: Coordinates;
   distance_from_origin_km: number;
+  city?: string;
   brand?: string;
   operator?: string;
   opening_hours?: string;
@@ -70,10 +82,15 @@ export interface Milestone {
   distance_from_origin_km: number;
   distance_from_road_meters?: number;
   side?: 'left' | 'right' | 'center';
+  city?: string;
   tags?: Record<string, unknown>;
   operator?: string;
   brand?: string;
   opening_hours?: string;
+  phone?: string;
+  website?: string;
+  cuisine?: string;
+  amenities?: string[];
   quality_score?: number;
 }
 

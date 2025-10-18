@@ -17,9 +17,9 @@ logger = logging.getLogger(__name__)
 class OSMProvider(GeoProvider):
     """
     OpenStreetMap provider implementation.
-    
+
     This provider uses OSM data sources including:
-    - Nominatim for geocoding
+    - Nominatim for geocoding (with city extraction from address dictionary)
     - Overpass API for POI searches
     - OSMnx for routing calculations
     """
@@ -100,13 +100,31 @@ class OSMProvider(GeoProvider):
             
             if not location:
                 return None
-            
+
+            # Debug: check what's in location.raw
+            logger.debug(f"📍 location.raw = {location.raw if hasattr(location, 'raw') else 'NO RAW ATTRIBUTE'}")
+
+            # Extract city from the address dictionary (not the string)
+            address_dict = location.raw.get('address', {}) if hasattr(location, 'raw') else {}
+
+            logger.debug(f"📍 Geocode address dict: {address_dict}")
+
+            city = (address_dict.get('city') or
+                   address_dict.get('town') or
+                   address_dict.get('village') or
+                   address_dict.get('municipality') or
+                   address_dict.get('county'))
+
+            state = address_dict.get('state')
+
+            logger.debug(f"📍 Extracted city={city}, state={state} from geocoding")
+
             result = GeoLocation(
                 latitude=location.latitude,
                 longitude=location.longitude,
                 address=location.address,
-                city=self._extract_city_from_address(location.address),
-                state=self._extract_state_from_address(location.address),
+                city=city,
+                state=state,
                 country="Brasil"
             )
             
@@ -149,12 +167,27 @@ class OSMProvider(GeoProvider):
             if not location:
                 return None
             
+            # Extract city from the address dictionary (not the string)
+            address_dict = location.raw.get('address', {}) if hasattr(location, 'raw') else {}
+
+            logger.debug(f"🌍 Reverse geocode address dict: {address_dict}")
+
+            city = (address_dict.get('city') or
+                   address_dict.get('town') or
+                   address_dict.get('village') or
+                   address_dict.get('municipality') or
+                   address_dict.get('county'))
+
+            state = address_dict.get('state')
+
+            logger.debug(f"🌍 Extracted city={city}, state={state} from reverse geocoding")
+
             result = GeoLocation(
                 latitude=latitude,
                 longitude=longitude,
                 address=location.address,
-                city=self._extract_city_from_address(location.address),
-                state=self._extract_state_from_address(location.address),
+                city=city,
+                state=state,
                 country="Brasil"
             )
             
