@@ -26,7 +26,7 @@ async def log_requests(request: Request, call_next):
     method = request.method
     
     # Log mais conciso evitando strings repetitivas
-    logger.info(f"🔔 REQ#{req_id} INICIADA: {method} {path}")
+    # logger.info(f"🔔 REQ#{req_id} INICIADA: {method} {path}")
     
     try:
         response = await call_next(request)
@@ -42,7 +42,7 @@ async def log_requests(request: Request, call_next):
         else:
             status_str = f"❌ {status_code}"
             
-        logger.info(f"🏁 REQ#{req_id} COMPLETA: {method} {path} - Status: {status_str} - Tempo: {process_time:.4f}s")
+        # logger.info(f"🏁 REQ#{req_id} COMPLETA: {method} {path} - Status: {status_str} - Tempo: {process_time:.4f}s")
         return response
     except Exception as e:
         process_time = time.time() - start_time
