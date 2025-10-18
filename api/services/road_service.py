@@ -43,7 +43,7 @@ class RoadService:
         max_distance_from_road: float = 3000,  # Aumentado de 1000 para 3000 metros
         min_distance_from_origin_km: float = 5.0,
         progress_callback: Optional[Callable[[float], None]] = None,
-        segment_length_km: float = 10.0
+        segment_length_km: float = 1.0
     ) -> LinearMapResponse:
         """
         Gera um mapa linear de uma estrada entre os pontos de origem e destino.
@@ -107,9 +107,9 @@ class RoadService:
             milestone_categories.extend([POICategory.SERVICES])  # Toll booths as services
         
         logger.info(f"🛣️ Categorias de milestone solicitadas: {[cat.value for cat in milestone_categories]}")
-        
-        all_milestones = run_async_safe(self._find_milestones_along_route(
-            route,
+
+        all_milestones = run_async_safe(self._find_milestones_from_segments(
+            linear_segments,
             milestone_categories,
             max_distance_from_road,
             min_distance_from_origin_km
@@ -168,8 +168,8 @@ class RoadService:
                 start_distance_km=start_distance,
                 end_distance_km=end_distance,
                 length_km=end_distance - start_distance,
-                start_coordinates={"latitude": start_coord[0], "longitude": start_coord[1]},
-                end_coordinates={"latitude": end_coord[0], "longitude": end_coord[1]},
+                start_coordinates=Coordinates(latitude=start_coord[0], longitude=start_coord[1]),
+                end_coordinates=Coordinates(latitude=end_coord[0], longitude=end_coord[1]),
                 milestones=[]
             )
             
@@ -217,32 +217,57 @@ class RoadService:
         lon = point_before[1] + (point_after[1] - point_before[1]) * local_ratio
         
         return (lat, lon)
-    
-    async def _find_milestones_along_route(self, route: Route, categories: List[POICategory], 
-                                         max_distance_from_road: float, 
-                                         min_distance_from_origin_km: float) -> List[RoadMilestone]:
+
+    async def _find_milestones_from_segments(
+        self, 
+        segments: List[LinearRoadSegment], 
+        categories: List[POICategory],
+        max_distance_from_road: float,
+        min_distance_from_origin_km: float
+    ) -> List[RoadMilestone]:
         """
-        Find milestones (POIs) along a route using the geo provider.
-        """
-        logger.info(f"🔍 Iniciando busca de milestones com categorias: {[cat.value for cat in categories]}")
-        logger.info(f"🔍 Parâmetros: max_distance={max_distance_from_road}m, min_distance={min_distance_from_origin_km}km")
+        Find milestones (POIs) along the route using segment start/end points.
         
+        This method searches for POIs around the start and end coordinates of each 1km segment,
+        eliminating the need for arbitrary 5km sampling.
+        """
+        logger.info(f"🔍 Iniciando busca de milestones usando {len(segments)} segmentos de 1km")
+        logger.info(f"🔍 Categorias: {[cat.value for cat in categories]}")
+        logger.info(f"🔍 Parâmetros: max_distance={max_distance_from_road}m, min_distance={min_distance_from_origin_km}km")
+
         milestones = []
         total_errors = 0
         total_requests = 0
         consecutive_errors = 0
         
-        # Search for POIs along the route by sampling points
-        sample_points = self._sample_points_along_route(route, interval_km=5.0)
-        logger.info(f"🔍 Gerados {len(sample_points)} pontos de amostragem na rota")
-        
-        for i, (point, distance_from_origin) in enumerate(sample_points):
-            if distance_from_origin < min_distance_from_origin_km:
-                logger.debug(f"🔍 Ponto {i} ignorado: distância {distance_from_origin:.1f}km < {min_distance_from_origin_km}km")
+        # Extract search points from segment start/end coordinates
+        search_points = []
+        for segment in segments:
+            # Skip segments before minimum distance
+            if segment.start_distance_km < min_distance_from_origin_km:
                 continue
-                
+            
+            # Add segment start point
+            if segment.start_coordinates:
+                search_points.append((
+                    (segment.start_coordinates.latitude, segment.start_coordinates.longitude),
+                    segment.start_distance_km
+                ))
+            
+            # Add segment end point (avoid duplicates with next segment start)
+            # Only add end point if it's the last segment or to ensure coverage
+            if segment.end_coordinates and segment == segments[-1]:
+                search_points.append((
+                    (segment.end_coordinates.latitude, segment.end_coordinates.longitude),
+                    segment.end_distance_km
+                ))
+        
+        logger.info(f"🔍 Gerados {len(search_points)} pontos de busca a partir dos segmentos")
+        
+        for i, (point, distance_from_origin) in enumerate(search_points):
             logger.debug(f"🔍 Ponto {i}: lat={point[0]:.6f}, lon={point[1]:.6f}, dist={distance_from_origin:.1f}km")
             total_requests += 1
+            
             try:
                 # Search for POIs around this point
                 pois = await self.geo_provider.search_pois(
@@ -282,7 +307,14 @@ class RoadService:
                             poi.location.latitude, poi.location.longitude,
                             point[0], point[1]
                         )
-                        
+
+                        # Extract city from POI tags (quick, no API call)
+                        city = None
+                        if poi.provider_data:
+                            city = (poi.provider_data.get('addr:city') or
+                                   poi.provider_data.get('address:city') or
+                                   poi.provider_data.get('addr:municipality'))
+
                         milestone = RoadMilestone(
                             id=poi.id,
                             name=poi.name,
@@ -295,6 +327,7 @@ class RoadService:
                             distance_from_road_meters=distance_from_road,
                             side="center",  # Default side
                             tags=poi.provider_data,
+                            city=city,
                             operator=poi.subcategory,
                             brand=poi.subcategory,
                             opening_hours=self._format_opening_hours(poi.opening_hours),
@@ -322,16 +355,14 @@ class RoadService:
                 consecutive_errors += 1
                 logger.error(f"🔍 Erro buscando POIs no ponto {i}: {e}")
                 
-                # More strict criteria for failing with fallback system:
-                # 1. If we have 5+ consecutive errors, fail immediately (all endpoints down)
-                # 2. If error rate > 90% after at least 5 requests, fail (systemic issue)
+                # Fail fast criteria
                 if consecutive_errors >= 5:
                     logger.error(f"Too many consecutive POI search failures ({consecutive_errors}). All endpoints may be down.")
                     raise RuntimeError(f"POI search failed: {consecutive_errors} consecutive failures. All Overpass endpoints may be unavailable. Last error: {e}")
                 
                 if total_requests >= 5:
                     error_rate = total_errors / total_requests
-                    if error_rate > 0.9:  # More than 90% failed
+                    if error_rate > 0.9:
                         logger.error(f"POI search failure rate too high ({error_rate:.1%}). Systemic issue detected.")
                         raise RuntimeError(f"POI search failed: {error_rate:.1%} of requests failed. Systemic issue detected. Last error: {e}")
                 
@@ -342,40 +373,37 @@ class RoadService:
             error_rate = total_errors / total_requests
             if error_rate > 0:
                 logger.warning(f"POI search completed with {error_rate:.1%} error rate ({total_errors}/{total_requests} failed)")
-            if error_rate > 0.5:  # More than 50% failed
+            if error_rate > 0.5:
                 logger.warning(f"High error rate detected. Consider checking Overpass API status.")
-        
+
         logger.info(f"🎯 RESULTADO FINAL: {len(milestones)} milestones encontrados ao longo da rota")
+
+        # OTIMIZAÇÃO: Fazer reverse geocoding apenas dos POIs finais que serão exibidos
+        logger.info(f"🌍 Fazendo reverse geocoding para obter cidades dos {len(milestones)} POIs finais...")
+        milestones_without_city = [m for m in milestones if not m.city]
+        logger.info(f"🌍 {len(milestones_without_city)} POIs precisam de reverse geocoding")
+
+        for milestone in milestones_without_city:
+            try:
+                reverse_loc = await self.geo_provider.reverse_geocode(
+                    milestone.coordinates.latitude,
+                    milestone.coordinates.longitude
+                )
+                if reverse_loc and reverse_loc.city:
+                    milestone.city = reverse_loc.city
+                    logger.debug(f"🌍 {milestone.name}: {reverse_loc.city}")
+            except Exception as e:
+                logger.debug(f"Could not reverse geocode {milestone.name}: {e}")
+
+        cities_found = len([m for m in milestones if m.city])
+        logger.info(f"🌍 Reverse geocoding concluído: {cities_found}/{len(milestones)} POIs com cidade identificada")
+
         for milestone in milestones:
-            logger.info(f"🎯 Milestone: {milestone.name} ({milestone.type.value}) - dist={milestone.distance_from_origin_km:.1f}km")
-        
+            city_info = f" ({milestone.city})" if milestone.city else ""
+            logger.info(f"🎯 Milestone: {milestone.name}{city_info} ({milestone.type.value}) - dist={milestone.distance_from_origin_km:.1f}km")
+
         return milestones
-    
-    def _sample_points_along_route(self, route: Route, interval_km: float) -> List[Tuple[Tuple[float, float], float]]:
-        """
-        Sample points along the route at regular intervals.
-        Returns list of ((lat, lon), distance_from_origin) tuples.
-        """
-        logger.debug(f"📍 Gerando pontos de amostragem com intervalo de {interval_km}km")
-        logger.debug(f"📍 Rota: {route.total_distance:.1f}km total, {len(route.geometry)} pontos na geometria")
-        
-        points = []
-        total_distance = route.total_distance
-        current_distance = 0.0
-        
-        while current_distance <= total_distance:
-            coord = self._interpolate_coordinate_at_distance(route.geometry, current_distance, total_distance)
-            points.append((coord, current_distance))
-            logger.debug(f"📍 Ponto {len(points)-1}: dist={current_distance:.1f}km, lat={coord[0]:.6f}, lon={coord[1]:.6f}")
-            current_distance += interval_km
-        
-        logger.info(f"📍 Gerados {len(points)} pontos de amostragem")
-        if points:
-            logger.debug(f"📍 Primeiro ponto: lat={points[0][0][0]:.6f}, lon={points[0][0][1]:.6f}")
-            logger.debug(f"📍 Último ponto: lat={points[-1][0][0]:.6f}, lon={points[-1][0][1]:.6f}")
-        
-        return points
-    
+
     def _poi_category_to_milestone_type(self, category: POICategory) -> MilestoneType:
         """
         Convert POI category to milestone type.

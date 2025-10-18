@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, BackgroundTasks
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from api.models.road_models import (
     AsyncOperationResponse,
@@ -65,3 +65,94 @@ async def start_async_linear_map(request: LinearMapRequest, background_tasks: Ba
     )
     
     return operation
+
+
+@router.get("/debug/segments", response_model=Dict[str, Any])
+async def get_debug_segments(operation_id: Optional[str] = None):
+    """
+    Endpoint de debug para visualizar os segmentos de 10km criados a partir da rota.
+    Se operation_id não for fornecido, retorna os segmentos do último mapa linear gerado.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Se operation_id não foi fornecido, buscar a última operação concluída
+        if not operation_id:
+            operations = AsyncService.list_operations(active_only=False)
+            
+            # Filtrar apenas operações de tipo "linear_map" que foram concluídas
+            completed_maps = [
+                op for op in operations 
+                if op.type == "linear_map" and op.status == "completed" and op.result is not None
+            ]
+            
+            if not completed_maps:
+                raise HTTPException(
+                    status_code=404, 
+                    detail="Nenhum mapa linear foi gerado ainda. Gere um mapa primeiro na página de busca."
+                )
+            
+            # Ordenar por data de início (mais recente primeiro)
+            completed_maps.sort(key=lambda x: x.started_at, reverse=True)
+            latest_operation = completed_maps[0]
+            operation_id = latest_operation.operation_id
+            logger.info(f"Using latest operation: {operation_id}")
+        
+        # Buscar a operação específica
+        operation = AsyncService.get_operation(operation_id)
+        if not operation:
+            raise HTTPException(status_code=404, detail=f"Operação {operation_id} não encontrada")
+        
+        if operation.status != "completed":
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Operação {operation_id} ainda não foi concluída. Status: {operation.status}"
+            )
+        
+        if not operation.result:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Operação {operation_id} não possui resultado"
+            )
+        
+        # Extrair os segmentos do resultado
+        result = operation.result
+        segments = result.get("segments", [])
+        
+        if not segments:
+            raise HTTPException(
+                status_code=404, 
+                detail="Nenhum segmento encontrado no resultado da operação"
+            )
+        
+        # Preparar resposta com os segmentos
+        segments_data = []
+        for segment in segments:
+            segment_info = {
+                "id": segment.get("id"),
+                "start_distance_km": segment.get("start_distance_km"),
+                "end_distance_km": segment.get("end_distance_km"),
+                "length_km": segment.get("length_km"),
+                "name": segment.get("name"),
+                "start_coordinates": segment.get("start_coordinates"),
+                "end_coordinates": segment.get("end_coordinates"),
+            }
+            segments_data.append(segment_info)
+        
+        logger.info(f"Returning {len(segments_data)} debug segments from operation {operation_id}")
+        
+        return {
+            "operation_id": operation_id,
+            "origin": result.get("origin"),
+            "destination": result.get("destination"),
+            "total_distance_km": result.get("total_length_km"),
+            "total_segments": len(segments_data),
+            "segments": segments_data
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating debug segments: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar segmentos de debug: {str(e)}")

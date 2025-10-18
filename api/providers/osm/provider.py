@@ -448,13 +448,13 @@ class OSMProvider(GeoProvider):
             'east': location.longitude + radius_deg
         }
         
-        logger.debug(f"🔧 Bounding box: {bbox}")
+        # logger.debug(f"🔧 Bounding box: {bbox}")
         
         # Map categories to OSM amenity tags (use set to avoid duplicates)
         amenity_filters = set()
         for category in categories:
             osm_amenities = self._get_osm_amenities_for_category(category)
-            logger.debug(f"🔧 Categoria {category.value} -> amenities OSM: {osm_amenities}")
+            # logger.debug(f"🔧 Categoria {category.value} -> amenities OSM: {osm_amenities}")
             amenity_filters.update(osm_amenities)
         
         amenity_filters = list(amenity_filters)  # Convert back to list

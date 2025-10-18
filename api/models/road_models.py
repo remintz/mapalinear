@@ -55,8 +55,9 @@ class RoadMilestone(BaseModel):
     distance_from_road_meters: float = Field(..., description="Distância da estrada em metros")
     side: str = Field(..., description="Lado da estrada (left, right, center)")
     tags: Dict[str, Any] = Field(default_factory=dict, description="Metadados adicionais do provider")
-    
+
     # Metadados enriquecidos
+    city: Optional[str] = Field(None, description="Cidade onde o POI está localizado")
     operator: Optional[str] = Field(None, description="Operadora do estabelecimento (ex: 'Petrobras', 'Shell')")
     brand: Optional[str] = Field(None, description="Marca do estabelecimento")
     opening_hours: Optional[str] = Field(None, description="Horário de funcionamento")
@@ -75,6 +76,8 @@ class LinearRoadSegment(BaseModel):
     name: Optional[str] = Field(None, description="Nome da estrada neste segmento")
     ref: Optional[str] = Field(None, description="Referência da estrada neste segmento (ex: 'BR-101')")
     highway_type: Optional[str] = Field(None, description="Tipo de estrada (motorway, trunk, etc.)")
+    start_coordinates: Optional[Coordinates] = Field(None, description="Coordenadas do início do segmento")
+    end_coordinates: Optional[Coordinates] = Field(None, description="Coordenadas do fim do segmento")
     geometry: List[Coordinates] = Field(default_factory=list, description="Coordenadas geográficas do segmento")
     start_milestone: Optional[RoadMilestone] = Field(None, description="Marco no início do segmento")
     end_milestone: Optional[RoadMilestone] = Field(None, description="Marco no fim do segmento")
