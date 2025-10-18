@@ -1,5 +1,5 @@
 """
-Utilidades para exportar dados de rotas e POIs para visualização em ferramentas web baseadas em OSM.
+Utilidades para exportar dados de rotas e POIs para visualização em ferramentas web de mapas.
 """
 
 import json
@@ -9,7 +9,6 @@ from typing import List, Dict, Any
 from pathlib import Path
 
 from api.models.road_models import LinearMapResponse
-from api.models.osm_models import Coordinates
 
 
 def export_to_geojson(
@@ -17,7 +16,7 @@ def export_to_geojson(
     output_file: str = None
 ) -> Dict[str, Any]:
     """
-    Exporta rota e POIs para formato GeoJSON para visualização em ferramentas web OSM.
+    Exporta rota e POIs para formato GeoJSON para visualização em ferramentas web de mapas.
     
     Args:
         route_response: Resposta completa da rota linear
@@ -48,7 +47,7 @@ def export_to_geojson(
     route_coordinates = []
     for segment in route_response.segments:
         for coord in segment.geometry:
-            route_coordinates.append([coord.lon, coord.lat])  # GeoJSON usa [lon, lat]
+            route_coordinates.append([coord.longitude, coord.latitude])  # GeoJSON usa [lon, lat]
     
     if route_coordinates:
         route_feature = {
@@ -84,7 +83,7 @@ def export_to_geojson(
             "type": "Feature",
             "geometry": {
                 "type": "Point",
-                "coordinates": [poi.coordinates.lon, poi.coordinates.lat]
+                "coordinates": [poi.coordinates.longitude, poi.coordinates.latitude]
             },
             "properties": {
                 "name": poi.name,
@@ -159,8 +158,8 @@ def export_to_gpx(
     # 1. Adicionar POIs como waypoints
     for poi in route_response.milestones:
         wpt = ET.SubElement(gpx, "wpt", {
-            "lat": str(poi.coordinates.lat),
-            "lon": str(poi.coordinates.lon)
+            "lat": str(poi.coordinates.latitude),
+            "lon": str(poi.coordinates.longitude)
         })
         ET.SubElement(wpt, "name").text = poi.name
         ET.SubElement(wpt, "desc").text = f"{str(poi.type)} - {poi.distance_from_origin_km:.1f}km do início"
@@ -179,8 +178,8 @@ def export_to_gpx(
     for segment in route_response.segments:
         for coord in segment.geometry:
             trkpt = ET.SubElement(trkseg, "trkpt", {
-                "lat": str(coord.lat),
-                "lon": str(coord.lon)
+                "lat": str(coord.latitude),
+                "lon": str(coord.longitude)
             })
     
     # Converter para string XML
@@ -218,8 +217,8 @@ def export_umap_url(route_response: LinearMapResponse) -> str:
         first_coord = route_response.segments[0].geometry[0]
         last_coord = route_response.segments[-1].geometry[-1]
         
-        center_lat = (first_coord.lat + last_coord.lat) / 2
-        center_lon = (first_coord.lon + last_coord.lon) / 2
+        center_lat = (first_coord.latitude + last_coord.latitude) / 2
+        center_lon = (first_coord.longitude + last_coord.longitude) / 2
         
         # Estimar zoom baseado na distância
         if route_response.total_length_km > 300:
@@ -293,8 +292,8 @@ def export_to_overpass_turbo_url(
     
     for segment in route_response.segments:
         for coord in segment.geometry:
-            lats.append(coord.lat)
-            lons.append(coord.lon)
+            lats.append(coord.latitude)
+            lons.append(coord.longitude)
     
     if not lats:
         return "https://overpass-turbo.eu/"

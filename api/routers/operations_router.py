@@ -1,19 +1,15 @@
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
-from typing import List, Optional, Dict, Any
+from fastapi import APIRouter, HTTPException, BackgroundTasks
+from typing import Dict, Any, Optional
 
 from api.models.road_models import (
     AsyncOperationResponse,
     LinearMapRequest,
-    LinearMapResponse,
 )
-from api.models.osm_models import OSMSearchRequest
 from api.services.async_service import AsyncService
 from api.services.road_service import RoadService
-from api.services.osm_service import OSMService
 
 router = APIRouter()
 road_service = RoadService()
-osm_service = OSMService()
 
 @router.get("/{operation_id}", response_model=AsyncOperationResponse)
 async def get_operation(operation_id: str):
@@ -25,18 +21,15 @@ async def get_operation(operation_id: str):
         raise HTTPException(status_code=404, detail=f"Operação {operation_id} não encontrada")
     return operation
 
-@router.get("", response_model=List[AsyncOperationResponse])
-async def list_operations(active_only: bool = Query(True, description="Listar apenas operações em andamento")):
-    """
-    Lista operações assíncronas.
-    """
-    return AsyncService.list_operations(active_only=active_only)
-
 @router.post("/linear-map", response_model=AsyncOperationResponse)
 async def start_async_linear_map(request: LinearMapRequest, background_tasks: BackgroundTasks):
     """
     Inicia uma operação assíncrona para gerar um mapa linear de uma estrada.
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"🔍 DEBUG - Requisição recebida: include_food={request.include_food}, include_gas_stations={request.include_gas_stations}, include_toll_booths={request.include_toll_booths}")
+
     # Criar uma nova operação
     operation = AsyncService.create_operation("linear_map")
     
@@ -58,7 +51,7 @@ async def start_async_linear_map(request: LinearMapRequest, background_tasks: Ba
             )
             
             # Converter para dicionário para armazenamento
-            return result.dict()
+            return result.model_dump()
         except Exception as e:
             # Em caso de erro, falhar a operação
             AsyncService.fail_operation(operation.operation_id, str(e))
@@ -73,68 +66,93 @@ async def start_async_linear_map(request: LinearMapRequest, background_tasks: Ba
     
     return operation
 
-@router.post("/osm-search", response_model=AsyncOperationResponse)
-async def start_async_osm_search(request: OSMSearchRequest, background_tasks: BackgroundTasks):
+
+@router.get("/debug/segments", response_model=Dict[str, Any])
+async def get_debug_segments(operation_id: Optional[str] = None):
     """
-    Inicia uma operação assíncrona para buscar estradas no OpenStreetMap.
+    Endpoint de debug para visualizar os segmentos de 10km criados a partir da rota.
+    Se operation_id não for fornecido, retorna os segmentos do último mapa linear gerado.
     """
-    # Criar uma nova operação
-    operation = AsyncService.create_operation("osm_search")
+    import logging
+    logger = logging.getLogger(__name__)
     
-    # Definir a função que executará o processamento em segundo plano
-    def process_osm_search(progress_callback=None):
-        try:
-            # Executar a busca OSM
-            if progress_callback:
-                progress_callback(10.0)  # Iniciar com 10% para feedback visual
-                
-            result = osm_service.search_road_data(
-                origin=request.origin,
-                destination=request.destination,
-                road_type=request.road_type
-            )
+    try:
+        # Se operation_id não foi fornecido, buscar a última operação concluída
+        if not operation_id:
+            operations = AsyncService.list_operations(active_only=False)
             
-            if progress_callback:
-                progress_callback(90.0)  # Quase completo
-                
-            # Converter para dicionário para armazenamento
-            return result.dict()
-        except Exception as e:
-            # Em caso de erro, falhar a operação
-            AsyncService.fail_operation(operation.operation_id, str(e))
-            raise
-    
-    # Adicionar a tarefa em segundo plano
-    background_tasks.add_task(
-        AsyncService.run_async,
-        operation.operation_id,
-        process_osm_search
-    )
-    
-    return operation
-
-@router.delete("/{operation_id}", response_model=Dict[str, Any])
-async def cancel_operation(operation_id: str):
-    """
-    Cancela uma operação assíncrona em andamento.
-    """
-    operation = AsyncService.get_operation(operation_id)
-    if not operation:
-        raise HTTPException(status_code=404, detail=f"Operação {operation_id} não encontrada")
+            # Filtrar apenas operações de tipo "linear_map" que foram concluídas
+            completed_maps = [
+                op for op in operations 
+                if op.type == "linear_map" and op.status == "completed" and op.result is not None
+            ]
+            
+            if not completed_maps:
+                raise HTTPException(
+                    status_code=404, 
+                    detail="Nenhum mapa linear foi gerado ainda. Gere um mapa primeiro na página de busca."
+                )
+            
+            # Ordenar por data de início (mais recente primeiro)
+            completed_maps.sort(key=lambda x: x.started_at, reverse=True)
+            latest_operation = completed_maps[0]
+            operation_id = latest_operation.operation_id
+            logger.info(f"Using latest operation: {operation_id}")
         
-    # Verificar se a operação está em andamento
-    if operation.status != "in_progress":
-        raise HTTPException(status_code=400, detail=f"Operação {operation_id} não está em andamento")
-    
-    # Marcar como falhada com mensagem de cancelamento
-    AsyncService.fail_operation(operation_id, "Operação cancelada pelo usuário")
-    
-    return {"message": f"Operação {operation_id} cancelada com sucesso"}
-
-@router.delete("", response_model=Dict[str, Any])
-async def cleanup_operations(max_age_hours: int = Query(24, description="Idade máxima em horas das operações a serem limpas")):
-    """
-    Limpa operações antigas do sistema.
-    """
-    count = AsyncService.cleanup_old_operations(max_age_hours=max_age_hours)
-    return {"message": f"{count} operações antigas foram limpas"} 
+        # Buscar a operação específica
+        operation = AsyncService.get_operation(operation_id)
+        if not operation:
+            raise HTTPException(status_code=404, detail=f"Operação {operation_id} não encontrada")
+        
+        if operation.status != "completed":
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Operação {operation_id} ainda não foi concluída. Status: {operation.status}"
+            )
+        
+        if not operation.result:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Operação {operation_id} não possui resultado"
+            )
+        
+        # Extrair os segmentos do resultado
+        result = operation.result
+        segments = result.get("segments", [])
+        
+        if not segments:
+            raise HTTPException(
+                status_code=404, 
+                detail="Nenhum segmento encontrado no resultado da operação"
+            )
+        
+        # Preparar resposta com os segmentos
+        segments_data = []
+        for segment in segments:
+            segment_info = {
+                "id": segment.get("id"),
+                "start_distance_km": segment.get("start_distance_km"),
+                "end_distance_km": segment.get("end_distance_km"),
+                "length_km": segment.get("length_km"),
+                "name": segment.get("name"),
+                "start_coordinates": segment.get("start_coordinates"),
+                "end_coordinates": segment.get("end_coordinates"),
+            }
+            segments_data.append(segment_info)
+        
+        logger.info(f"Returning {len(segments_data)} debug segments from operation {operation_id}")
+        
+        return {
+            "operation_id": operation_id,
+            "origin": result.get("origin"),
+            "destination": result.get("destination"),
+            "total_distance_km": result.get("total_length_km"),
+            "total_segments": len(segments_data),
+            "segments": segments_data
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating debug segments: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar segmentos de debug: {str(e)}")

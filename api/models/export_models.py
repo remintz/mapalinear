@@ -4,7 +4,7 @@ Modelos para exportação de dados de rotas e POIs.
 
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
-from api.models.osm_models import Coordinates
+from api.models.road_models import Coordinates
 
 
 class ExportCoordinates(BaseModel):
@@ -41,7 +41,7 @@ class ExportRouteData(BaseModel):
     def to_linear_map_response(self) -> Dict[str, Any]:
         """Converte para formato LinearMapResponse para compatibilidade."""
         from api.models.road_models import MilestoneType
-        from api.models.osm_models import Coordinates
+        from api.models.road_models import Coordinates
         
         # Converter POIs para milestones
         milestones = []
@@ -61,7 +61,7 @@ class ExportRouteData(BaseModel):
                 "id": poi.id,
                 "name": poi.name,
                 "type": milestone_type,
-                "coordinates": Coordinates(lat=poi.coordinates.lat, lon=poi.coordinates.lon),
+                "coordinates": Coordinates(latitude=poi.coordinates.lat, longitude=poi.coordinates.lon),
                 "distance_from_origin_km": poi.distance_from_origin_km,
                 "distance_from_road_meters": 0.0,
                 "side": "right",
@@ -75,7 +75,7 @@ class ExportRouteData(BaseModel):
         # Converter segmentos
         converted_segments = []
         for seg in self.segments:
-            geometry = [Coordinates(lat=coord.lat, lon=coord.lon) for coord in seg.geometry]
+            geometry = [Coordinates(latitude=coord.lat, longitude=coord.lon) for coord in seg.geometry]
             converted_segment = {
                 "id": seg.id,
                 "name": seg.name or "Segmento",
@@ -96,5 +96,5 @@ class ExportRouteData(BaseModel):
             "segments": converted_segments,
             "milestones": milestones,
             "creation_date": "2024-01-01T00:00:00",
-            "osm_road_id": "export-temp"
+            "road_id": "export-temp"
         }

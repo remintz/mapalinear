@@ -11,7 +11,7 @@ Este documento descreve o planejamento sequencial para implementar melhorias no 
 **Objetivo**: Melhorar a qualidade e completude dos dados de pontos de interesse.
 
 #### 1.1.1 Atualizar Queries Overpass API
-- **Arquivo**: `api/services/osm_service.py`
+- **Arquivo**: `api/providers/osm/provider.py` (migrado de osm_service.py)
 - **Melhorias**:
   - Incluir ways e relations além de nodes
   - Unificar queries usando regex: `amenity~"^(fuel|restaurant)$"`

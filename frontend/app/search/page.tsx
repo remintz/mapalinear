@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { Button, Card, CardHeader, CardTitle, CardContent } from '@/components/ui';
 import { SearchForm } from '@/components/forms/SearchForm';
 import { useAsyncRouteSearch } from '@/hooks/useAsyncRouteSearch';
-import { MapPin, Route, ArrowLeft } from 'lucide-react';
+import { MapPin, Route, ArrowLeft, Bug } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 
@@ -107,10 +107,16 @@ export default function SearchPage() {
       <div className="container mx-auto px-4 py-8">
         {/* Header */}
         <header className="mb-8">
-          <Link href="/" className="inline-flex items-center gap-2 text-blue-600 hover:text-blue-700 mb-4">
-            <ArrowLeft className="h-4 w-4" />
-            Voltar ao início
-          </Link>
+          <div className="flex justify-between items-start mb-4">
+            <Link href="/" className="inline-flex items-center gap-2 text-blue-600 hover:text-blue-700">
+              <ArrowLeft className="h-4 w-4" />
+              Voltar ao início
+            </Link>
+            <Link href="/debug-segments" className="inline-flex items-center gap-2 text-gray-600 hover:text-gray-800 text-sm">
+              <Bug className="h-4 w-4" />
+              Debug: Ver Segmentos
+            </Link>
+          </div>
           <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">
             Buscar Rota
           </h1>
@@ -136,10 +142,18 @@ export default function SearchPage() {
           <div className="mb-8">
             <Card className="max-w-4xl mx-auto">
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Route className="h-5 w-5 text-green-600" />
-                  Rota Encontrada
-                </CardTitle>
+                <div className="flex justify-between items-center">
+                  <CardTitle className="flex items-center gap-2">
+                    <Route className="h-5 w-5 text-green-600" />
+                    Rota Encontrada
+                  </CardTitle>
+                  <Link href="/debug-segments" target="_blank">
+                    <Button variant="outline" size="sm" className="flex items-center gap-2">
+                      <Bug className="h-4 w-4" />
+                      Ver Segmentos (Debug)
+                    </Button>
+                  </Link>
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="space-y-6">
@@ -193,31 +207,67 @@ export default function SearchPage() {
                   {/* POI List */}
                   {data.pois && data.pois.length > 0 && (
                     <div className="border-t pt-6">
-                      <h3 className="text-lg font-semibold text-gray-900 mb-4">Detalhes dos Pontos</h3>
-                      <div className="space-y-3 max-h-96 overflow-y-auto">
-                        {data.pois.slice(0, 10).map((poi, index) => (
-                          <div key={poi.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded">
-                            <div className="flex-shrink-0">
-                              {poi.type === 'gas_station' && <div className="w-3 h-3 bg-green-500 rounded-full"></div>}
-                              {poi.type === 'restaurant' && <div className="w-3 h-3 bg-orange-500 rounded-full"></div>}
-                              {poi.type === 'toll_booth' && <div className="w-3 h-3 bg-purple-500 rounded-full"></div>}
-                            </div>
-                            <div className="flex-grow">
-                              <p className="font-medium text-gray-900">{poi.name || 'Nome não disponível'}</p>
-                              <p className="text-sm text-gray-600">
-                                {poi.distance_from_origin_km ? poi.distance_from_origin_km.toFixed(1) : '0.0'} km da origem
-                              </p>
-                            </div>
-                            <div className="text-right">
-                              <MapPin className="h-4 w-4 text-gray-400" />
-                            </div>
-                          </div>
-                        ))}
-                        {data.pois && data.pois.length > 10 && (
-                          <p className="text-sm text-gray-600 text-center py-2">
-                            ... e mais {data.pois.length - 10} pontos de interesse
-                          </p>
-                        )}
+                      <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                        Todos os Pontos de Interesse ({data.pois.length})
+                      </h3>
+                      <div className="overflow-x-auto max-h-96 overflow-y-auto border rounded">
+                        <table className="min-w-full divide-y divide-gray-200">
+                          <thead className="bg-gray-50 sticky top-0">
+                            <tr>
+                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                KM
+                              </th>
+                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Tipo
+                              </th>
+                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Nome
+                              </th>
+                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Cidade
+                              </th>
+                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Lado
+                              </th>
+                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Operadora
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-gray-200">
+                            {data.pois.map((poi) => (
+                              <tr key={poi.id} className="hover:bg-gray-50">
+                                <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
+                                  {poi.distance_from_origin_km?.toFixed(1) || '0.0'}
+                                </td>
+                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-600">
+                                  {poi.type === 'gas_station' && '⛽ Posto'}
+                                  {poi.type === 'restaurant' && '🍽️ Restaurante'}
+                                  {poi.type === 'fast_food' && '🍔 Fast Food'}
+                                  {poi.type === 'cafe' && '☕ Café'}
+                                  {poi.type === 'toll_booth' && '🛣️ Pedágio'}
+                                  {poi.type === 'hotel' && '🏨 Hotel'}
+                                  {!['gas_station', 'restaurant', 'fast_food', 'cafe', 'toll_booth', 'hotel'].includes(poi.type) && poi.type}
+                                </td>
+                                <td className="px-3 py-2 text-sm text-gray-900">
+                                  {poi.name || 'Nome não disponível'}
+                                </td>
+                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-600">
+                                  {poi.city || '-'}
+                                </td>
+                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-600">
+                                  {poi.side === 'left' && '← Esquerda'}
+                                  {poi.side === 'right' && 'Direita →'}
+                                  {poi.side === 'center' && '↕️ Centro'}
+                                  {!['left', 'right', 'center'].includes(poi.side) && poi.side}
+                                </td>
+                                <td className="px-3 py-2 text-sm text-gray-600">
+                                  {poi.operator || poi.brand || '-'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
                     </div>
                   )}

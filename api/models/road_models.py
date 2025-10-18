@@ -4,7 +4,11 @@ from enum import Enum
 from datetime import datetime
 from uuid import uuid4
 
-from api.models.osm_models import Coordinates, OSMPointOfInterestType
+
+class Coordinates(BaseModel):
+    """Generic coordinates representation."""
+    latitude: float = Field(..., ge=-90, le=90, description="Latitude coordinate")
+    longitude: float = Field(..., ge=-180, le=180, description="Longitude coordinate")
 
 
 class MilestoneType(str, Enum):
@@ -39,23 +43,24 @@ class LinearMapRequest(BaseModel):
     include_food: bool = Field(False, description="Incluir estabelecimentos de alimentação como marcos (restaurantes, fast food, cafés, etc.)")
     include_toll_booths: bool = Field(True, description="Incluir pedágios como marcos")
     max_distance_from_road: float = Field(1000, description="Distância máxima em metros da estrada para considerar pontos de interesse")
-    min_distance_from_origin_km: float = Field(5.0, description="Distância mínima em km da origem para incluir POIs (evita POIs na cidade de origem)")
+    min_distance_from_origin_km: float = Field(0.0, description="Distância mínima em km da origem (não mais usado - filtramos por cidade de origem)")
 
 
 class RoadMilestone(BaseModel):
-    id: str = Field(..., description="ID do marco no OSM")
+    id: str = Field(..., description="ID único do marco")
     name: str = Field(..., description="Nome do marco")
     type: MilestoneType = Field(..., description="Tipo do marco")
     coordinates: Coordinates = Field(..., description="Coordenadas do marco")
     distance_from_origin_km: float = Field(..., description="Distância do ponto de origem em quilômetros")
     distance_from_road_meters: float = Field(..., description="Distância da estrada em metros")
     side: str = Field(..., description="Lado da estrada (left, right, center)")
-    tags: Dict[str, Any] = Field(default_factory=dict, description="Tags adicionais do OSM")
-    
+    tags: Dict[str, Any] = Field(default_factory=dict, description="Metadados adicionais do provider")
+
     # Metadados enriquecidos
+    city: Optional[str] = Field(None, description="Cidade onde o POI está localizado")
     operator: Optional[str] = Field(None, description="Operadora do estabelecimento (ex: 'Petrobras', 'Shell')")
     brand: Optional[str] = Field(None, description="Marca do estabelecimento")
-    opening_hours: Optional[str] = Field(None, description="Horário de funcionamento (formato OSM)")
+    opening_hours: Optional[str] = Field(None, description="Horário de funcionamento")
     phone: Optional[str] = Field(None, description="Telefone de contato")
     website: Optional[str] = Field(None, description="Website do estabelecimento")
     cuisine: Optional[str] = Field(None, description="Tipo de culinária (para restaurantes)")
@@ -71,6 +76,8 @@ class LinearRoadSegment(BaseModel):
     name: Optional[str] = Field(None, description="Nome da estrada neste segmento")
     ref: Optional[str] = Field(None, description="Referência da estrada neste segmento (ex: 'BR-101')")
     highway_type: Optional[str] = Field(None, description="Tipo de estrada (motorway, trunk, etc.)")
+    start_coordinates: Optional[Coordinates] = Field(None, description="Coordenadas do início do segmento")
+    end_coordinates: Optional[Coordinates] = Field(None, description="Coordenadas do fim do segmento")
     geometry: List[Coordinates] = Field(default_factory=list, description="Coordenadas geográficas do segmento")
     start_milestone: Optional[RoadMilestone] = Field(None, description="Marco no início do segmento")
     end_milestone: Optional[RoadMilestone] = Field(None, description="Marco no fim do segmento")
@@ -85,7 +92,7 @@ class LinearMapResponse(BaseModel):
     segments: List[LinearRoadSegment] = Field(..., description="Segmentos do mapa linear")
     milestones: List[RoadMilestone] = Field(..., description="Todos os marcos ao longo da rota")
     creation_date: datetime = Field(default_factory=datetime.now, description="Data e hora de criação")
-    osm_road_id: str = Field(..., description="ID da estrada no OpenStreetMap")
+    road_id: str = Field(..., description="ID da estrada no provider geográfico")
 
 
 class RoadMilestoneResponse(BaseModel):

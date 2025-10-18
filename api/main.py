@@ -10,7 +10,7 @@ logger = logging.getLogger("api.main")
 
 app = FastAPI(
     title="Mapa Linear API",
-    description="API para extração de dados do OpenStreetMap e criação de mapas lineares de estradas",
+    description="API para geração de mapas lineares de estradas",
     version="0.1.0",
 )
 
@@ -26,7 +26,7 @@ async def log_requests(request: Request, call_next):
     method = request.method
     
     # Log mais conciso evitando strings repetitivas
-    logger.info(f"🔔 REQ#{req_id} INICIADA: {method} {path}")
+    # logger.info(f"🔔 REQ#{req_id} INICIADA: {method} {path}")
     
     try:
         response = await call_next(request)
@@ -42,7 +42,7 @@ async def log_requests(request: Request, call_next):
         else:
             status_str = f"❌ {status_code}"
             
-        logger.info(f"🏁 REQ#{req_id} COMPLETA: {method} {path} - Status: {status_str} - Tempo: {process_time:.4f}s")
+        # logger.info(f"🏁 REQ#{req_id} COMPLETA: {method} {path} - Status: {status_str} - Tempo: {process_time:.4f}s")
         return response
     except Exception as e:
         process_time = time.time() - start_time
@@ -64,16 +64,12 @@ app.middleware("http")(error_handler_middleware)
 # Configurar handlers de exceção
 setup_error_handlers(app)
 
-# Import routers
-from api.routers import osm_router, road_router, test_router, operations_router, pois_router, export
+# Import only required routers
+from api.routers import operations_router, export
 
-# Include routers
-app.include_router(osm_router.router, prefix="/api/osm", tags=["OpenStreetMap"])
-app.include_router(road_router.router, prefix="/api/roads", tags=["Roads"])
-app.include_router(pois_router.router, prefix="/api/pois", tags=["Points of Interest"])
+# Include only required routers
 app.include_router(operations_router.router, prefix="/api/operations", tags=["Operations"])
 app.include_router(export.router, prefix="/api", tags=["Export"])
-app.include_router(test_router.router, prefix="/api/test", tags=["Testes"])
 
 @app.get("/")
 async def root():
@@ -82,9 +78,3 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
-
-# Rota de teste para verificar o tratamento de erros
-@app.get("/test-error")
-async def test_error():
-    """Rota para testar o middleware de erro."""
-    raise ValueError("Isso é um erro de teste para verificar o middleware de tratamento de erros!") 

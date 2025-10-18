@@ -1,0 +1,56 @@
+# Configuração Minimalista de Logging - MapaLinear API
+
+version: 1
+disable_existing_loggers: false
+
+# Formatadores
+formatters:
+  default:
+    format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    datefmt: "%Y-%m-%d %H:%M:%S"
+
+  simple:
+    format: "%(levelname)s - %(message)s"
+
+# Destinos dos logs
+handlers:
+  console:
+    class: logging.StreamHandler
+    level: DEBUG
+    formatter: default
+    stream: ext://sys.stdout
+
+  file:
+    class: logging.handlers.RotatingFileHandler
+    level: DEBUG
+    formatter: default
+    filename: logs/app.log
+    maxBytes: 10485760  # 10MB
+    backupCount: 3
+    encoding: utf8
+
+# Configuração por módulo
+loggers:
+  # Aplicação
+  api:
+    level: DEBUG
+    handlers: [console, file]
+    propagate: false
+
+  # Bibliotecas externas
+  uvicorn:
+    level: INFO
+    handlers: [console]
+    propagate: false
+
+  uvicorn.access:
+    level: WARNING
+    handlers: []
+    propagate: false
+
+  
+
+# Root logger
+root:
+  level: INFO
+  handlers: [console]

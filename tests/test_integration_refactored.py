@@ -20,8 +20,7 @@ class TestProviderSystemIntegration:
         """It should create RoadService with default provider."""
         road_service = RoadService()
         
-        # Should have both old and new providers for compatibility
-        assert hasattr(road_service, 'osm_service')
+        # Should have the new provider system
         assert hasattr(road_service, 'geo_provider')
         assert road_service.geo_provider is not None
         assert road_service.geo_provider.provider_type == ProviderType.OSM
@@ -73,7 +72,7 @@ class TestProviderSystemIntegration:
             amenities=["24h", "Loja"],
             rating=4.2,
             phone="+55 11 1234-5678",
-            provider_data={'osm_tags': {'amenity': 'fuel', 'brand': 'Shell'}}
+            provider_data={'tags': {'amenity': 'fuel', 'brand': 'Shell'}}
         )
         
         with patch.object(road_service.geo_provider, 'search_pois') as mock_search:
@@ -145,17 +144,6 @@ class TestProviderSystemIntegration:
 class TestProviderCompatibility:
     """Test backward compatibility with existing code."""
     
-    def test_old_osm_service_still_available(self):
-        """It should maintain access to the old OSMService for compatibility."""
-        road_service = RoadService()
-        
-        # Old service should still be available
-        assert hasattr(road_service, 'osm_service')
-        assert road_service.osm_service is not None
-        
-        # Should have the expected methods
-        assert hasattr(road_service.osm_service, 'search_road_data')
-        assert hasattr(road_service.osm_service, 'query_overpass')
     
     def test_provider_manager_creates_correct_provider(self):
         """It should create the correct provider type."""

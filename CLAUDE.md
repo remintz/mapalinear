@@ -230,3 +230,4 @@ When working with geographic data:
 - IMPORTANTE: Implemente usando Test Driven Development (TDD)
 - os testes automáticos devem sempre passar 100%
 - se um teste automático está falhando descubra a causa raiz. O objetivo não é simplesmente passar nos testes mas assegurar que o sistema está funcionando conforme desejado
+- só faça commit se eu pedir
