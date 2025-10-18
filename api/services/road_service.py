@@ -1,8 +1,6 @@
 import uuid
 from typing import List, Optional, Dict, Any, Tuple, Callable
 import logging
-from datetime import datetime
-import os
 import math
 
 from api.models.road_models import (
@@ -17,45 +15,8 @@ from api.models.road_models import (
 from api.providers.base import GeoProvider
 from api.providers.models import GeoLocation, Route, POI, POICategory
 
-# Configuração do logging
-def setup_logging():
-    """
-    Configura o logging para gravar em arquivo e console.
-    """
-    # Criar diretório de logs se não existir
-    log_dir = "logs"
-    os.makedirs(log_dir, exist_ok=True)
-    
-    # Nome do arquivo de log com timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = os.path.join(log_dir, f"mapalinear_{timestamp}.log")
-    
-    # Configurar o logger
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.INFO)
-    logger.propagate = False  # Desabilita a propagação para o logger pai
-    
-    # Formato do log
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    
-    # Handler para arquivo
-    file_handler = logging.FileHandler(log_file, encoding='utf-8')
-    file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(formatter)
-    
-    # Handler para console
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(formatter)
-    
-    # Adicionar handlers ao logger
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    
-    return logger
-
-# Inicializar o logger
-logger = setup_logging()
+# Usar logger centralizado
+logger = logging.getLogger(__name__)
 
 class RoadService:
     def __init__(self, geo_provider: Optional[GeoProvider] = None):
