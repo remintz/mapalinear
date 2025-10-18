@@ -98,7 +98,7 @@ export interface RouteSearchRequest {
   origin: string;
   destination: string;
   include_gas_stations?: boolean;
-  include_restaurants?: boolean;
+  include_food?: boolean;
   include_toll_booths?: boolean;
   max_distance?: number;
 }

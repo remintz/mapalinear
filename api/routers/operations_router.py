@@ -26,6 +26,10 @@ async def start_async_linear_map(request: LinearMapRequest, background_tasks: Ba
     """
     Inicia uma operação assíncrona para gerar um mapa linear de uma estrada.
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"🔍 DEBUG - Requisição recebida: include_food={request.include_food}, include_gas_stations={request.include_gas_stations}, include_toll_booths={request.include_toll_booths}")
+
     # Criar uma nova operação
     operation = AsyncService.create_operation("linear_map")
     
