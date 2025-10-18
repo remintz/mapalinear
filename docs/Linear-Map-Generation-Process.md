@@ -1,7 +1,7 @@
 # Processo de Geração do Mapa Linear - MapaLinear
 
-**Versão**: 1.0
-**Data**: 2025-01-13
+**Versão**: 1.1
+**Data**: 2025-01-18
 **Autor**: Documentação Técnica MapaLinear
 
 ---
@@ -10,10 +10,10 @@
 
 1. [Visão Geral](#visão-geral)
 2. [Fluxo Completo do Processo](#fluxo-completo-do-processo)
-3. [Etapa 1: Geocodificação](#etapa-1-geocodificação)
+3. [Etapa 1: Geocodificação e Extração de Cidade](#etapa-1-geocodificação-e-extração-de-cidade)
 4. [Etapa 2: Cálculo da Rota](#etapa-2-cálculo-da-rota)
 5. [Etapa 3: Segmentação Linear](#etapa-3-segmentação-linear)
-6. [Etapa 4: Amostragem de Pontos](#etapa-4-amostragem-de-pontos)
+6. [Etapa 4: Extração de Pontos de Busca](#etapa-4-extração-de-pontos-de-busca)
 7. [Etapa 5: Busca de POIs](#etapa-5-busca-de-pois)
 8. [Etapa 6: Criação de Milestones](#etapa-6-criação-de-milestones)
 9. [Etapa 7: Atribuição aos Segmentos](#etapa-7-atribuição-aos-segmentos)
@@ -32,11 +32,11 @@ O **MapaLinear** transforma uma rota geográfica complexa em uma representação
 ```
 Entrada: "São Paulo, SP" → "Rio de Janeiro, RJ"
 
-Saída:   [Mapa Linear com segmentos de 10km e POIs]
+Saída:   [Mapa Linear com segmentos de 1km e POIs]
 
-         0km    10km   20km   30km   40km   50km  ...  450km
-         |------|------|------|------|------|-----|-----|
-         SP    [⛽]  [🍔]  [⛽]  [⛽]      [🏨]     RJ
+         0km  1  2  3  4  5  6  7  8  9  10km ... 450km
+         |---|---|---|---|---|---|---|---|---|---| ... |
+         SP     [⛽]     [🍔]  [⛽]        [🏨]    RJ
 ```
 
 ### Objetivo
@@ -59,10 +59,11 @@ Saída:   [Mapa Linear com segmentos de 10km e POIs]
      │
      ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ ETAPA 1: GEOCODIFICAÇÃO                                         │
-│ Converter endereços textuais em coordenadas geográficas         │
+│ ETAPA 1: GEOCODIFICAÇÃO E EXTRAÇÃO DE CIDADE                    │
+│ Converter endereços em coordenadas + extrair cidade de origem   │
 └─────────────────────────────────────────────────────────────────┘
      │
+     │  origin_city = "São Paulo"  # Extraído de "São Paulo, SP"
      │  origin_location = GeoLocation(lat=-23.5505, lon=-46.6333)
      │  destination_location = GeoLocation(lat=-22.9068, lon=-43.1729)
      │
@@ -81,28 +82,28 @@ Saída:   [Mapa Linear com segmentos de 10km e POIs]
      ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │ ETAPA 3: SEGMENTAÇÃO LINEAR                                     │
-│ Dividir rota em segmentos de tamanho fixo (padrão: 10km)        │
+│ Dividir rota em segmentos de tamanho fixo (padrão: 1km)         │
 └─────────────────────────────────────────────────────────────────┘
      │
      │  segments = [
-     │      Segment(0-10km),
-     │      Segment(10-20km),
+     │      Segment(0-1km),
+     │      Segment(1-2km),
      │      ...
-     │      Segment(440-450km)
-     │  ]  # Total: 45 segmentos
+     │      Segment(449-450km)
+     │  ]  # Total: 450 segmentos
      │
      ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ ETAPA 4: AMOSTRAGEM DE PONTOS                                   │
-│ Gerar pontos ao longo da rota para buscar POIs (intervalo: 5km) │
+│ ETAPA 4: EXTRAÇÃO DE PONTOS DE BUSCA                            │
+│ Usar coordenadas de início/fim dos segmentos para buscar POIs   │
 └─────────────────────────────────────────────────────────────────┘
      │
-     │  sample_points = [
-     │      (lat1, lon1, 0km),
-     │      (lat2, lon2, 5km),
-     │      (lat3, lon3, 10km),
+     │  search_points = [
+     │      (lat_seg1_start, lon_seg1_start, 0km),     # início seg 1
+     │      (lat_seg1_end, lon_seg1_end, 1km),         # fim seg 1
+     │      (lat_seg2_end, lon_seg2_end, 2km),         # fim seg 2
      │      ...
-     │  ]  # Total: ~90 pontos
+     │  ]  # Total: ~450 pontos (1 por km)
      │
      ▼
 ┌─────────────────────────────────────────────────────────────────┐
@@ -114,6 +115,7 @@ Saída:   [Mapa Linear com segmentos de 10km e POIs]
      │    - Buscar POIs (postos, restaurantes, hotéis, pedágios)
      │    - Filtrar por qualidade
      │    - Remover duplicatas
+     │    - Excluir POIs da cidade de origem (via reverse geocoding)
      │
      ▼
 ┌─────────────────────────────────────────────────────────────────┐
@@ -148,10 +150,10 @@ Saída:   [Mapa Linear com segmentos de 10km e POIs]
 
 ---
 
-## Etapa 1: Geocodificação
+## Etapa 1: Geocodificação e Extração de Cidade
 
 ### Objetivo
-Converter endereços em formato texto para coordenadas geográficas precisas.
+Converter endereços em formato texto para coordenadas geográficas precisas e extrair o nome da cidade de origem para filtragem de POIs.
 
 ### Processo
 
@@ -160,7 +162,11 @@ Converter endereços em formato texto para coordenadas geográficas precisas.
 origin = "São Paulo, SP"
 destination = "Rio de Janeiro, RJ"
 
-# PROCESSO
+# PASSO 1: Extrair nome da cidade de origem
+origin_city = origin.split(',')[0].strip()  # "São Paulo"
+# Esta cidade será usada para filtrar POIs posteriormente
+
+# PASSO 2: Geocodificar origem e destino
 origin_location = await geo_provider.geocode(origin)
 # Resultado: GeoLocation(
 #     latitude=-23.5505,
@@ -175,6 +181,28 @@ destination_location = await geo_provider.geocode(destination)
 #     address="Rio de Janeiro, RJ, Brasil"
 # )
 ```
+
+### Extração de Cidade
+
+A extração do nome da cidade é simples e eficaz:
+
+```python
+# Exemplos de extração
+"São Paulo, SP"           → "São Paulo"
+"Belo Horizonte, MG"      → "Belo Horizonte"
+"Rio de Janeiro, RJ"      → "Rio de Janeiro"
+"Campinas, SP"            → "Campinas"
+
+# Normalização para comparação (feita posteriormente)
+"São Paulo"  → "são paulo"  (lowercase + trim)
+"Belo Horizonte" → "belo horizonte"
+```
+
+**Por que extrair do input do usuário?**
+- ✅ Mais simples e confiável
+- ✅ Evita inconsistências da API de geocoding
+- ✅ Funciona offline (não depende de API)
+- ✅ Formato previsível ("Cidade, UF")
 
 ### Diagrama Visual
 
@@ -197,7 +225,16 @@ Texto                     API Geocoding              Coordenadas
 ## Etapa 2: Cálculo da Rota
 
 ### Objetivo
-Calcular a melhor rota entre origem e destino, obtendo geometria detalhada e metadados.
+Calcular a melhor rota entre origem e destino, obtendo geometria detalhada e metadados usando **OSRM** (Open Source Routing Machine).
+
+### Motor de Roteamento
+
+**OSRM (Open Source Routing Machine)** é o provider principal de roteamento:
+- ✅ Roteamento otimizado para estradas
+- ✅ Geometria de alta qualidade (500-1000 pontos)
+- ✅ Gratuito e open-source
+- ✅ API pública disponível
+- ✅ Fallback para cálculo direto se OSRM falhar
 
 ### Processo
 
@@ -376,90 +413,112 @@ Algoritmo simplificado:
 
 ---
 
-## Etapa 4: Amostragem de Pontos
+## Etapa 4: Extração de Pontos de Busca
 
 ### Objetivo
-Gerar pontos equidistantes ao longo da rota onde serão realizadas buscas de POIs.
+Extrair coordenadas dos segmentos lineares (1km) para usar como pontos de busca de POIs, eliminando a necessidade de amostragem arbitrária.
 
 ### Processo
 
+**Mudança importante**: Eliminamos a amostragem de pontos a cada 5km. Agora usamos as coordenadas de início e fim de cada segmento de 1km diretamente.
+
 ```python
-def _sample_points_along_route(route, interval_km=5.0):
+def _extract_search_points_from_segments(segments: List[LinearRoadSegment]):
     """
-    Gera pontos de amostragem a cada 5km ao longo da rota.
+    Extrai pontos de busca das coordenadas dos segmentos.
+
+    Para cada segmento de 1km, usamos as coordenadas de início e fim
+    como pontos onde buscaremos POIs em um raio de 3km.
     """
-    points = []
-    current_distance = 0.0
+    search_points = []
 
-    while current_distance <= route.distance_km:
-        # Interpolar coordenada nesta distância
-        coord = interpolate_at_distance(route.geometry, current_distance)
-        points.append((coord, current_distance))
-        current_distance += interval_km
+    for segment in segments:
+        # Usar coordenadas de início e fim de cada segmento
+        start_point = (
+            segment.start_coordinates.latitude,
+            segment.start_coordinates.longitude
+        )
+        end_point = (
+            segment.end_coordinates.latitude,
+            segment.end_coordinates.longitude
+        )
 
-    return points
+        search_points.append((start_point, segment.start_distance_km))
+        search_points.append((end_point, segment.end_distance_km))
 
-# Exemplo de saída para rota de 450km:
-sample_points = [
-    ((lat=-23.5505, lon=-46.6333), 0.0),      # km 0
-    ((lat=-23.5312, lon=-46.6145), 5.0),      # km 5
-    ((lat=-23.5123, lon=-46.5987), 10.0),     # km 10
-    ((lat=-23.4934, lon=-46.5829), 15.0),     # km 15
-    # ... mais 86 pontos ...
-    ((lat=-22.9068, lon=-43.1729), 450.0)     # km 450
-]  # Total: 91 pontos
+    # Remover duplicatas (fim de um segmento = início do próximo)
+    search_points = list(dict.fromkeys(search_points))
+
+    return search_points
+
+# Exemplo de saída para rota de 450km com segmentos de 1km:
+search_points = [
+    ((lat=-23.5505, lon=-46.6333), 0.0),      # início seg 1 (km 0)
+    ((lat=-23.5501, lon=-46.6320), 1.0),      # fim seg 1 = início seg 2 (km 1)
+    ((lat=-23.5497, lon=-46.6307), 2.0),      # fim seg 2 (km 2)
+    ((lat=-23.5493, lon=-46.6294), 3.0),      # fim seg 3 (km 3)
+    # ... mais 447 pontos ...
+    ((lat=-22.9068, lon=-43.1729), 450.0)     # fim último segmento (km 450)
+]  # Total: ~450 pontos (1 por km)
 ```
+
+**Vantagens**:
+- ✅ Granularidade de 1km (vs 5km antigamente)
+- ✅ Não perde POIs entre pontos de amostragem
+- ✅ Código mais simples (não precisa interpolar)
+- ✅ Coordenadas precisas já calculadas na segmentação
+- ✅ Melhor cobertura de POIs
 
 ### Diagrama Visual
 
+**Processo Antigo (DESCONTINUADO)**: Amostragem a cada 5km
 ```
-ROTA COMPLETA (450km):
+SP ●────●────●────●────●────●────● RJ
+   0    5   10   15   20   25   30km...
+
+   Problemas: ~91 pontos, pode perder POIs entre amostragens
+```
+
+**Processo Atual**: Pontos de busca dos segmentos de 1km
+```
+SEGMENTOS DE 1KM:
 ════════════════════════════════════════════════════════════════
-SP ●─────────────────────────────────────────────────────────● RJ
-   0                      225km                            450km
+        Segmento 1     Segmento 2     Segmento 3     Segmento 4
+   0km  ├─────────┤  ├─────────┤  ├─────────┤  ├─────────┤  4km
+   SP   ●─────────●──●─────────●──●─────────●──●─────────●
+        ↑         ↑  ↑         ↑  ↑         ↑  ↑         ↑
+      início    fim  início    fim início    fim início    fim
+        P0       P1  (P1)      P2  (P2)      P3  (P3)      P4
 
-                  ▼ AMOSTRAGEM (intervalo: 5km) ▼
+   Cada coordenada de início/fim é um ponto de busca
+   Total: ~450 pontos para rota de 450km
 
-PONTOS DE AMOSTRAGEM (91 pontos):
+BUSCA DE POIs EM CADA PONTO (raio: 3km):
 ════════════════════════════════════════════════════════════════
-SP ●────●────●────●────●────●────●────●────●────●────●────●─ RJ
-   0    5   10   15   20   25   30   35   40   45   50   55km...
 
-   P0   P1   P2   P3   P4   P5   P6   P7   P8   P9  P10  P11
+        Raio de busca (3km)          Raio de busca (3km)
+              ╱───╲                        ╱───╲
+   ●──────────●──────────●──────────●──────────●──────────●
+   0km       P1         2km        P3         4km        P5
 
-Cada ponto será usado para buscar POIs em um raio de 3km:
+              [──── overlap ────]
 
-        Raio de busca (3km)
-              ╱───╲
-   P1 ──────●───────────  (km 5)
-            │ Buscar:    │
-            │ - Postos   │
-            │ - Comida   │
-            │ - Hotéis   │
-            │ - Pedágios │
-             ╲───╱
+   Overlap total: Cada POI pode ser encontrado em múltiplos pontos
+   Garante cobertura completa sem perder POIs
 ```
 
-### Por que 5km de intervalo?
+### Por que usar coordenadas dos segmentos?
 
-**Vantagens**:
-- ✅ **Cobertura completa**: Com raio de busca de 3km, garante overlap
-- ✅ **Balanceamento**: Não sobrecarrega API (91 requisições vs 450 com 1km)
-- ✅ **Precisão adequada**: Não perde POIs importantes
-- ✅ **Performance**: Tempo de processamento aceitável (~3-5 minutos)
+**Vantagens sobre amostragem de 5km**:
+- ✅ **Granularidade superior**: 1km vs 5km
+- ✅ **Cobertura completa**: Não perde POIs entre pontos
+- ✅ **Coordenadas precisas**: Já calculadas na segmentação
+- ✅ **Código simples**: Não precisa interpolar
+- ✅ **Melhor qualidade**: Mais POIs descobertos
 
-**Overlap dos raios de busca**:
-```
-         [─── 3km ───]
-    P1 ──────●──────────────
-                 [─── 3km ───]
-            P2 ──────●──────────────
-                         [─── 3km ───]
-                    P3 ──────●──────────────
-
-    Overlap: 1km entre buscas consecutivas
-    Garante que nenhum POI seja perdido
-```
+**Trade-off**:
+- ⚠️ Mais requisições à API: ~450 vs ~91 (mas com cache, não é problema)
+- ✅ Muito melhor detecção de POIs compensa o aumento
 
 ---
 
@@ -471,7 +530,12 @@ Para cada ponto de amostragem, buscar POIs relevantes em um raio configurável.
 ### Processo
 
 ```python
-async def _find_milestones_along_route(route, categories, max_distance_from_road=3000):
+async def _find_milestones_along_route(
+    route,
+    categories,
+    max_distance_from_road=3000,
+    exclude_cities=None  # Lista de cidades a excluir (ex: ["São Paulo"])
+):
     """
     Busca POIs ao longo da rota.
 
@@ -479,6 +543,7 @@ async def _find_milestones_along_route(route, categories, max_distance_from_road
         route: Rota calculada
         categories: [POICategory.GAS_STATION, POICategory.RESTAURANT, ...]
         max_distance_from_road: Raio de busca em metros (padrão: 3000m = 3km)
+        exclude_cities: Lista de nomes de cidades cujos POIs devem ser excluídos
     """
     milestones = []
 
@@ -500,6 +565,17 @@ async def _find_milestones_along_route(route, categories, max_distance_from_road
             if not any(m.id == poi.id for m in milestones):
                 milestone = create_milestone_from_poi(poi, distance_from_origin)
                 milestones.append(milestone)
+
+    # Enriquecer milestones com informações de cidade (reverse geocoding)
+    await enrich_milestones_with_cities(milestones)
+
+    # Filtrar POIs da cidade de origem
+    if exclude_cities:
+        exclude_cities_normalized = [city.strip().lower() for city in exclude_cities]
+        milestones = [
+            m for m in milestones
+            if not m.city or m.city.strip().lower() not in exclude_cities_normalized
+        ]
 
     return milestones
 ```
@@ -611,6 +687,83 @@ POIs encontrados no km 25:
    Cozinha: Italiana
    Telefone: +55 11 3456-1234
    Horário: 11:00-23:00
+```
+
+### Filtragem por Cidade
+
+Após buscar e filtrar POIs por qualidade, o sistema aplica filtragem por cidade para remover POIs da cidade de origem:
+
+```python
+def filter_by_city(milestones, exclude_cities):
+    """
+    Filtra milestones excluindo POIs das cidades especificadas.
+
+    Args:
+        milestones: Lista de RoadMilestone com campo 'city' preenchido
+        exclude_cities: Lista de nomes de cidades a excluir (ex: ["São Paulo"])
+
+    Returns:
+        Lista filtrada de milestones
+    """
+    # Normalizar nomes de cidades para comparação (lowercase, trim)
+    exclude_cities_normalized = [city.strip().lower() for city in exclude_cities]
+
+    filtered = [
+        m for m in milestones
+        if not m.city or m.city.strip().lower() not in exclude_cities_normalized
+    ]
+
+    return filtered
+```
+
+**Exemplo: Rota "São Paulo, SP" → "Rio de Janeiro, RJ"**
+
+```
+POIs encontrados após busca e filtragem de qualidade:
+
+✅ INCLUÍDO - Posto Shell
+   Cidade: Guarulhos
+   Distância: 25.3km
+   Motivo: Cidade diferente de São Paulo
+
+✅ INCLUÍDO - Restaurante Estrada
+   Cidade: Jacareí
+   Distância: 87.5km
+   Motivo: Cidade diferente de São Paulo
+
+❌ EXCLUÍDO - Posto Ipiranga Marginal
+   Cidade: São Paulo
+   Distância: 8.2km
+   Motivo: Cidade de origem (São Paulo)
+
+❌ EXCLUÍDO - Restaurante Paulista
+   Cidade: são paulo  # Normalizado para comparação
+   Distância: 12.1km
+   Motivo: Cidade de origem (São Paulo)
+
+✅ INCLUÍDO - Hotel Via Dutra
+   Cidade: Rio de Janeiro
+   Distância: 442.8km
+   Motivo: Cidade de destino (incluída)
+```
+
+**Enriquecimento com Reverse Geocoding**
+
+Para cada milestone, fazemos reverse geocoding para obter o nome da cidade:
+
+```python
+async def enrich_milestones_with_cities(milestones):
+    """
+    Enriquece milestones com informações de cidade via reverse geocoding.
+    """
+    for milestone in milestones:
+        if not milestone.city:  # Se ainda não tem cidade
+            location = await geo_provider.reverse_geocode(
+                milestone.coordinates.latitude,
+                milestone.coordinates.longitude
+            )
+            # Extrair cidade do resultado
+            milestone.city = location.city or location.town or location.village
 ```
 
 ---
@@ -742,12 +895,16 @@ POICategory (genérica)  →  MilestoneType (específica)
 GAS_STATION            →  FUEL (combustível)
 FUEL                   →  FUEL
 
-RESTAURANT             →  FOOD (alimentação)
-FOOD                   →  FOOD
-CAFE                   →  FOOD
-FAST_FOOD              →  FOOD
+RESTAURANT             →  RESTAURANT (restaurante)
+FAST_FOOD              →  FAST_FOOD (fast food)
+CAFE                   →  CAFE (café)
+BAR                    →  BAR (bar)
+PUB                    →  PUB (pub)
+FOOD_COURT             →  FOOD_COURT (praça de alimentação)
+BAKERY                 →  BAKERY (padaria)
+ICE_CREAM              →  ICE_CREAM (sorveteria)
 
-HOTEL                  →  LODGING (hospedagem)
+HOTEL                  →  HOTEL (hospedagem)
 MOTEL                  →  LODGING
 
 HOSPITAL               →  SERVICES (serviços)
@@ -925,48 +1082,81 @@ def generate_linear_map(
     road_id: Optional[str] = None,                  # ID customizado
     include_cities: bool = True,                    # Incluir cidades
     include_gas_stations: bool = True,              # Incluir postos
-    include_food: bool = False,                     # Incluir comida
+    include_food: bool = False,                     # Incluir estabelecimentos de alimentação (8 tipos)
     include_toll_booths: bool = True,               # Incluir pedágios
     max_distance_from_road: float = 3000,           # Raio busca (metros)
-    min_distance_from_origin_km: float = 5.0,       # Ignorar início
-    segment_length_km: float = 10.0,                # Tamanho segmento
+    min_distance_from_origin_km: float = 0.0,       # DEPRECATED - use filtragem por cidade
+    segment_length_km: float = 1.0,                 # Tamanho segmento (padrão: 1km)
     progress_callback: Optional[Callable] = None    # Callback progresso
 ) -> LinearMapResponse:
 ```
 
 ### Impacto dos Parâmetros
 
-#### `segment_length_km` (Tamanho do Segmento)
+#### `include_food` (Estabelecimentos de Alimentação)
+
+**Mudança importante**: Substituiu `include_restaurants` e agora inclui **8 tipos** de estabelecimentos de alimentação.
 
 ```
+include_food=True busca os seguintes tipos:
+
+📍 Refeições:
+   - restaurant     (restaurantes)
+   - fast_food      (fast food)
+   - food_court     (praças de alimentação)
+
+📍 Bebidas:
+   - cafe           (cafés e cafeterias)
+   - bar            (bares)
+   - pub            (pubs)
+
+📍 Doces:
+   - bakery         (padarias)
+   - ice_cream      (sorveterias)
+
+Vantagem: Cobertura completa de opções de alimentação para viajantes
+```
+
+**Exemplo de query OSM**:
+```
+amenity~"restaurant|fast_food|cafe|bar|pub|food_court|ice_cream"
+shop="bakery"
+```
+
+#### `segment_length_km` (Tamanho do Segmento)
+
+**Mudança importante**: O padrão mudou de 10km para **1km** para melhor detecção de POIs.
+
+```
+segment_length_km = 1.0 (PADRÃO ATUAL):
+   0   1   2   3   4   5   6   7   8   9   10  km
+   |---|---|---|---|---|---|---|---|---|----| ...
+   S1  S2  S3  S4  S5  S6  S7  S8  S9  S10
+
+   ✓ Alta granularidade (450 segmentos para 450km)
+   ✓ Detecção precisa de POIs
+   ✓ Elimina necessidade de amostragem intermediária
+   ✓ Coordenadas de início/fim de cada segmento usadas diretamente
+   ✗ Mais segmentos na resposta
+
 segment_length_km = 5.0:
    0    5   10   15   20   25   30  km
    |────|────|────|────|────|────|
    S1   S2   S3   S4   S5   S6   S7
 
-   ✓ Mais segmentos (90 para 450km)
-   ✓ Mais granular
-   ✗ Mais dados para processar
-   ✗ UI pode ficar carregada
+   ✓ Menos segmentos (90 para 450km)
+   ✓ Granularidade média
+   ✗ Pode perder alguns POIs
 
-segment_length_km = 10.0 (PADRÃO):
+segment_length_km = 10.0 (ANTIGO PADRÃO):
    0    10   20   30   40   50   60  km
    |─────|─────|─────|─────|─────|
    S1    S2    S3    S4    S5    S6
 
-   ✓ Balanceado (45 segmentos)
-   ✓ Boa granularidade
-   ✓ Performance adequada
-
-segment_length_km = 20.0:
-   0     20    40    60    80   100  km
-   |──────|──────|──────|──────|
-   S1     S2     S3     S4     S5
-
-   ✓ Menos segmentos (23 para 450km)
-   ✓ Mais rápido
-   ✗ Menos granular
-   ✗ Pode perder detalhes
+   ✓ Poucos segmentos (45 para 450km)
+   ✓ Resposta mais compacta
+   ✗ Menor granularidade
+   ✗ Pode perder POIs entre segmentos
 ```
 
 #### `max_distance_from_road` (Raio de Busca)
@@ -999,23 +1189,42 @@ max_distance = 5000m (5km):
    ✗ Muitos resultados
 ```
 
-#### `min_distance_from_origin_km` (Ignorar Início)
+#### Filtragem por Cidade de Origem
+
+**Nota**: O parâmetro `min_distance_from_origin_km` foi descontinuado. O sistema agora usa **filtragem inteligente por cidade**.
 
 ```
-Sem filtro (min_distance = 0):
-SP ●⛽🍔⛽🍔⛽────────────────────────────● RJ
-   0  2 4 6 8        ...              450km
+Como funciona:
 
-   ✗ Muitos POIs no início (redundante)
-   ✗ Usuário já conhece a região
+1. Extração do nome da cidade:
+   Input: "São Paulo, SP"
+   Cidade extraída: "São Paulo"
 
-Com filtro (min_distance = 5km, PADRÃO):
-SP ●──────────⛽────🍔────⛽────────────● RJ
-   0    5    10   15   20   25  ...  450km
+2. Filtragem de POIs:
+   ✓ POIs em outras cidades são incluídos
+   ✗ POIs na cidade de origem são excluídos
 
-   ✓ Ignora região conhecida
-   ✓ Foca na viagem real
-   ✓ Menos processamento
+Exemplo: Rota "São Paulo, SP" → "Rio de Janeiro, RJ"
+
+SP (cidade de origem) ●──────────────────────────────────● RJ (cidade de destino)
+   |                                                        |
+   | POIs em São Paulo: ❌ Excluídos                       |
+   | POIs em Guarulhos: ✅ Incluídos                       |
+   | POIs em Jacareí: ✅ Incluídos                         |
+   | POIs em outras cidades: ✅ Incluídos                  |
+   | POIs no Rio de Janeiro: ✅ Incluídos (destino)        |
+
+Vantagens:
+   ✓ Mais preciso que filtro por distância
+   ✓ Exclui apenas POIs que o usuário já conhece (cidade de origem)
+   ✓ Mantém POIs úteis em cidades próximas
+   ✓ Normalização inteligente (ignora maiúsculas/espaços)
+   ✓ Funciona com cidades de qualquer tamanho
+
+Comparação com cidade:
+   - "são paulo" == "São Paulo" ✅
+   - "Belo Horizonte" == "belo horizonte" ✅
+   - "Rio de Janeiro" == "rio de janeiro" ✅
 ```
 
 ---
@@ -1032,7 +1241,7 @@ linear_map = road_service.generate_linear_map(
     include_gas_stations=True,
     include_food=True,
     include_toll_booths=True,
-    segment_length_km=10.0
+    segment_length_km=1.0  # Padrão: 1km
 )
 
 # RESULTADO
@@ -1045,41 +1254,37 @@ LinearMapResponse {
             id: "segment_1",
             name: "Via Dutra",
             start_distance_km: 0.0,
-            end_distance_km: 10.0,
-            milestones: []  # Ignorados (min_distance=5km)
+            end_distance_km: 1.0,
+            milestones: []  # POIs filtrados (cidade de origem: São Paulo)
         },
         LinearRoadSegment {
             id: "segment_2",
-            start_distance_km: 10.0,
-            end_distance_km: 20.0,
+            start_distance_km: 1.0,
+            end_distance_km: 2.0,
+            milestones: []  # Ainda em São Paulo
+        },
+        // ... segmentos 3-14 (ainda em São Paulo) ...
+        LinearRoadSegment {
+            id: "segment_15",
+            start_distance_km: 14.0,
+            end_distance_km: 15.0,
+            milestones: []
+        },
+        LinearRoadSegment {
+            id: "segment_16",
+            start_distance_km: 15.0,
+            end_distance_km: 16.0,
             milestones: [
                 RoadMilestone {
                     name: "Posto Ipiranga",
-                    type: FUEL,
+                    type: GAS_STATION,
                     distance_from_origin_km: 15.3,
+                    city: "Guarulhos",  # Primeira cidade fora de SP
                     amenities: ["24h", "banheiro", "loja"]
                 }
             ]
         },
-        LinearRoadSegment {
-            id: "segment_3",
-            start_distance_km: 20.0,
-            end_distance_km: 30.0,
-            milestones: [
-                RoadMilestone {
-                    name: "Restaurante Famiglia",
-                    type: FOOD,
-                    distance_from_origin_km: 23.7,
-                    amenities: ["wifi", "estacionamento"]
-                },
-                RoadMilestone {
-                    name: "Pedágio Jacareí",
-                    type: TOLL,
-                    distance_from_origin_km: 28.5
-                }
-            ]
-        },
-        // ... mais 42 segmentos
+        // ... mais 434 segmentos (450 total) ...
     ],
     milestones: [  // Lista completa ordenada
         // ~150 milestones
@@ -1098,7 +1303,7 @@ LinearMapResponse {
 
  KM  │ SEGMENTO │ MILESTONES
 ═════╪══════════╪═══════════════════════════════════════════════════
-  0  │    S1    │ (início ignorado)
+  0  │    S1    │ (POIs de São Paulo filtrados)
  10  │    S2    │ ⛽ Posto Ipiranga (15.3km)
  20  │    S3    │ 🍔 Restaurante Famiglia (23.7km)
      │          │ 🎫 Pedágio Jacareí (28.5km)
@@ -1123,7 +1328,7 @@ LinearMapResponse {
 linear_map = road_service.generate_linear_map(
     origin="Belo Horizonte, MG",
     destination="Ouro Preto, MG",
-    segment_length_km=5.0,  # Segmentos menores
+    segment_length_km=1.0,  # Padrão: 1km
     max_distance_from_road=2000,  # Raio menor
     include_gas_stations=True,
     include_food=False  # Não incluir comida
@@ -1133,11 +1338,12 @@ linear_map = road_service.generate_linear_map(
 LinearMapResponse {
     total_length_km: 87.0,
     segments: [
-        # 18 segmentos de 5km cada
-        # (87km / 5km = ~18 segmentos)
+        # 87 segmentos de 1km cada
+        # Granularidade fina para rota curta
     ],
     milestones: [
-        # ~25 milestones (apenas postos)
+        # ~30 milestones (apenas postos)
+        # Mais POIs encontrados devido à granularidade de 1km
     ]
 }
 ```
@@ -1226,12 +1432,12 @@ Segundo acesso (cache completo):
        │        └─► OSRM/HERE Routing API
        │
        ├─► [3] Segmentação Linear (local)
-       │        └─► Divide rota em segmentos de 10km
+       │        └─► Divide rota em segmentos de 1km
        │
-       ├─► [4] Amostragem de Pontos (local)
-       │        └─► Gera pontos a cada 5km
+       ├─► [4] Extração de Pontos de Busca (local)
+       │        └─► Extrai coordenadas start/end dos segmentos (1 por km)
        │
-       ├─► [5] Busca de POIs (geo_provider.search_pois × 91)
+       ├─► [5] Busca de POIs (geo_provider.search_pois × ~450)
        │        └─► OSM Overpass/HERE Places API
        │
        ├─► [6] Criação Milestones (local)
@@ -1274,7 +1480,7 @@ Segundo acesso (cache completo):
 | Termo | Definição |
 |-------|-----------|
 | **Linear Map** | Representação simplificada de uma rota em formato linear |
-| **Segmento** | Trecho linear de 10km da rota |
+| **Segmento** | Trecho linear de 1km da rota (padrão) |
 | **Milestone** | Ponto de interesse (POI) ao longo da rota |
 | **POI** | Point of Interest - estabelecimento ou local relevante |
 | **Geocodificação** | Conversão de endereço texto → coordenadas |
@@ -1296,8 +1502,9 @@ Segundo acesso (cache completo):
 
 ---
 
-**Versão do documento**: 1.0
-**Última atualização**: 2025-01-13
+**Versão do documento**: 1.1
+**Última atualização**: 2025-01-18
+**Mudanças v1.1**: Substituído filtro de distância mínima por filtragem inteligente por cidade
 **Autor**: Equipe MapaLinear
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
