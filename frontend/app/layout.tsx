@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MapaLinear - Mapas Lineares para Viagens",
+  title: "OraPOIS - Pontos de Interesse em Viagens",
   description: "Crie mapas lineares com pontos de interesse para suas viagens brasileiras",
 };
 

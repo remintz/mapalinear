@@ -22,6 +22,10 @@ export interface POI {
   cuisine?: string;
   amenities?: string[];
   quality_score?: number;
+  // Junction information for distant POIs
+  junction_distance_km?: number;
+  junction_coordinates?: { latitude: number; longitude: number };
+  requires_detour?: boolean;
 }
 
 // Enums
@@ -94,6 +98,10 @@ export interface Milestone {
   cuisine?: string;
   amenities?: string[];
   quality_score?: number;
+  // Junction information for distant POIs
+  junction_distance_km?: number;
+  junction_coordinates?: { latitude: number; longitude: number };
+  requires_detour?: boolean;
 }
 
 export enum MilestoneType {

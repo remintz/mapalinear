@@ -13,11 +13,11 @@ export default function Home() {
             Powered by OpenStreetMap
           </Badge>
           <h1 className="text-5xl md:text-7xl font-bold text-gray-900 mb-6">
-            Mapas Lineares para{' '}
-            <span className="text-blue-600">Viagens Rodoviárias</span>
+            Seu Auxílio nas{' '}
+            <span className="text-blue-600">Estradas</span>
           </h1>
           <p className="text-xl text-gray-600 mb-8 max-w-3xl mx-auto">
-            Planeje suas viagens pelas estradas brasileiras com mapas lineares inteligentes.
+            Planeje suas viagens pelas estradas brasileiras com pontos de interesse organizados por distância.
             Encontre postos, restaurantes, cidades e muito mais ao longo do caminho.
           </p>
           <div className="flex gap-4 justify-center">
@@ -123,8 +123,8 @@ export default function Home() {
 
         {/* Key Features */}
         <div className="mb-16">
-          <h2 className="text-3xl font-bold text-center mb-10">Recursos Avançados</h2>
-          <div className="grid md:grid-cols-2 gap-8">
+          <h2 className="text-3xl font-bold text-center mb-10">Recursos Principais</h2>
+          <div className="grid md:grid-cols-1 gap-8 max-w-2xl mx-auto">
             <Card className="border-blue-200 bg-blue-50">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-blue-900">
@@ -144,66 +144,6 @@ export default function Home() {
                 </ul>
               </CardContent>
             </Card>
-
-            <Card className="border-green-200 bg-green-50">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-green-900">
-                  <span className="text-2xl">⚡</span>
-                  Cache Inteligente
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-green-800 mb-4">
-                  Sistema de cache persistente que acelera buscas e reduz chamadas à API.
-                </p>
-                <ul className="text-sm text-green-700 space-y-2">
-                  <li>✓ Geocodificação em cache (7 dias)</li>
-                  <li>✓ Rotas em cache (6 horas)</li>
-                  <li>✓ POIs em cache (1 dia)</li>
-                  <li>✓ Matching semântico inteligente</li>
-                </ul>
-              </CardContent>
-            </Card>
-
-            <Card className="border-purple-200 bg-purple-50">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-purple-900">
-                  <span className="text-2xl">📤</span>
-                  Exportação Múltipla
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-purple-800 mb-4">
-                  Exporte seus mapas em diversos formatos para uso em outras ferramentas.
-                </p>
-                <ul className="text-sm text-purple-700 space-y-2">
-                  <li>✓ GeoJSON (para uMap, QGIS)</li>
-                  <li>✓ GPX (para GPS e apps móveis)</li>
-                  <li>✓ Visualização no uMap</li>
-                  <li>✓ Validação no Overpass Turbo</li>
-                </ul>
-              </CardContent>
-            </Card>
-
-            <Card className="border-orange-200 bg-orange-50">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-orange-900">
-                  <span className="text-2xl">🔄</span>
-                  Processamento Assíncrono
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-orange-800 mb-4">
-                  Buscas longas são processadas em background com acompanhamento em tempo real.
-                </p>
-                <ul className="text-sm text-orange-700 space-y-2">
-                  <li>✓ Barra de progresso visual</li>
-                  <li>✓ Estimativa de tempo restante</li>
-                  <li>✓ Mensagens de status</li>
-                  <li>✓ Interface responsiva</li>
-                </ul>
-              </CardContent>
-            </Card>
           </div>
         </div>
 
@@ -214,7 +154,7 @@ export default function Home() {
               Pronto para Planejar sua Viagem?
             </h2>
             <p className="text-blue-100 mb-8 text-lg max-w-2xl mx-auto">
-              Crie seu primeiro mapa linear agora e descubra tudo que existe ao longo do caminho.
+              Crie seu primeiro mapa agora e descubra tudo que existe ao longo do caminho.
               É rápido, fácil e completamente gratuito!
             </p>
             <div className="flex gap-4 justify-center">
@@ -230,7 +170,7 @@ export default function Home() {
         {/* Footer Info */}
         <div className="text-center mt-12 text-gray-600 text-sm">
           <p>
-            MapaLinear utiliza dados do{' '}
+            OraPOIS utiliza dados do{' '}
             <a href="https://www.openstreetmap.org" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
               OpenStreetMap
             </a>

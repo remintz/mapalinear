@@ -1,7 +1,7 @@
 # Processo de Geração do Mapa Linear - MapaLinear
 
-**Versão**: 1.1
-**Data**: 2025-01-18
+**Versão**: 1.2
+**Data**: 2025-01-19
 **Autor**: Documentação Técnica MapaLinear
 
 ---
@@ -920,6 +920,185 @@ CITY                   →  CITY (cidade)
 TOWN                   →  CITY
 ```
 
+### Cálculo de Entroncamento para POIs Afastados
+
+**Problema**: POIs distantes da estrada (>500m) requerem que o viajante saia da rodovia principal. A distância do POI até a origem não reflete onde o viajante deve realmente sair da estrada.
+
+**Solução**: Para POIs afastados, o sistema calcula o **entroncamento** (junction) - o ponto exato na rota principal onde o viajante deve sair para acessar o POI.
+
+#### Quando é Aplicado
+
+```
+Critério de ativação: distance_from_road_meters > 500
+
+POI próximo (≤500m):               POI afastado (>500m):
+════════════════════════            ════════════════════════
+        ⛽ (300m)                            🏨 (2500m)
+         |                                    |
+    ─────●─────  Rota                    ─────●─────  Rota
+         ↑                                    ↑
+    Acesso direto                       Precisa de entroncamento!
+    (não calcula junction)              (calcula junction)
+```
+
+#### Estratégia: Routing Regional com Lookback
+
+O sistema usa uma estratégia de "lookback" inteligente:
+
+```python
+1. Detecta POI afastado (>500m da estrada)
+2. Calcula ponto de lookback:
+   - Mínimo: 5km antes do ponto de detecção
+   - Máximo: 20km antes do ponto de detecção
+   - Dinâmico: baseado na distância do POI da estrada
+
+3. Calcula rota do ponto de lookback até o POI
+4. Encontra interseção entre essa rota e a rota principal
+5. Marca a interseção como entroncamento
+```
+
+#### Diagrama Visual: Processo de Cálculo
+
+```
+SITUAÇÃO: Hotel encontrado no km 45, mas está 2.5km distante da estrada
+
+════════════════════════════════════════════════════════════════════
+ROTA PRINCIPAL (Via Dutra):
+                                        ● Hotel (2.5km da estrada)
+                                       ╱
+   Origem ●──────────────────────────●───────────────────── Destino
+          0km    10km   20km   30km  40km   50km   60km
+                                     ↑
+                              Ponto de detecção
+                              (km 45 - mais próximo)
+
+PASSO 1: Calcular lookback dinâmico
+   POI distance: 2.5km → lookback: min(2.5 × 4, 20) = 10km
+   Lookback point: 45km - 10km = 35km
+
+PASSO 2: Calcular rota de acesso (lookback → POI)
+   ════════════════════════════════════════════════════════════════
+                                        ● Hotel
+                                       ╱│
+                                      ╱ │
+   Origem ●────────────────────●─────●──●──────────────── Destino
+          0km              Lookback  │  45km
+                           (35km)    │
+                                     ↓
+                              Rota de acesso calculada
+                              (via OSRM routing)
+
+PASSO 3: Encontrar interseção (com tolerância de 150m)
+   ════════════════════════════════════════════════════════════════
+                                        ● Hotel
+                                       ╱
+                                      ╱
+   Origem ●────────────────────●─────◆──●──────────────── Destino
+          0km              35km    42.5km 45km
+                                     ↑
+                              Entroncamento encontrado!
+                              (interseção das rotas)
+
+RESULTADO: Milestone com informações de entroncamento
+   ════════════════════════════════════════════════════════════════
+   RoadMilestone {
+       name: "Hotel Fazenda Via Dutra",
+       distance_from_origin_km: 45.0,        ← Onde foi detectado
+       distance_from_road_meters: 2500,       ← Distância do POI
+
+       requires_detour: true,                 ← POI requer desvio
+       junction_distance_km: 42.5,            ← Onde SAIR da estrada
+       junction_coordinates: (lat, lon)       ← Coordenadas da saída
+   }
+```
+
+#### Parâmetros do Algoritmo
+
+```python
+# Limiar para POI afastado
+DISTANCE_THRESHOLD = 500  # metros
+
+# Lookback dinâmico
+MIN_LOOKBACK_KM = 5       # Mínimo de lookback
+MAX_LOOKBACK_KM = 20      # Máximo de lookback
+LOOKBACK_FACTOR = 4       # Multiplicador da distância do POI
+
+lookback_km = min(
+    max(poi_distance_km * LOOKBACK_FACTOR, MIN_LOOKBACK_KM),
+    MAX_LOOKBACK_KM
+)
+
+# Tolerância para encontrar interseção
+INTERSECTION_TOLERANCE = 150  # metros
+```
+
+#### Exemplo Prático
+
+```
+Cenário: Rota São Paulo → Rio de Janeiro
+
+POI encontrado no km 87.5:
+   Nome: "Restaurante Panorama"
+   Distância da estrada: 1800 metros (>500m ✓)
+   Coordenadas: (-23.2145, -45.8976)
+
+Cálculo do entroncamento:
+   1. Lookback: 1.8km × 4 = 7.2km
+   2. Lookback point: 87.5 - 7.2 = 80.3km
+   3. Rota calculada: Ponto(80.3km) → Restaurante
+   4. Interseção encontrada: km 84.7
+
+Resultado no milestone:
+   distance_from_origin_km: 87.5      # Detecção original
+   junction_distance_km: 84.7          # Onde realmente sair!
+   requires_detour: true
+
+Mensagem para o viajante:
+   "No km 84.7, saia da rodovia para acessar o
+    Restaurante Panorama (1.8km da estrada)"
+```
+
+#### Casos Especiais
+
+**Caso 1: Entroncamento não encontrado**
+```
+Se a interseção não for encontrada dentro da tolerância:
+   → POI é ABANDONADO (não incluído no mapa)
+   → Motivo: Provavelmente inacessível ou rota muito indireta
+```
+
+**Caso 2: Lookback muito próximo do início**
+```
+Se lookback_point < 0:
+   → Usa lookback_point = 0 (início da rota)
+   → Garante que sempre há um ponto de partida válido
+```
+
+**Caso 3: POI próximo da estrada**
+```
+Se distance_from_road <= 500m:
+   → junction_distance_km: null
+   → junction_coordinates: null
+   → requires_detour: false
+   → Acesso direto, sem necessidade de cálculo
+```
+
+#### Performance
+
+```
+Impacto no tempo de processamento:
+
+Rota de 450km com 150 POIs:
+   - POIs próximos (≤500m): 130 POIs → sem cálculo extra
+   - POIs afastados (>500m): 20 POIs → +20 cálculos de rota
+
+Tempo adicional:
+   - Com cache: ~2-3 segundos
+   - Sem cache: ~40-60 segundos (20 rotas × 2-3s cada)
+
+Trade-off: ✅ Informação precisa vale o custo adicional
+```
+
 ---
 
 ## Etapa 7: Atribuição aos Segmentos
@@ -1067,6 +1246,11 @@ class RoadMilestone:
     amenities: List[str]                 # ["24h", "banheiro", "wifi"]
     quality_score: Optional[float]       # 0.85
     tags: Dict                           # Dados brutos do provider
+
+    # Informações de entroncamento (para POIs afastados)
+    junction_distance_km: Optional[float]      # 42.5 - Distância do entroncamento desde a origem
+    junction_coordinates: Optional[Coordinates] # Coordenadas do entroncamento/saída
+    requires_detour: bool                      # True se POI está >500m da estrada
 ```
 
 ---
@@ -1489,6 +1673,9 @@ Segundo acesso (cache completo):
 | **Amostragem** | Seleção de pontos equidistantes para busca de POIs |
 | **Provider** | Fonte de dados geográficos (OSM, HERE, etc.) |
 | **Quality Score** | Métrica de completude dos dados de um POI |
+| **Entroncamento** | Ponto exato na rota principal onde sair para acessar POI afastado |
+| **Junction** | Ver Entroncamento (termo técnico em inglês) |
+| **Lookback** | Distância retroativa usada para calcular rota de acesso ao POI |
 
 ---
 
@@ -1502,8 +1689,9 @@ Segundo acesso (cache completo):
 
 ---
 
-**Versão do documento**: 1.1
-**Última atualização**: 2025-01-18
+**Versão do documento**: 1.2
+**Última atualização**: 2025-01-19
+**Mudanças v1.2**: Adicionado cálculo de entroncamento para POIs afastados (>500m) usando estratégia de routing regional com lookback dinâmico
 **Mudanças v1.1**: Substituído filtro de distância mínima por filtragem inteligente por cidade
 **Autor**: Equipe MapaLinear
 
