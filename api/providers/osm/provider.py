@@ -479,10 +479,10 @@ class OSMProvider(GeoProvider):
     def _generate_overpass_query(self, location: GeoLocation, radius: float, categories: List[POICategory]) -> str:
         """Generate Overpass query for POI search."""
         logger.debug(f"🔧 Gerando query Overpass para categorias: {[cat.value for cat in categories]}")
-        
+
         # Convert radius to degrees (approximate)
         radius_deg = radius / 111000  # Rough conversion
-        
+
         # Calculate bounding box
         bbox = {
             'south': location.latitude - radius_deg,
@@ -490,29 +490,42 @@ class OSMProvider(GeoProvider):
             'north': location.latitude + radius_deg,
             'east': location.longitude + radius_deg
         }
-        
+
         # logger.debug(f"🔧 Bounding box: {bbox}")
-        
+
         # Map categories to OSM amenity tags (use set to avoid duplicates)
         amenity_filters = set()
+        include_places = False
         for category in categories:
+            if category == POICategory.SERVICES:
+                include_places = True  # SERVICES category includes cities/towns/villages
             osm_amenities = self._get_osm_amenities_for_category(category)
             # logger.debug(f"🔧 Categoria {category.value} -> amenities OSM: {osm_amenities}")
             amenity_filters.update(osm_amenities)
-        
+
         amenity_filters = list(amenity_filters)  # Convert back to list
         logger.info(f"🔧 Amenities OSM únicos para busca: {amenity_filters}")
-        
+        if include_places:
+            logger.info(f"🏙️ Incluindo busca por cidades (place=city/town/village)")
+
         # Build query
         bbox_str = f"{bbox['south']},{bbox['west']},{bbox['north']},{bbox['east']}"
-        
+
         query_parts = ['[out:json];', '(']
+
+        # Add amenity searches
         for amenity in amenity_filters:
             query_parts.append(f'  node["amenity"="{amenity}"]({bbox_str});')
             query_parts.append(f'  way["amenity"="{amenity}"]({bbox_str});')
-        
+
+        # Add place searches (cities, towns, villages) if SERVICES category is present
+        if include_places:
+            for place_type in ['city', 'town', 'village']:
+                query_parts.append(f'  node["place"="{place_type}"]({bbox_str});')
+                query_parts.append(f'  way["place"="{place_type}"]({bbox_str});')
+
         query_parts.extend([');', 'out meta;'])
-        
+
         final_query = '\n'.join(query_parts)
         # logger.debug(f"🔧 Query final:\n{final_query}")
         return final_query
@@ -577,11 +590,11 @@ class OSMProvider(GeoProvider):
         """Parse OSM element to POI object with quality filtering."""
         try:
             tags = element.get('tags', {})
-            
-            # Skip elements without required data
-            if not tags.get('name') and not tags.get('amenity'):
+
+            # Skip elements without required data (must have name OR amenity OR place)
+            if not tags.get('name') and not tags.get('amenity') and not tags.get('place'):
                 return None
-            
+
             # Skip abandoned POIs
             if self._is_poi_abandoned(tags):
                 return None
@@ -600,15 +613,25 @@ class OSMProvider(GeoProvider):
                 lat, lon = element['center']['lat'], element['center']['lon']
             else:
                 return None
-            
-            # Determine category
-            category = self._map_osm_amenity_to_category(tags.get('amenity', ''))
-            if not category:
-                category = POICategory.SERVICES  # Default category
-            
+
+            # Determine category - try place first, then amenity
+            place_type = tags.get('place', '')
+            if place_type in ['city', 'town', 'village']:
+                # Map place types to POICategory.SERVICES
+                category = POICategory.SERVICES
+            else:
+                # Try amenity mapping
+                category = self._map_osm_amenity_to_category(tags.get('amenity', ''))
+                if not category:
+                    category = POICategory.SERVICES  # Default category
+
             # Create POI
             poi_id = f"{element['type']}/{element['id']}"
-            name = tags.get('name', tags.get('amenity', 'Unknown POI'))
+            # For places, use the name. For other POIs, fallback to amenity/place type if no name
+            if place_type:
+                name = tags.get('name', f"{place_type.title()} sem nome")
+            else:
+                name = tags.get('name', tags.get('amenity', 'Unknown POI'))
             
             # Extract amenities using improved method
             amenities = self._extract_amenities_from_tags(tags)

@@ -354,7 +354,10 @@ export default function SearchPage() {
                                   {poi.type === 'hotel' && '🏨 Hotel'}
                                   {poi.type === 'camping' && '⛺ Camping'}
                                   {poi.type === 'hospital' && '🏥 Hospital'}
-                                  {!['gas_station', 'restaurant', 'fast_food', 'cafe', 'toll_booth', 'hotel', 'camping', 'hospital'].includes(poi.type) && poi.type}
+                                  {poi.type === 'city' && '🏙️ Cidade'}
+                                  {poi.type === 'town' && '🏘️ Vila'}
+                                  {poi.type === 'village' && '🏡 Povoado'}
+                                  {!['gas_station', 'restaurant', 'fast_food', 'cafe', 'toll_booth', 'hotel', 'camping', 'hospital', 'city', 'town', 'village'].includes(poi.type) && poi.type}
                                 </td>
                                 <td className="px-3 py-2 text-sm text-gray-900">
                                   {poi.name || 'Nome não disponível'}

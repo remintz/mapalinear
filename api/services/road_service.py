@@ -377,20 +377,39 @@ class RoadService:
         Returns:
             RoadMilestone object
         """
-        milestone_type = self._poi_category_to_milestone_type(poi.category)
-        
+        # Determine milestone type - check if it's a place (city/town/village) first
+        milestone_type = None
+        if poi.provider_data and 'osm_tags' in poi.provider_data:
+            osm_tags = poi.provider_data['osm_tags']
+            place_type = osm_tags.get('place', '')
+            if place_type == 'city':
+                milestone_type = MilestoneType.CITY
+            elif place_type == 'town':
+                milestone_type = MilestoneType.TOWN
+            elif place_type == 'village':
+                milestone_type = MilestoneType.VILLAGE
+
+        # If not a place, use category mapping
+        if not milestone_type:
+            milestone_type = self._poi_category_to_milestone_type(poi.category)
+
         # Calculate distance from POI to route point
         distance_from_road = self._calculate_distance_meters(
             poi.location.latitude, poi.location.longitude,
             route_point[0], route_point[1]
         )
-        
+
         # Extract city from POI tags (quick, no API call)
         city = None
         if poi.provider_data:
-            city = (poi.provider_data.get('addr:city') or
-                   poi.provider_data.get('address:city') or
-                   poi.provider_data.get('addr:municipality'))
+            # For places (city/town/village), the city IS the POI itself
+            if milestone_type in [MilestoneType.CITY, MilestoneType.TOWN, MilestoneType.VILLAGE]:
+                city = poi.name  # The place name is the city name
+            else:
+                # For other POIs, try to extract city from address tags
+                city = (poi.provider_data.get('addr:city') or
+                       poi.provider_data.get('address:city') or
+                       poi.provider_data.get('addr:municipality'))
             if city:
                 logger.debug(f"🏙️ POI {poi.name}: cidade '{city}' extraída das tags OSM")
         
