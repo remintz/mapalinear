@@ -44,8 +44,6 @@ class OSMProvider(GeoProvider):
         self.overpass_endpoints = [
             "https://overpass-api.de/api/interpreter",
             "https://overpass.kumi.systems/api/interpreter",
-            "https://overpass.openstreetmap.ru/api/interpreter",
-            "https://overpass.osm.ch/api/interpreter"
         ]
         self.current_endpoint_index = 0
         
