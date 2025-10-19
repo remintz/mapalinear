@@ -224,7 +224,8 @@ class RoadService:
             linear_segments,
             milestone_categories,
             max_distance_from_road,
-            exclude_cities=[origin_city]
+            exclude_cities=[origin_city],
+            progress_callback=progress_callback
         ))
         
         # Step 5: Sort and assign milestones to segments
@@ -483,7 +484,8 @@ class RoadService:
             try:
                 reverse_loc = await self.geo_provider.reverse_geocode(
                     milestone.coordinates.latitude,
-                    milestone.coordinates.longitude
+                    milestone.coordinates.longitude,
+                    poi_name=milestone.name
                 )
                 if reverse_loc and reverse_loc.city:
                     milestone.city = reverse_loc.city
@@ -552,7 +554,8 @@ class RoadService:
         segments: List[LinearRoadSegment],
         categories: List[POICategory],
         max_distance_from_road: float,
-        exclude_cities: Optional[List[Optional[str]]] = None
+        exclude_cities: Optional[List[Optional[str]]] = None,
+        progress_callback: Optional[Callable[[float], None]] = None
     ) -> List[RoadMilestone]:
         """
         Find POI milestones along the route using segment start/end points.
@@ -578,14 +581,20 @@ class RoadService:
         
         # Extract search points from segments
         search_points = self._extract_search_points_from_segments(segments)
-        
+        total_points = len(search_points)
+
         # Search for POIs and convert to milestones
         milestones = []
         total_errors = 0
         total_requests = 0
         consecutive_errors = 0
-        
+
         for i, (point, distance_from_origin) in enumerate(search_points):
+            # Update progress based on points processed
+            # Progress goes from 10% to 90% during POI search (leaving 10% for enrichment and filtering)
+            if progress_callback:
+                progress = round(10.0 + (i / total_points) * 80.0)
+                progress_callback(progress)
             logger.debug(f"🔍 Ponto {i}: lat={point[0]:.6f}, lon={point[1]:.6f}, "
                         f"dist={distance_from_origin:.1f}km")
             total_requests += 1
@@ -669,9 +678,17 @@ class RoadService:
                 logger.warning(f"High error rate detected. Consider checking Overpass API status.")
         
         logger.info(f"🎯 RESULTADO FINAL: {len(milestones)} milestones encontrados ao longo da rota")
-        
+
+        # Update progress - POI search completed (90%)
+        if progress_callback:
+            progress_callback(90)
+
         # Enrich milestones with cities (reverse geocoding)
         await self._enrich_milestones_with_cities(milestones)
+
+        # Update progress - enrichment completed (95%)
+        if progress_callback:
+            progress_callback(95)
         
         # Filter out POIs in excluded cities
         milestones = self._filter_excluded_cities(milestones, exclude_cities_filtered)

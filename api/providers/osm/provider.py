@@ -151,16 +151,29 @@ class OSMProvider(GeoProvider):
             logger.error(f"Geocoding error for '{address}': {e}")
             return None
     
-    async def reverse_geocode(self, latitude: float, longitude: float) -> Optional[GeoLocation]:
+    async def reverse_geocode(
+        self,
+        latitude: float,
+        longitude: float,
+        poi_name: Optional[str] = None
+    ) -> Optional[GeoLocation]:
         """Convert coordinates to address using Nominatim."""
         import asyncio
-        
+
+        # Build cache params - include poi_name if provided
+        cache_params = {
+            "latitude": latitude,
+            "longitude": longitude
+        }
+        if poi_name:
+            cache_params["poi_name"] = poi_name
+
         # Check cache first
         if self._cache:
             cached_result = await self._cache.get(
                 provider=ProviderType.OSM,
                 operation="reverse_geocode",
-                params={"latitude": latitude, "longitude": longitude}
+                params=cache_params
             )
             if cached_result:
                 return cached_result
@@ -204,7 +217,7 @@ class OSMProvider(GeoProvider):
                 await self._cache.set(
                     provider=ProviderType.OSM,
                     operation="reverse_geocode",
-                    params={"latitude": latitude, "longitude": longitude},
+                    params=cache_params,
                     data=result
                 )
             
@@ -503,16 +516,22 @@ class OSMProvider(GeoProvider):
 
         # Map categories to OSM amenity tags (use set to avoid duplicates)
         amenity_filters = set()
+        tourism_filters = set()
         include_places = False
         for category in categories:
             if category == POICategory.SERVICES:
                 include_places = True  # SERVICES category includes cities/towns/villages
             osm_amenities = self._get_osm_amenities_for_category(category)
+            osm_tourism = self._get_osm_tourism_tags_for_category(category)
             # logger.debug(f"🔧 Categoria {category.value} -> amenities OSM: {osm_amenities}")
             amenity_filters.update(osm_amenities)
+            tourism_filters.update(osm_tourism)
 
         amenity_filters = list(amenity_filters)  # Convert back to list
+        tourism_filters = list(tourism_filters)
         logger.info(f"🔧 Amenities OSM únicos para busca: {amenity_filters}")
+        if tourism_filters:
+            logger.info(f"🔧 Tourism tags OSM para busca: {tourism_filters}")
         if include_places:
             logger.info(f"🏙️ Incluindo busca por cidades com raio de {radius * 5}m (place=city/town/village)")
 
@@ -526,6 +545,11 @@ class OSMProvider(GeoProvider):
         for amenity in amenity_filters:
             query_parts.append(f'  node["amenity"="{amenity}"]({bbox_str});')
             query_parts.append(f'  way["amenity"="{amenity}"]({bbox_str});')
+
+        # Add tourism tag searches (normal radius)
+        for tourism in tourism_filters:
+            query_parts.append(f'  node["tourism"="{tourism}"]({bbox_str});')
+            query_parts.append(f'  way["tourism"="{tourism}"]({bbox_str});')
 
         # Add place searches with LARGER radius (cities, towns, villages)
         if include_places:
@@ -623,16 +647,23 @@ class OSMProvider(GeoProvider):
             else:
                 return None
 
-            # Determine category - try place first, then amenity
+            # Determine category - try place first, then tourism, then amenity
             place_type = tags.get('place', '')
             if place_type in ['city', 'town', 'village']:
                 # Map place types to POICategory.SERVICES
                 category = POICategory.SERVICES
             else:
-                # Try amenity mapping
-                category = self._map_osm_amenity_to_category(tags.get('amenity', ''))
+                # Try tourism mapping first (for hotels, etc)
+                tourism_type = tags.get('tourism', '')
+                category = self._map_osm_tourism_to_category(tourism_type)
+
+                # If no tourism match, try amenity mapping
                 if not category:
-                    category = POICategory.SERVICES  # Default category
+                    category = self._map_osm_amenity_to_category(tags.get('amenity', ''))
+
+                # Default category if nothing matches
+                if not category:
+                    category = POICategory.SERVICES
 
             # Create POI
             poi_id = f"{element['type']}/{element['id']}"
@@ -693,6 +724,19 @@ class OSMProvider(GeoProvider):
     def _map_osm_amenity_to_category(self, amenity: str) -> Optional[POICategory]:
         """Map OSM amenity tag to our POI category."""
         return self._category_mapping.get(amenity)
+
+    def _map_osm_tourism_to_category(self, tourism: str) -> Optional[POICategory]:
+        """Map OSM tourism tag to our POI category."""
+        tourism_mapping = {
+            'hotel': POICategory.HOTEL,
+            'motel': POICategory.HOTEL,
+            'hostel': POICategory.LODGING,
+            'guest_house': POICategory.LODGING,
+            'apartment': POICategory.LODGING,
+            'camp_site': POICategory.CAMPING,
+            'caravan_site': POICategory.CAMPING,
+        }
+        return tourism_mapping.get(tourism)
     
     def _get_osm_amenities_for_category(self, category: POICategory) -> List[str]:
         """Get OSM amenity tags for a given category."""
@@ -713,6 +757,15 @@ class OSMProvider(GeoProvider):
             POICategory.SERVICES: ['police']  # Only police amenity for SERVICES category
         }
         return category_to_amenities.get(category, [])
+
+    def _get_osm_tourism_tags_for_category(self, category: POICategory) -> List[str]:
+        """Get OSM tourism tags for a given category."""
+        category_to_tourism = {
+            POICategory.HOTEL: ['hotel', 'motel'],
+            POICategory.LODGING: ['hotel', 'motel', 'hostel', 'guest_house', 'apartment'],
+            POICategory.CAMPING: ['camp_site', 'caravan_site'],
+        }
+        return category_to_tourism.get(category, [])
     
     def _extract_city_from_address(self, address: str) -> Optional[str]:
         """Extract city from address string."""

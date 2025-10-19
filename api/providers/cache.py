@@ -39,15 +39,16 @@ class CacheKey:
     def _normalize_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize parameters for consistent hashing."""
         normalized = {}
-        
+
         for key, value in params.items():
             if isinstance(value, str):
                 # Normalize strings: lowercase, remove extra spaces
                 normalized[key] = ' '.join(value.lower().split())
             elif isinstance(value, (int, float)):
-                # Round coordinates to 6 decimal places for consistency
+                # Round coordinates to 3 decimal places (~111m precision)
+                # This allows POIs within ~100m to share the same cache
                 if key in ('latitude', 'longitude', 'lat', 'lon'):
-                    normalized[key] = round(float(value), 6)
+                    normalized[key] = round(float(value), 3)
                 else:
                     normalized[key] = value
             elif isinstance(value, list):
@@ -55,7 +56,7 @@ class CacheKey:
                 normalized[key] = sorted(value) if value else []
             else:
                 normalized[key] = value
-        
+
         return normalized
 
 
