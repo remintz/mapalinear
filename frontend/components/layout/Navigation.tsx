@@ -25,7 +25,7 @@ export function Navigation({ className }: NavigationProps) {
               href="/search"
               className="text-gray-600 hover:text-gray-900 transition-colors"
             >
-              Buscar Rota
+              Criar Mapa
             </Link>
             <Link
               href="/maps"

@@ -15,7 +15,7 @@ interface UseRouteSearchReturn {
 
 export function useRouteSearch(): UseRouteSearchReturn {
   const [error, setError] = useState<string | null>(null);
-  const [progressMessage, setProgressMessage] = useState<string>('Buscar Rota');
+  const [progressMessage, setProgressMessage] = useState<string>('Criar Mapa');
 
   const mutation = useMutation({
     mutationFn: async (formData: SearchFormData): Promise<RouteSearchResponse> => {
@@ -33,11 +33,11 @@ export function useRouteSearch(): UseRouteSearchReturn {
     },
     onSuccess: () => {
       setError(null);
-      setProgressMessage('Buscar Rota');
+      setProgressMessage('Criar Mapa');
     },
     onError: (error: Error) => {
       setError(error.message || 'Erro ao buscar rota. Tente novamente.');
-      setProgressMessage('Buscar Rota');
+      setProgressMessage('Criar Mapa');
     },
   });
 
@@ -87,7 +87,7 @@ export function useRouteSearch(): UseRouteSearchReturn {
 
   const reset = () => {
     setError(null);
-    setProgressMessage('Buscar Rota');
+    setProgressMessage('Criar Mapa');
     mutation.reset();
   };
 

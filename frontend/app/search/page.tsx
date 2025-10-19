@@ -190,7 +190,7 @@ export default function SearchPage() {
             </Link>
           </div>
           <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">
-            Buscar Rota
+            Criar Mapa
           </h1>
           <p className="text-lg text-gray-600">
             Digite sua origem e destino para encontrar pontos de interesse ao longo da rota.

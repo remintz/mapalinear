@@ -16,11 +16,11 @@ interface SearchFormProps {
   estimatedCompletion?: string | null;
 }
 
-export function SearchForm({ 
-  onSubmit, 
-  isLoading = false, 
-  error, 
-  progressMessage = 'Buscar Rota',
+export function SearchForm({
+  onSubmit,
+  isLoading = false,
+  error,
+  progressMessage = 'Criar Mapa',
   progressPercent = 0,
   estimatedCompletion
 }: SearchFormProps) {
@@ -57,7 +57,7 @@ export function SearchForm({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Search className="h-5 w-5" />
-          Buscar Rota
+          Criar Mapa
         </CardTitle>
       </CardHeader>
       <CardContent>

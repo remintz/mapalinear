@@ -19,7 +19,7 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<RouteSearchResponse | null>(null);
-  const [progressMessage, setProgressMessage] = useState<string>('Buscar Rota');
+  const [progressMessage, setProgressMessage] = useState<string>('Criar Mapa');
   const [progressPercent, setProgressPercent] = useState<number>(0);
   const [estimatedCompletion, setEstimatedCompletion] = useState<string | null>(null);
   
@@ -58,7 +58,7 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
       if (operation.status === 'completed') {
         clearPolling();
         setIsLoading(false);
-        setProgressMessage('Buscar Rota');
+        setProgressMessage('Criar Mapa');
         setProgressPercent(100);
         
         if (operation.result) {
@@ -127,7 +127,7 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
       } else if (operation.status === 'failed') {
         clearPolling();
         setIsLoading(false);
-        setProgressMessage('Buscar Rota');
+        setProgressMessage('Criar Mapa');
         setProgressPercent(0);
         setError(operation.error || 'Erro na busca da rota.');
       }
@@ -175,7 +175,7 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
       
     } catch (err) {
       setIsLoading(false);
-      setProgressMessage('Buscar Rota');
+      setProgressMessage('Criar Mapa');
       setProgressPercent(0);
       
       const errorMessage = err instanceof Error ? err.message : 'Erro ao iniciar busca da rota.';
@@ -189,7 +189,7 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
     setIsLoading(false);
     setError(null);
     setData(null);
-    setProgressMessage('Buscar Rota');
+    setProgressMessage('Criar Mapa');
     setProgressPercent(0);
     setEstimatedCompletion(null);
   }, [clearPolling]);
