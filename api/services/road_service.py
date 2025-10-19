@@ -39,17 +39,24 @@ class RoadService:
         This helper allows calling async provider methods from sync contexts.
         """
         import asyncio
-        import concurrent.futures
         
         try:
-            # Try to get current event loop
-            loop = asyncio.get_running_loop()
-            # If there's a loop running, create a new task in thread pool
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, coro)
-                return future.result()
+            # Try to get the event loop for this thread
+            loop = asyncio.get_event_loop()
+            
+            # Check if the loop is running
+            if loop.is_running():
+                # If loop is already running (e.g., in async context), 
+                # we need to run in a new thread
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, coro)
+                    return future.result()
+            else:
+                # Loop exists but not running - run the coroutine in it
+                return loop.run_until_complete(coro)
         except RuntimeError:
-            # No loop running, can use asyncio.run directly
+            # No event loop in this thread, create and use a new one
             return asyncio.run(coro)
     
     def _extract_city_name(self, location_string: str) -> str:
@@ -248,14 +255,7 @@ class RoadService:
                    f"{len(all_milestones)} milestones")
         self._log_milestone_statistics(all_milestones)
 
-        # Save cache to disk
-        try:
-            from ..providers import get_manager
-            manager = get_manager()
-            manager.cache.save_to_file()
-            logger.info("💾 Cache salvo em disco com sucesso")
-        except Exception as e:
-            logger.error(f"❌ Erro ao salvar cache em disco: {e}")
+        # Note: Cache is automatically persisted to PostgreSQL, no manual save needed
 
         # Save linear map to disk
         try:

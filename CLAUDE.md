@@ -38,15 +38,61 @@ poetry install
 poetry shell
 ```
 
+### PostgreSQL Setup
+
+**Quick Start:** When using `mprocs` (recommended), PostgreSQL is automatically started. Then initialize the database:
+
+```bash
+# Start all services (including PostgreSQL)
+mprocs
+
+# In another terminal, initialize the database (first time only)
+make db-setup
+
+# If you have issues with the database, recreate it:
+make db-recreate
+```
+
+If you want to run PostgreSQL manually:
+
+```bash
+# Using Docker (recommended for development)
+docker run --name mapalinear-postgres \
+  -e POSTGRES_DB=mapalinear \
+  -e POSTGRES_USER=mapalinear \
+  -e POSTGRES_PASSWORD=mapalinear \
+  -v mapalinear-pgdata:/var/lib/postgresql/data \
+  -p 5432:5432 \
+  -d postgres:16
+
+# Or install PostgreSQL locally
+# macOS:
+brew install postgresql@16
+brew services start postgresql@16
+
+# Ubuntu/Debian:
+sudo apt-get install postgresql-16
+sudo systemctl start postgresql
+
+# Create database and user (for local installation)
+psql -U postgres -c "CREATE DATABASE mapalinear;"
+psql -U postgres -c "CREATE USER mapalinear WITH PASSWORD 'mapalinear';"
+psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE mapalinear TO mapalinear;"
+
+# Initialize the schema (required before first run)
+make db-setup
+```
+
 ### Running the Application
 ```bash
-# Start both API and Frontend (using mprocs) - RECOMMENDED
+# Start all services (using mprocs) - RECOMMENDED
 mprocs
 
 # This will start:
+# - PostgreSQL database (Docker container with persistent volume)
 # - Frontend dev server on http://localhost:8000 (with hot reload)
 # - API server on http://localhost:8001 (with auto restart)
-# - Both services restart automatically on code changes
+# - All services restart automatically on code changes
 
 # Or start services individually:
 # API server only (on port 8001)
@@ -77,6 +123,38 @@ npm start
 
 # Test PWA features locally
 npm run start:https  # Serves with HTTPS for PWA testing
+```
+
+### Database Management (Makefile)
+
+**IMPORTANT:** You must run `make db-setup` before starting the application for the first time. The application will NOT automatically create the database schema.
+
+```bash
+# Show all available commands
+make help
+
+# Container management
+make db-start      # Start PostgreSQL container
+make db-stop       # Stop PostgreSQL container
+make db-recreate   # Recreate container from scratch (clears all data)
+
+# Database setup
+make db-setup      # Initialize database (create DB, user, and schema)
+make db-reset      # Reset database completely
+
+# Cache management
+make db-stats      # View cache statistics
+make db-clear      # Clear all cache entries
+make db-cleanup    # Remove expired entries only
+
+# Utilities
+make db-shell      # Open PostgreSQL interactive shell
+
+# Other useful commands
+make install    # Install dependencies
+make run        # Start all services with mprocs
+make format     # Format code (black + isort)
+make test       # Run tests
 ```
 
 ### Code Quality Tools
@@ -159,6 +237,16 @@ npm run lighthouse:perf
 - `MAPALINEAR_HOST`: API host (default: 0.0.0.0)
 - `MAPALINEAR_PORT`: API port (default: 8001)
 
+### Cache System
+- `CACHE_BACKEND`: Cache backend type (memory, postgres) - default: postgres
+- `POSTGRES_HOST`: PostgreSQL host (default: localhost)
+- `POSTGRES_PORT`: PostgreSQL port (default: 5432)
+- `POSTGRES_DATABASE`: PostgreSQL database name (default: mapalinear)
+- `POSTGRES_USER`: PostgreSQL user (default: mapalinear)
+- `POSTGRES_PASSWORD`: PostgreSQL password (default: mapalinear)
+- `POSTGRES_POOL_MIN_SIZE`: Minimum connection pool size (default: 10)
+- `POSTGRES_POOL_MAX_SIZE`: Maximum connection pool size (default: 20)
+
 ### Geographic Providers (Multi-Provider System)
 - `GEO_PRIMARY_PROVIDER`: Provider to use (osm, here, tomtom) - default: osm
 - `HERE_API_KEY`: HERE Maps API key (when using HERE provider)
@@ -167,6 +255,7 @@ npm run lighthouse:perf
 - `GEO_CACHE_TTL_GEOCODE`: Cache TTL for geocoding (default: 604800 seconds / 7 days)
 - `GEO_CACHE_TTL_ROUTE`: Cache TTL for routes (default: 21600 seconds / 6 hours)
 - `GEO_CACHE_TTL_POI`: Cache TTL for POIs (default: 86400 seconds / 1 day)
+- `GEO_CACHE_TTL_POI_DETAILS`: Cache TTL for POI details (default: 43200 seconds / 12 hours)
 
 ### Frontend (PWA)
 - `NEXT_PUBLIC_API_URL`: API endpoint for frontend (default: http://localhost:8001/api)
@@ -193,7 +282,7 @@ npm run lighthouse:perf
 
 ### Cache System Architecture
 
-The Unified Cache (`api/providers/cache.py`) is critical for performance and cost optimization:
+The Unified Cache (`api/providers/cache.py`) is critical for performance and cost optimization. It now uses **PostgreSQL** as the default backend for persistence and scalability.
 
 **Key Classes:**
 - `CacheKey`: Generates consistent cache keys with parameter normalization
@@ -205,17 +294,31 @@ The Unified Cache (`api/providers/cache.py`) is critical for performance and cos
   - Implements `_serialize_data()` for robust type conversion
   - Implements `_reconstruct_data()` to rebuild Pydantic objects on load
 - `UnifiedCache`: Main cache interface with intelligent matching
-  - **Exact matching**: Hash-based lookup for identical parameters
+  - **Exact matching**: Hash-based lookup for identical parameters via PostgreSQL primary key
   - **Semantic matching**: For geocoding with similar addresses
   - **Spatial matching**: For POI searches in nearby locations
-  - **Persistence**: Saves to `cache/unified_cache.json` on disk
+  - **Persistence**: Stored in PostgreSQL database with connection pooling
+  - **Automatic cleanup**: Expired entries removed periodically
+
+**Database Schema:**
+- Table: `cache_entries` with JSONB columns for flexible data storage
+- Indexes on: expires_at, operation, provider, params (GIN index)
+- Schema file: `api/providers/cache_schema.sql`
 
 **Cache Hit Criteria:**
 - **Geocoding/Reverse Geocoding**: Exact match on normalized address or coordinates
 - **POI Search**: Either exact match OR spatial match (distance < avg radius && same categories)
 - **Routes**: Exact match on origin/destination coordinates and waypoints
 
-**Important:** When modifying cache logic, ensure `_serialize_data()` handles all Pydantic model types to avoid "not JSON serializable" errors.
+**Backend Configuration:**
+- Set `CACHE_BACKEND=postgres` (default) in `.env` for PostgreSQL backend
+- Set `CACHE_BACKEND=memory` for in-memory cache (testing only)
+- PostgreSQL connection pooling configured via environment variables
+
+**Important:**
+- When modifying cache logic, ensure `_serialize_data()` handles all Pydantic model types to avoid "not JSON serializable" errors
+- PostgreSQL database must be running and accessible for the cache to work
+- Use Docker or local PostgreSQL installation (see setup instructions below)
 
 ### Provider System
 
@@ -263,9 +366,11 @@ Long-running operations use async tasks stored in `cache/async_operations/`:
 - All geographical searches are focused on Brazilian locations (cities must include state abbreviation)
 - The API must be running for frontend and CLI to work
 - Geographic provider is selected via `GEO_PRIMARY_PROVIDER` environment variable
-- Cache files in `cache/` directory can be safely deleted to force fresh data retrieval
+- **PostgreSQL database must be running and initialized** for the cache system to work (default backend)
+- Database schema must be initialized with `make db-setup` before first run
 - Unified cache works across all providers with intelligent key generation
-- **Cache persistence**: Cache is saved to disk at end of `generate_linear_map()` operation
+- Cache data persists in PostgreSQL with connection pooling for optimal performance
+- For testing without PostgreSQL, set `CACHE_BACKEND=memory` in `.env`
 
 ### Frontend PWA
 - PWA works offline after initial load and route caching
@@ -331,3 +436,38 @@ When working with geographic data:
 ### POI Name Issues
 **Problem:** POI comes from OSM without proper name (shows category instead)
 **Solution:** OSM data limitation. Many POIs lack names. Code handles this in `_parse_osm_element_to_poi()` with fallback to amenity type.
+
+### PostgreSQL Cache Management
+**Problem:** Need to clear cache or reset database
+**Solution:**
+
+Using Makefile (recommended):
+```bash
+make db-clear    # Clear all cache entries
+make db-stats    # View cache statistics
+make db-cleanup  # Remove expired entries
+make db-reset    # Reset entire database
+```
+
+Or using Docker directly:
+```bash
+# Clear all cache entries (keeps database structure)
+docker exec -it mapalinear-postgres psql -U mapalinear -c "DELETE FROM cache_entries;"
+
+# Or reset entire database and volume
+docker stop mapalinear-postgres
+docker rm mapalinear-postgres
+docker volume rm mapalinear-pgdata
+# Next mprocs start will create fresh database
+
+# View cache statistics
+docker exec -it mapalinear-postgres psql -U mapalinear -c "SELECT COUNT(*), operation FROM cache_entries GROUP BY operation;"
+```
+
+### PostgreSQL Connection Issues
+**Problem:** "Connection refused" or "could not connect to server"
+**Solution:**
+- Ensure Docker is running: `docker ps`
+- Check if PostgreSQL container is healthy: `docker logs mapalinear-postgres`
+- Verify port 5432 is not in use: `lsof -i :5432`
+- For local PostgreSQL conflicts, stop local instance or change port in `.env`

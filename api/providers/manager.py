@@ -25,11 +25,17 @@ class GeoProviderManager:
     def __init__(self, cache: Optional[UnifiedCache] = None):
         """
         Initialize the provider manager.
-        
+
         Args:
             cache: Optional unified cache instance. If not provided, creates a new one.
         """
-        self._cache = cache or UnifiedCache()
+        if cache is None:
+            # Import settings to determine cache backend
+            from .settings import get_settings
+            settings = get_settings()
+            cache = UnifiedCache(backend=settings.cache_backend)
+
+        self._cache = cache
         self._providers: Dict[ProviderType, GeoProvider] = {}
         self._provider_classes: Dict[ProviderType, Type[GeoProvider]] = {}
         
@@ -105,24 +111,24 @@ class GeoProviderManager:
         """Get the unified cache instance."""
         return self._cache
     
-    def get_stats(self) -> Dict[str, any]:
+    async def get_stats(self) -> Dict[str, any]:
         """
         Get statistics for all registered providers.
-        
+
         Returns:
             Dictionary with provider statistics and cache metrics
         """
         stats = {
             "active_providers": list(self._providers.keys()),
             "registered_providers": list(self._provider_classes.keys()),
-            "cache_stats": self._cache.get_stats(),
+            "cache_stats": await self._cache.get_stats(),
         }
-        
+
         # Add provider-specific stats if available
         for provider_type, provider in self._providers.items():
             if hasattr(provider, 'get_stats'):
                 stats[f"{provider_type.value}_stats"] = provider.get_stats()
-        
+
         return stats
 
 

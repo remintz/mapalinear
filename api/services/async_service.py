@@ -232,6 +232,11 @@ class AsyncService:
             )
 
         def _worker():
+            # Criar um novo event loop para esta thread
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
             try:
                 # Atualiza para 5% para mostrar que iniciou
                 _update_progress(5)
@@ -249,6 +254,10 @@ class AsyncService:
             except Exception as e:
                 logger.error(f"Erro na operação assíncrona {operation_id}: {str(e)}")
                 AsyncService.fail_operation(operation_id, str(e))
+            finally:
+                # NÃO fechar o event loop - deixar vivo para reutilização da thread
+                # O event loop será reusado se a thread for reusada
+                pass
         
         # Inicia a thread em segundo plano
         thread = threading.Thread(target=_worker)

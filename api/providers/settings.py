@@ -115,6 +115,48 @@ class ProviderSettings(BaseSettings):
         description="API server port"
     )
     
+    # PostgreSQL Cache configuration
+    cache_backend: str = Field(
+        default="postgres",
+        alias="CACHE_BACKEND",
+        description="Cache backend type (memory, postgres)"
+    )
+    postgres_host: str = Field(
+        default="localhost",
+        alias="POSTGRES_HOST",
+        description="PostgreSQL host"
+    )
+    postgres_port: int = Field(
+        default=5432,
+        alias="POSTGRES_PORT",
+        description="PostgreSQL port"
+    )
+    postgres_database: str = Field(
+        default="mapalinear",
+        alias="POSTGRES_DATABASE",
+        description="PostgreSQL database name"
+    )
+    postgres_user: str = Field(
+        default="mapalinear",
+        alias="POSTGRES_USER",
+        description="PostgreSQL user"
+    )
+    postgres_password: str = Field(
+        default="mapalinear",
+        alias="POSTGRES_PASSWORD",
+        description="PostgreSQL password"
+    )
+    postgres_pool_min_size: int = Field(
+        default=0,
+        alias="POSTGRES_POOL_MIN_SIZE",
+        description="Minimum PostgreSQL connection pool size (0 to avoid race conditions)"
+    )
+    postgres_pool_max_size: int = Field(
+        default=50,
+        alias="POSTGRES_POOL_MAX_SIZE",
+        description="Maximum PostgreSQL connection pool size"
+    )
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
