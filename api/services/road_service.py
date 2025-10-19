@@ -615,17 +615,39 @@ class RoadService:
                 converted_count = 0
                 for j, poi in enumerate(pois):
                     try:
-                        # Skip if already exists (avoid duplicates)
-                        if any(m.id == poi.id for m in milestones):
-                            logger.debug(f"🔍 POI {poi.name} já existe, ignorando")
+                        # Check if POI already exists
+                        existing_milestone = next((m for m in milestones if m.id == poi.id), None)
+
+                        if existing_milestone:
+                            # POI já existe - verificar se o ponto atual está mais próximo
+                            current_distance_to_poi = self._calculate_distance_meters(
+                                poi.location.latitude, poi.location.longitude,
+                                point[0], point[1]
+                            )
+
+                            # Se o ponto atual está mais próximo, atualizar o milestone
+                            if current_distance_to_poi < existing_milestone.distance_from_road_meters:
+                                logger.debug(
+                                    f"🔄 Atualizando {poi.name}: "
+                                    f"distância melhorada de {existing_milestone.distance_from_road_meters:.0f}m "
+                                    f"para {current_distance_to_poi:.0f}m (km {distance_from_origin:.1f})"
+                                )
+                                # Atualizar com o ponto de referência mais próximo
+                                existing_milestone.distance_from_origin_km = distance_from_origin
+                                existing_milestone.distance_from_road_meters = current_distance_to_poi
+                            else:
+                                logger.debug(
+                                    f"🔍 POI {poi.name} já existe com ponto mais próximo "
+                                    f"({existing_milestone.distance_from_road_meters:.0f}m vs {current_distance_to_poi:.0f}m)"
+                                )
                             continue
-                        
+
                         # Validate POI category
                         if not isinstance(poi.category, POICategory):
                             logger.error(f"🔍 POI {j}: categoria inválida! "
                                        f"Valor: {poi.category}, tipo: {type(poi.category)}")
                             continue
-                        
+
                         # Create milestone
                         milestone = self._create_milestone_from_poi(poi, distance_from_origin, point)
                         milestones.append(milestone)
