@@ -246,6 +246,23 @@ class RoadService:
                    f"{len(all_milestones)} milestones")
         self._log_milestone_statistics(all_milestones)
 
+        # Save cache to disk
+        try:
+            from ..providers import get_manager
+            manager = get_manager()
+            manager.cache.save_to_file()
+            logger.info("💾 Cache salvo em disco com sucesso")
+        except Exception as e:
+            logger.error(f"❌ Erro ao salvar cache em disco: {e}")
+
+        # Save linear map to disk
+        try:
+            from .map_storage_service import get_storage_service
+            storage = get_storage_service()
+            storage.save_map(linear_map)
+        except Exception as e:
+            logger.error(f"❌ Erro ao salvar mapa linear em disco: {e}")
+
         return linear_map
 
     def _process_route_into_segments(self, route: Route, segment_length_km: float) -> List[LinearRoadSegment]:
@@ -402,11 +419,22 @@ class RoadService:
         # Extract city from POI tags (quick, no API call)
         city = None
         if poi.provider_data:
-            # For places (city/town/village), the city IS the POI itself
-            if milestone_type in [MilestoneType.CITY, MilestoneType.TOWN, MilestoneType.VILLAGE]:
+            # For cities and towns, the city field is the place name itself
+            if milestone_type in [MilestoneType.CITY, MilestoneType.TOWN]:
                 city = poi.name  # The place name is the city name
+            # For villages, city should be the municipality name (from tags or reverse geocoding)
+            elif milestone_type == MilestoneType.VILLAGE:
+                # Try to extract municipality from OSM tags
+                osm_tags = poi.provider_data.get('osm_tags', {})
+                city = (osm_tags.get('addr:city') or
+                       osm_tags.get('is_in:city') or
+                       osm_tags.get('is_in') or
+                       poi.provider_data.get('addr:city') or
+                       poi.provider_data.get('address:city') or
+                       poi.provider_data.get('addr:municipality'))
+                # If no city found in tags, reverse geocoding will fill it later
             else:
-                # For other POIs, try to extract city from address tags
+                # For other POIs (gas stations, restaurants, etc), try to extract city from address tags
                 city = (poi.provider_data.get('addr:city') or
                        poi.provider_data.get('address:city') or
                        poi.provider_data.get('addr:municipality'))

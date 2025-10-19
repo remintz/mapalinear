@@ -536,7 +536,7 @@ class OSMProvider(GeoProvider):
         query_parts.extend([');', 'out meta;'])
 
         final_query = '\n'.join(query_parts)
-        logger.info(f"🔧 Query Overpass:\n{final_query}")
+        # logger.debug(f"🔧 Query Overpass:\n{final_query}")
         return final_query
     
     async def _make_overpass_request(self, query: str) -> dict:
@@ -710,7 +710,7 @@ class OSMProvider(GeoProvider):
             POICategory.ATM: ['atm'],
             POICategory.SHOPPING: ['shop'],
             POICategory.PARKING: ['parking'],
-            POICategory.SERVICES: ['townhall', 'community_centre', 'post_office', 'police']  # Added missing mapping for services
+            POICategory.SERVICES: ['police']  # Only police amenity for SERVICES category
         }
         return category_to_amenities.get(category, [])
     

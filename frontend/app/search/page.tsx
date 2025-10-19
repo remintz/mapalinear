@@ -1,15 +1,19 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Button, Card, CardHeader, CardTitle, CardContent } from '@/components/ui';
 import { SearchForm } from '@/components/forms/SearchForm';
 import { useAsyncRouteSearch } from '@/hooks/useAsyncRouteSearch';
-import { MapPin, Route, ArrowLeft, Bug } from 'lucide-react';
+import { MapPin, Route, ArrowLeft, Bug, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 
 export default function SearchPage() {
-  const { searchRoute, isLoading, error, data, reset, progressMessage, progressPercent, estimatedCompletion } = useAsyncRouteSearch();
+  const searchParams = useSearchParams();
+  const mapId = searchParams.get('mapId');
+
+  const { searchRoute, isLoading, error, data, reset, progressMessage, progressPercent, estimatedCompletion, setData } = useAsyncRouteSearch();
   const [isExporting, setIsExporting] = useState(false);
   const [poiFilters, setPoiFilters] = useState({
     includeGasStations: true,
@@ -22,6 +26,43 @@ export default function SearchPage() {
     includeTowns: true,
     includeVillages: true,
   });
+
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
+
+  // Load saved map if mapId is provided in URL
+  useEffect(() => {
+    if (mapId) {
+      const loadSavedMap = async () => {
+        try {
+          const response = await fetch(`${API_URL}/maps/${mapId}`);
+
+          if (!response.ok) {
+            throw new Error('Erro ao carregar mapa salvo');
+          }
+
+          const savedMap = await response.json();
+
+          // Transform saved map data to match RouteSearchResponse format
+          const routeData = {
+            origin: savedMap.origin,
+            destination: savedMap.destination,
+            total_distance_km: savedMap.total_length_km,
+            segments: savedMap.segments || [],
+            pois: savedMap.milestones || [],
+            milestones: savedMap.milestones || []
+          };
+
+          setData(routeData);
+          toast.success('Mapa carregado com sucesso!');
+        } catch (error) {
+          console.error('Error loading saved map:', error);
+          toast.error('Erro ao carregar mapa salvo');
+        }
+      };
+
+      loadSavedMap();
+    }
+  }, [mapId, setData, API_URL]);
 
   const handleSearch = (formData: any) => {
     searchRoute(formData);

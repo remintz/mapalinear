@@ -8,6 +8,7 @@ interface UseAsyncRouteSearchReturn {
   isLoading: boolean;
   error: string | null;
   data: RouteSearchResponse | null;
+  setData: (data: RouteSearchResponse | null) => void;
   reset: () => void;
   progressMessage: string;
   progressPercent: number;
@@ -198,6 +199,7 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
     isLoading,
     error,
     data,
+    setData,
     reset,
     progressMessage,
     progressPercent,

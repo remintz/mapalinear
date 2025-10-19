@@ -145,6 +145,17 @@ class UnifiedCache:
         }
         
         logger.info(f"Initialized unified cache with backend: {backend}")
+
+        
+        # Persistent cache configuration
+        self.cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'cache')
+        self.cache_file = os.path.join(self.cache_dir, 'unified_cache.json')
+        
+        # Ensure cache directory exists
+        os.makedirs(self.cache_dir, exist_ok=True)
+        
+        # Load existing cache from disk if available
+        self._load_from_file()
     
     async def get(self, provider: ProviderType, operation: str, params: Dict[str, Any]) -> Optional[Any]:
         """
@@ -416,6 +427,79 @@ class UnifiedCache:
         
         logger.info(f"Invalidated {len(matching_keys)} cache entries matching pattern: {pattern}")
         return len(matching_keys)
+
+    
+    def _load_from_file(self) -> None:
+        """Load cache from persistent storage on disk."""
+        if not os.path.exists(self.cache_file):
+            logger.info("No persistent cache file found, starting with empty cache")
+            return
+        
+        try:
+            with open(self.cache_file, 'r', encoding='utf-8') as f:
+                cache_data = json.load(f)
+            
+            # Reconstruct cache entries from stored data
+            loaded_count = 0
+            expired_count = 0
+            
+            for entry_dict in cache_data.get('entries', []):
+                try:
+                    entry = CacheEntry.from_dict(entry_dict)
+                    
+                    # Skip expired entries
+                    if entry.is_expired():
+                        expired_count += 1
+                        continue
+                    
+                    self._cache[entry.key] = entry
+                    loaded_count += 1
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to load cache entry: {e}")
+                    continue
+            
+            # Load stats if available
+            if 'stats' in cache_data:
+                self._stats = cache_data['stats']
+            
+            logger.info(f"Loaded {loaded_count} cache entries from disk ({expired_count} expired entries skipped)")
+            
+        except Exception as e:
+            logger.error(f"Error loading cache from file: {e}")
+            logger.info("Starting with empty cache")
+    
+    def save_to_file(self) -> None:
+        """Save cache to persistent storage on disk."""
+        try:
+            # Clean up expired entries before saving
+            current_time = datetime.utcnow()
+            valid_entries = [
+                entry.to_dict()
+                for entry in self._cache.values()
+                if not entry.is_expired()
+            ]
+            
+            cache_data = {
+                'version': '1.0',
+                'saved_at': datetime.utcnow().isoformat(),
+                'backend': self.backend,
+                'stats': self._stats,
+                'entries': valid_entries
+            }
+            
+            # Write to temporary file first, then rename (atomic operation)
+            temp_file = self.cache_file + '.tmp'
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(cache_data, f, indent=2, ensure_ascii=False)
+            
+            # Atomic rename
+            os.replace(temp_file, self.cache_file)
+            
+            logger.info(f"Saved {len(valid_entries)} cache entries to disk at {self.cache_file}")
+            
+        except Exception as e:
+            logger.error(f"Error saving cache to file: {e}")
 
 
 # Import math for distance calculation

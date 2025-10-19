@@ -1,89 +1,242 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui';
+import { Badge } from '@/components/ui/badge';
 
 export default function Home() {
   return (
     <div className="container mx-auto px-4 py-12">
-      <div className="max-w-4xl mx-auto text-center">
+      <div className="max-w-6xl mx-auto">
         {/* Hero Section */}
-        <div className="mb-12">
-          <h1 className="text-4xl md:text-6xl font-bold text-gray-900 mb-6">
-            Mapas Lineares para suas{' '}
-            <span className="text-blue-600">Viagens</span>
+        <div className="text-center mb-16">
+          <Badge className="mb-4 bg-blue-100 text-blue-800 border-blue-200">
+            Powered by OpenStreetMap
+          </Badge>
+          <h1 className="text-5xl md:text-7xl font-bold text-gray-900 mb-6">
+            Mapas Lineares para{' '}
+            <span className="text-blue-600">Viagens Rodoviárias</span>
           </h1>
-          <p className="text-xl text-gray-600 mb-8 max-w-2xl mx-auto">
-            Descubra postos de combustível, restaurantes e pedágios ao longo da sua rota.
-            Visualize sua viagem de forma linear e planeje suas paradas.
+          <p className="text-xl text-gray-600 mb-8 max-w-3xl mx-auto">
+            Planeje suas viagens pelas estradas brasileiras com mapas lineares inteligentes.
+            Encontre postos, restaurantes, cidades e muito mais ao longo do caminho.
           </p>
-          <Link href="/search">
-            <Button size="lg" className="text-lg px-8 py-4">
-              🛣️ Criar Mapa Linear
-            </Button>
-          </Link>
+          <div className="flex gap-4 justify-center">
+            <Link href="/search">
+              <Button size="lg" className="text-lg px-8 py-4">
+                🗺️ Criar Mapa Agora
+              </Button>
+            </Link>
+            <Link href="/maps">
+              <Button size="lg" variant="outline" className="text-lg px-8 py-4">
+                📂 Meus Mapas
+              </Button>
+            </Link>
+          </div>
         </div>
 
-        {/* Features Section */}
-        <div className="grid md:grid-cols-3 gap-8 mb-12">
-          <Card>
+        {/* Features Grid */}
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 mb-16">
+          <Card className="hover:shadow-lg transition-shadow">
             <CardHeader>
-              <CardTitle className="flex items-center justify-center mb-4">
-                ⛽ <span className="ml-2">Postos de Combustível</span>
+              <CardTitle className="flex items-center gap-2">
+                <span className="text-2xl">⛽</span>
+                <span>Postos de Combustível</span>
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-gray-600">
-                Encontre postos de combustível ao longo da sua rota com informações 
-                sobre localização e distância.
+              <p className="text-gray-600 text-sm">
+                Localize postos com informações de marca, lado da pista e distância exata do ponto de partida.
               </p>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="hover:shadow-lg transition-shadow">
             <CardHeader>
-              <CardTitle className="flex items-center justify-center mb-4">
-                🍽️ <span className="ml-2">Restaurantes</span>
+              <CardTitle className="flex items-center gap-2">
+                <span className="text-2xl">🍽️</span>
+                <span>Restaurantes e Cafés</span>
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-gray-600">
-                Descubra opções de alimentação próximas à rodovia para 
-                fazer suas refeições durante a viagem.
+              <p className="text-gray-600 text-sm">
+                Encontre opções de alimentação, incluindo restaurantes, lanchonetes e cafés próximos à rota.
               </p>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="hover:shadow-lg transition-shadow">
             <CardHeader>
-              <CardTitle className="flex items-center justify-center mb-4">
-                🛣️ <span className="ml-2">Pedágios</span>
+              <CardTitle className="flex items-center gap-2">
+                <span className="text-2xl">🏙️</span>
+                <span>Cidades e Vilas</span>
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-gray-600">
-                Visualize a localização dos pedágios para se preparar 
-                financeiramente para sua viagem.
+              <p className="text-gray-600 text-sm">
+                Visualize cidades, vilas e povoados ao longo da rota com raio de busca otimizado.
               </p>
             </CardContent>
           </Card>
+
+          <Card className="hover:shadow-lg transition-shadow">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <span className="text-2xl">💰</span>
+                <span>Pedágios</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-gray-600 text-sm">
+                Identifique todos os pedágios no percurso para planejar os custos da viagem.
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="hover:shadow-lg transition-shadow">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <span className="text-2xl">🏨</span>
+                <span>Hotéis e Camping</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-gray-600 text-sm">
+                Encontre opções de hospedagem para viagens longas, incluindo hotéis e áreas de camping.
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="hover:shadow-lg transition-shadow">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <span className="text-2xl">🏥</span>
+                <span>Serviços Essenciais</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-gray-600 text-sm">
+                Hospitais, delegacias e outros serviços essenciais para emergências.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Key Features */}
+        <div className="mb-16">
+          <h2 className="text-3xl font-bold text-center mb-10">Recursos Avançados</h2>
+          <div className="grid md:grid-cols-2 gap-8">
+            <Card className="border-blue-200 bg-blue-50">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-blue-900">
+                  <span className="text-2xl">💾</span>
+                  Mapas Salvos
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-blue-800 mb-4">
+                  Todos os mapas criados são automaticamente salvos e podem ser acessados a qualquer momento.
+                </p>
+                <ul className="text-sm text-blue-700 space-y-2">
+                  <li>✓ Salvamento automático</li>
+                  <li>✓ Abertura instantânea</li>
+                  <li>✓ Regeneração com dados atualizados</li>
+                  <li>✓ Gerenciamento simplificado</li>
+                </ul>
+              </CardContent>
+            </Card>
+
+            <Card className="border-green-200 bg-green-50">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-green-900">
+                  <span className="text-2xl">⚡</span>
+                  Cache Inteligente
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-green-800 mb-4">
+                  Sistema de cache persistente que acelera buscas e reduz chamadas à API.
+                </p>
+                <ul className="text-sm text-green-700 space-y-2">
+                  <li>✓ Geocodificação em cache (7 dias)</li>
+                  <li>✓ Rotas em cache (6 horas)</li>
+                  <li>✓ POIs em cache (1 dia)</li>
+                  <li>✓ Matching semântico inteligente</li>
+                </ul>
+              </CardContent>
+            </Card>
+
+            <Card className="border-purple-200 bg-purple-50">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-purple-900">
+                  <span className="text-2xl">📤</span>
+                  Exportação Múltipla
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-purple-800 mb-4">
+                  Exporte seus mapas em diversos formatos para uso em outras ferramentas.
+                </p>
+                <ul className="text-sm text-purple-700 space-y-2">
+                  <li>✓ GeoJSON (para uMap, QGIS)</li>
+                  <li>✓ GPX (para GPS e apps móveis)</li>
+                  <li>✓ Visualização no uMap</li>
+                  <li>✓ Validação no Overpass Turbo</li>
+                </ul>
+              </CardContent>
+            </Card>
+
+            <Card className="border-orange-200 bg-orange-50">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-orange-900">
+                  <span className="text-2xl">🔄</span>
+                  Processamento Assíncrono
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-orange-800 mb-4">
+                  Buscas longas são processadas em background com acompanhamento em tempo real.
+                </p>
+                <ul className="text-sm text-orange-700 space-y-2">
+                  <li>✓ Barra de progresso visual</li>
+                  <li>✓ Estimativa de tempo restante</li>
+                  <li>✓ Mensagens de status</li>
+                  <li>✓ Interface responsiva</li>
+                </ul>
+              </CardContent>
+            </Card>
+          </div>
         </div>
 
         {/* CTA Section */}
-        <Card variant="elevated" className="bg-blue-50 border-blue-200">
-          <CardContent className="py-8">
-            <h2 className="text-2xl font-semibold text-gray-900 mb-4">
-              Pronto para começar?
+        <Card className="bg-gradient-to-r from-blue-600 to-blue-700 border-0 text-white">
+          <CardContent className="py-12 text-center">
+            <h2 className="text-3xl font-bold mb-4">
+              Pronto para Planejar sua Viagem?
             </h2>
-            <p className="text-gray-600 mb-6">
-              Digite sua origem e destino para criar seu mapa linear personalizado.
+            <p className="text-blue-100 mb-8 text-lg max-w-2xl mx-auto">
+              Crie seu primeiro mapa linear agora e descubra tudo que existe ao longo do caminho.
+              É rápido, fácil e completamente gratuito!
             </p>
-            <Link href="/search">
-              <Button variant="primary" size="lg">
-                Começar Agora
-              </Button>
-            </Link>
+            <div className="flex gap-4 justify-center">
+              <Link href="/search">
+                <Button size="lg" variant="secondary" className="text-lg px-8 py-4">
+                  Começar Agora →
+                </Button>
+              </Link>
+            </div>
           </CardContent>
         </Card>
+
+        {/* Footer Info */}
+        <div className="text-center mt-12 text-gray-600 text-sm">
+          <p>
+            MapaLinear utiliza dados do{' '}
+            <a href="https://www.openstreetmap.org" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+              OpenStreetMap
+            </a>
+            {' '}© OpenStreetMap contributors
+          </p>
+        </div>
       </div>
     </div>
   );
