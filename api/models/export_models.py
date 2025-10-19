@@ -2,14 +2,27 @@
 Modelos para exportação de dados de rotas e POIs.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import List, Optional, Dict, Any
 from api.models.road_models import Coordinates
 
 
 class ExportCoordinates(BaseModel):
+    """Coordenadas que aceitam tanto lat/lon quanto latitude/longitude."""
     lat: float
     lon: float
+
+    @model_validator(mode='before')
+    @classmethod
+    def normalize_coordinates(cls, data: Any) -> Any:
+        """Normaliza latitude/longitude para lat/lon."""
+        if isinstance(data, dict):
+            # Se veio latitude/longitude, converte para lat/lon
+            if 'latitude' in data and 'lat' not in data:
+                data['lat'] = data['latitude']
+            if 'longitude' in data and 'lon' not in data:
+                data['lon'] = data['longitude']
+        return data
 
 
 class ExportPOI(BaseModel):

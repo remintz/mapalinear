@@ -231,6 +231,65 @@ export default function MapPage() {
     }
   };
 
+  // Download PDF function
+  const downloadPDF = async (routeData: any) => {
+    setIsExporting(true);
+    try {
+      // Get active filter types
+      const activeFilters: string[] = [];
+      if (poiFilters.includeGasStations) activeFilters.push('gas_station');
+      if (poiFilters.includeRestaurants) activeFilters.push('restaurant', 'fast_food', 'cafe');
+      if (poiFilters.includeHotels) activeFilters.push('hotel');
+      if (poiFilters.includeCamping) activeFilters.push('camping');
+      if (poiFilters.includeHospitals) activeFilters.push('hospital');
+      if (poiFilters.includeTollBooths) activeFilters.push('toll_booth');
+      if (poiFilters.includeCities) activeFilters.push('city');
+      if (poiFilters.includeTowns) activeFilters.push('town');
+      if (poiFilters.includeVillages) activeFilters.push('village');
+
+      const response = await fetch(`${API_URL}/export/pdf`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          origin: routeData.origin,
+          destination: routeData.destination,
+          total_distance_km: routeData.total_distance_km,
+          segments: routeData.segments || [],
+          pois: filteredPOIs
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Erro ao exportar PDF');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+
+      const contentDisposition = response.headers.get('Content-Disposition');
+      const filename = contentDisposition
+        ? contentDisposition.split('filename=')[1]?.replace(/"/g, '')
+        : `pois_${routeData.origin.replace(/[^a-zA-Z0-9]/g, '_')}_${routeData.destination.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      toast.success('PDF baixado com sucesso!');
+    } catch (error) {
+      console.error('Erro ao exportar PDF:', error);
+      toast.error('Erro ao exportar PDF');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   // Open web tools function
   const openWebTool = async (tool: 'umap' | 'overpass', routeData: any) => {
     try {
@@ -679,6 +738,17 @@ export default function MapPage() {
                           </svg>
                           GPX (para GPS, apps móveis)
                         </Button>
+                        <Button
+                          onClick={() => downloadPDF(data)}
+                          disabled={isExporting}
+                          className="w-full justify-start"
+                          variant="outline"
+                        >
+                          <svg className="h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                          </svg>
+                          PDF (lista de POIs filtrados)
+                        </Button>
                       </div>
                     </div>
 
@@ -713,6 +783,7 @@ export default function MapPage() {
                   <div className="bg-blue-50 p-4 rounded-lg mb-4">
                     <h4 className="font-medium text-blue-800 mb-2">Como Visualizar:</h4>
                     <ul className="text-sm text-blue-700 space-y-1">
+                      <li>• <strong>PDF:</strong> Lista formatada dos POIs filtrados para impressão ou consulta offline</li>
                       <li>• <strong>uMap:</strong> Baixe o GeoJSON → Abra uMap → "Importar dados"</li>
                       <li>• <strong>GPX:</strong> Arraste o arquivo para map.project-osrm.org</li>
                       <li>• <strong>Overpass:</strong> Compare os POIs encontrados com os dados reais do OSM</li>

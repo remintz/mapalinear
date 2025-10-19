@@ -167,3 +167,56 @@ async def get_web_visualization_urls(route_data: ExportRouteData):
         return JSONResponse(content=urls)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao gerar URLs: {str(e)}")
+
+
+
+@router.post("/pdf")
+async def export_route_pdf(route_data: ExportRouteData):
+    """
+    Exporta lista de POIs da rota para formato PDF.
+
+    O frontend já envia os POIs filtrados no campo 'pois' do ExportRouteData.
+    """
+    try:
+        import re
+        import unicodedata
+
+        def sanitize_filename(text: str) -> str:
+            """
+            Sanitiza um texto para ser usado como nome de arquivo.
+            Remove ou substitui caracteres problemáticos.
+            """
+            # Normaliza unicode e remove acentos
+            text = unicodedata.normalize("NFD", text)
+            text = "".join(c for c in text if unicodedata.category(c) != "Mn")
+
+            # Remove caracteres especiais e substitui espaços por underscore
+            text = re.sub(r"[^\w\s-]", "", text).strip()
+            text = re.sub(r"[-\s]+", "_", text)
+
+            return text
+
+        from api.utils.export_utils import export_to_pdf
+
+        linear_map_data = create_linear_map_from_export_data(route_data)
+        # POIs já vêm filtrados do frontend
+        pdf_bytes = export_to_pdf(linear_map_data)
+        
+        # Gera filename sanitizado
+        origin_clean = sanitize_filename(route_data.origin)
+        destination_clean = sanitize_filename(route_data.destination)
+        filename = f"pois_{origin_clean}_{destination_clean}.pdf"
+        
+        # Cria filename para o header Content-Disposition com encoding adequado
+        filename_encoded = filename.encode("ascii", "ignore").decode("ascii")
+        
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename_encoded}"',
+                "Content-Type": "application/pdf",
+            },
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao exportar PDF: {str(e)}")

@@ -324,3 +324,233 @@ out geom;"""
     print(f"   Use para validar se os POIs encontrados existem na região")
     
     return url
+
+
+
+def export_to_pdf(
+    route_response: LinearMapResponse,
+    output_file: str = None,
+    poi_types_filter: List[str] = None
+) -> bytes:
+    """
+    Exporta lista de POIs para formato PDF.
+    
+    Args:
+        route_response: Resposta completa da rota linear
+        output_file: Caminho opcional para salvar o arquivo
+        poi_types_filter: Lista opcional de tipos de POI para incluir no PDF
+        
+    Returns:
+        Bytes do arquivo PDF gerado
+        
+    O PDF contém uma lista formatada de todos os POIs da rota com:
+    - Nome do POI
+    - Tipo
+    - Distância da origem
+    - Marca/Operador (quando disponível)
+    - Horário de funcionamento (quando disponível)
+    """
+    from io import BytesIO
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.lib.enums import TA_LEFT, TA_CENTER
+    from reportlab.lib import colors
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+    )
+    
+    # Criar buffer de memória para o PDF
+    buffer = BytesIO()
+    
+    # Configurar documento PDF
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=2*cm,
+        leftMargin=2*cm,
+        topMargin=2*cm,
+        bottomMargin=2*cm
+    )
+    
+    # Estilos
+    styles = getSampleStyleSheet()
+    
+    # Estilo personalizado para título
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        textColor=colors.HexColor('#2563eb'),
+        spaceAfter=30,
+        alignment=TA_CENTER,
+        fontName='Helvetica-Bold'
+    )
+    
+    # Estilo para subtítulo
+    subtitle_style = ParagraphStyle(
+        'CustomSubtitle',
+        parent=styles['Normal'],
+        fontSize=12,
+        textColor=colors.HexColor('#6b7280'),
+        spaceAfter=20,
+        alignment=TA_CENTER
+    )
+    
+    # Estilo para cabeçalhos de seção
+    section_style = ParagraphStyle(
+        'SectionHeader',
+        parent=styles['Heading2'],
+        fontSize=14,
+        textColor=colors.HexColor('#1f2937'),
+        spaceAfter=12,
+        spaceBefore=20,
+        fontName='Helvetica-Bold'
+    )
+    
+    # Elementos do documento
+    elements = []
+    
+    # Título
+    title = Paragraph(
+        f"Lista de Pontos de Interesse",
+        title_style
+    )
+    elements.append(title)
+    
+    # Subtítulo com informações da rota
+    subtitle = Paragraph(
+        f"{route_response.origin} → {route_response.destination}<br/>"
+        f"Distância total: {route_response.total_length_km:.1f} km",
+        subtitle_style
+    )
+    elements.append(subtitle)
+    elements.append(Spacer(1, 0.5*cm))
+    
+    # Filtrar POIs se necessário
+    milestones = route_response.milestones
+    if poi_types_filter:
+        milestones = [m for m in milestones if str(m.type) in poi_types_filter]
+    
+    # Informação sobre POIs
+    info_text = Paragraph(
+        f"Total de POIs: {len(milestones)}<br/>"
+        f"Gerado em: {datetime.now().strftime('%d/%m/%Y às %H:%M')}",
+        styles['Normal']
+    )
+    elements.append(info_text)
+    elements.append(Spacer(1, 0.8*cm))
+
+    # Mapear tipos de POI para nomes em português (igual à tabela da página)
+    type_display = {
+        "gas_station": "Posto",
+        "restaurant": "Restaurante",
+        "fast_food": "Fast Food",
+        "cafe": "Café",
+        "toll_booth": "Pedágio",
+        "hotel": "Hotel",
+        "lodging": "Hospedagem",
+        "camping": "Camping",
+        "hospital": "Hospital",
+        "city": "Cidade",
+        "town": "Vila",
+        "village": "Povoado",
+        "other": "Outro"
+    }
+
+    # Criar tabela única com todos os POIs
+    table_data = []
+
+    # Cabeçalho da tabela
+    table_data.append([
+        Paragraph('<b>KM</b>', styles['Normal']),
+        Paragraph('<b>Tipo</b>', styles['Normal']),
+        Paragraph('<b>Nome</b>', styles['Normal']),
+        Paragraph('<b>Detalhes</b>', styles['Normal'])
+    ])
+
+    # Ordenar todos os POIs por distância
+    milestones_sorted = sorted(milestones, key=lambda p: p.distance_from_origin_km)
+
+    for poi in milestones_sorted:
+        # Distância
+        distance = Paragraph(
+            f"<b>{poi.distance_from_origin_km:.1f}</b>",
+            styles['Normal']
+        )
+
+        # Tipo do POI - extrair o valor do enum corretamente
+        if hasattr(poi.type, 'value'):
+            poi_type_str = poi.type.value
+        else:
+            poi_type_str = str(poi.type).lower()
+
+        type_label = type_display.get(poi_type_str, poi_type_str.replace('_', ' ').title())
+        poi_type = Paragraph(type_label, styles['Normal'])
+
+        # Nome do POI
+        name = Paragraph(poi.name or 'Sem nome', styles['Normal'])
+
+        # Detalhes adicionais
+        details = []
+        if hasattr(poi, 'brand') and poi.brand:
+            details.append(f"<b>Marca:</b> {poi.brand}")
+        if hasattr(poi, 'operator') and poi.operator:
+            details.append(f"<b>Operador:</b> {poi.operator}")
+        if hasattr(poi, 'opening_hours') and poi.opening_hours:
+            details.append(f"<b>Horário:</b> {poi.opening_hours}")
+
+        details_text = '<br/>'.join(details) if details else '-'
+        details_para = Paragraph(details_text, styles['Normal'])
+
+        table_data.append([distance, poi_type, name, details_para])
+
+    # Criar e estilizar tabela
+    table = Table(table_data, colWidths=[2*cm, 3.5*cm, 5.5*cm, 6*cm])
+    table.setStyle(TableStyle([
+        # Cabeçalho
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2563eb')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, 0), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+        ('TOPPADDING', (0, 0), (-1, 0), 10),
+
+        # Células de dados
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 1), (-1, -1), 9),
+        ('ALIGN', (0, 1), (0, -1), 'CENTER'),  # Centralizar coluna KM
+        ('VALIGN', (0, 1), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 1), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+        ('LEFTPADDING', (0, 1), (-1, -1), 6),
+        ('RIGHTPADDING', (0, 1), (-1, -1), 6),
+
+        # Bordas
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#d1d5db')),
+
+        # Linhas alternadas
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f3f4f6')])
+    ]))
+
+    elements.append(table)
+    
+    # Construir PDF
+    doc.build(elements)
+    
+    # Obter bytes do PDF
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+    
+    # Salvar arquivo se especificado
+    if output_file:
+        output_path = Path(output_file)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(output_path, 'wb') as f:
+            f.write(pdf_bytes)
+        
+        print(f"📄 PDF exportado para: {output_path}")
+    
+    return pdf_bytes
