@@ -1,4 +1,12 @@
 procs:
+  postgres:
+    cmd: ["bash", "-c", "docker start -a mapalinear-postgres 2>/dev/null || docker run --name mapalinear-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_USER=postgres -v mapalinear-pgdata:/var/lib/postgresql/data -p 5432:5432 postgres:16"]
+    cwd: .
+    autostart: true
+    color: magenta
+    stop_signal: SIGTERM
+    stop_timeout: 5
+
   api:
     cmd: ["poetry", "run", "python", "-m", "api.run"]
     env:
@@ -9,7 +17,7 @@ procs:
     color: green
     stop_signal: SIGTERM
     stop_timeout: 5
-    
+
   frontend:
     cmd: ["npm", "run", "dev", "--", "--port", "8000"]
     env:

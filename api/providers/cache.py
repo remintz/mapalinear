@@ -12,6 +12,7 @@ import json
 import os
 import re
 import logging
+import math
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List, Union
 from dataclasses import dataclass, field
@@ -162,58 +163,107 @@ class CacheEntry:
 
 class UnifiedCache:
     """
-    Unified cache system for geographic data.
+    Unified cache system for geographic data backed by PostgreSQL.
     
     Features:
     1. Provider-aware caching with namespaced keys
     2. Semantic matching for geocoding (handles similar addresses)
     3. Configurable TTL per operation type
-    4. In-memory storage with optional persistence
+    4. PostgreSQL storage with connection pooling
     5. Statistics tracking for monitoring
     """
     
-    def __init__(self, backend: str = "memory"):
+    def __init__(self, backend: str = "postgres"):
         """
-        Initialize the unified cache.
+        Initialize cache with specified backend.
         
         Args:
-            backend: Cache backend type ("memory" or "redis" in future)
+            backend: Cache backend type ("memory" or "postgres")
         """
-        self.backend = backend
-        self._cache: Dict[str, CacheEntry] = {}
-        self._stats = {
-            'hits': 0,
-            'misses': 0,
-            'sets': 0,
-            'evictions': 0
-        }
-        
-        # Import settings here to avoid circular imports
         from .settings import get_settings
-        settings = get_settings()
         
-        # TTL configuration from Pydantic Settings
+        self.backend = backend
+        self._pools = {}  # Event loop ID -> pool mapping
+        self._pool_locks = {}  # Event loop ID -> lock mapping
+        self._stats = {'hits': 0, 'misses': 0, 'sets': 0, 'evictions': 0}
+        
+        self.settings = get_settings()
+        
+        # TTL configuration (in seconds)
         self.ttl_config = {
-            "geocode": settings.geo_cache_ttl_geocode,
-            "reverse_geocode": settings.geo_cache_ttl_geocode,
-            "route": settings.geo_cache_ttl_route,
-            "poi_search": settings.geo_cache_ttl_poi,
-            "poi_details": settings.geo_cache_ttl_poi_details
+            'geocode': self.settings.geo_cache_ttl_geocode,
+            'reverse_geocode': self.settings.geo_cache_ttl_geocode,
+            'route': self.settings.geo_cache_ttl_route,
+            'poi_search': self.settings.geo_cache_ttl_poi,
+            'poi_details': self.settings.geo_cache_ttl_poi_details,
         }
-        
-        logger.info(f"Initialized unified cache with backend: {backend}")
-
-        
-        # Persistent cache configuration
-        self.cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'cache')
-        self.cache_file = os.path.join(self.cache_dir, 'unified_cache.json')
-        
-        # Ensure cache directory exists
-        os.makedirs(self.cache_dir, exist_ok=True)
-        
-        # Load existing cache from disk if available
-        self._load_from_file()
     
+    async def _get_pool(self):
+        """Get or create PostgreSQL connection pool for current event loop."""
+        import asyncio
+        
+        try:
+            # Get current event loop
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop - should not happen in async context
+            logger.error("No running event loop found!")
+            raise
+        
+        # Use loop ID as key (each loop is unique per thread execution)
+        loop_id = id(loop)
+        
+        # Check if pool exists and if its loop is still valid
+        if loop_id in self._pools:
+            pool = self._pools[loop_id]
+            # Verify the loop is still running and not closed
+            if not loop.is_closed():
+                logger.debug(f"🔵 Returning existing pool for loop {loop_id}")
+                return pool
+            else:
+                # Loop was closed, remove stale pool
+                logger.warning(f"⚠️ Loop {loop_id} was closed, removing stale pool")
+                try:
+                    await pool.close()
+                except:
+                    pass
+                del self._pools[loop_id]
+                if loop_id in self._pool_locks:
+                    del self._pool_locks[loop_id]
+        
+        # Initialize lock for this loop if not exists
+        if loop_id not in self._pool_locks:
+            self._pool_locks[loop_id] = asyncio.Lock()
+        
+        logger.debug(f"🔵 Acquiring pool lock for loop {loop_id}")
+        
+        # Use lock to prevent multiple initializations
+        async with self._pool_locks[loop_id]:
+            # Double-check after acquiring lock
+            if loop_id in self._pools and not loop.is_closed():
+                logger.debug(f"🔵 Pool created by another task for loop {loop_id}")
+                return self._pools[loop_id]
+            
+            import asyncpg
+            
+            logger.info(f"🔵 Creating PostgreSQL connection pool for loop {loop_id}...")
+            
+            self._pools[loop_id] = await asyncpg.create_pool(
+                host=self.settings.postgres_host,
+                port=self.settings.postgres_port,
+                database=self.settings.postgres_database,
+                user=self.settings.postgres_user,
+                password=self.settings.postgres_password,
+                min_size=self.settings.postgres_pool_min_size,
+                max_size=self.settings.postgres_pool_max_size,
+                command_timeout=60
+            )
+            
+            logger.info(f"✅ PostgreSQL connection pool created for loop {loop_id}: {self.settings.postgres_host}:{self.settings.postgres_port}/{self.settings.postgres_database}")
+        
+        logger.debug(f"🔵 Releasing pool lock for loop {loop_id}")
+        return self._pools[loop_id]
+
     async def get(self, provider: ProviderType, operation: str, params: Dict[str, Any]) -> Optional[Any]:
         """
         Retrieve data from cache with fallback to similar entries.
@@ -231,63 +281,62 @@ class UnifiedCache:
         normalized_params = cache_key._normalize_params(params)
         primary_key = cache_key.generate_key()
         
-        # Try exact match first
-        entry = self._get_entry(primary_key)
-        if entry and not entry.is_expired():
-            entry.hit_count += 1
+        pool = await self._get_pool()
+        
+        # Try exact match first - simple read
+        row = None
+        
+        try:
+            # Use timeout to acquire connection
+            async with pool.acquire(timeout=10) as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT data, params
+                    FROM cache_entries
+                    WHERE key = $1 AND expires_at > NOW()
+                    """,
+                    primary_key
+                )
+        except Exception as e:
+            logger.error(f"❌ get({operation}): Error during cache read: {e}", exc_info=True)
+            # Return None on cache error, don't fail the operation
+            return None
+        
+        if row:
             self._stats['hits'] += 1
             logger.debug(f"Cache hit for {operation} with provider {provider.value}")
-            # Reconstruct Pydantic models if data came from disk
-            return self._reconstruct_data(entry.data, operation)
-        
-        # Special logging for reverse_geocode when cache miss
-        if operation == "reverse_geocode":
-            poi_name = params.get("poi_name")
-            logger.info(f"🔍 Cache MISS for reverse_geocode")
-            logger.info(f"🔍 Original params: {params}")
-            logger.info(f"🔍 Normalized params: {normalized_params}")
-            logger.info(f"🔍 Generated key: {primary_key}")
             
-            # Find all reverse_geocode entries with same poi_name
-            if poi_name:
-                matching_entries = []
-                for key, entry in self._cache.items():
-                    if entry.operation == "reverse_geocode" and entry.params.get("poi_name") == poi_name:
-                        matching_entries.append({
-                            "key": key,
-                            "params": entry.params,
-                            "is_expired": entry.is_expired(),
-                            "created_at": entry.created_at.isoformat()
-                        })
-                
-                if matching_entries:
-                    logger.info(f"🔍 Found {len(matching_entries)} cache entries with same POI name '{poi_name}':")
-                    for i, match in enumerate(matching_entries, 1):
-                        logger.info(f"🔍   Entry {i}:")
-                        logger.info(f"🔍     Key: {match['key']}")
-                        logger.info(f"🔍     Params: {match['params']}")
-                        logger.info(f"🔍     Expired: {match['is_expired']}")
-                        logger.info(f"🔍     Created: {match['created_at']}")
-                else:
-                    logger.info(f"🔍 No cache entries found with POI name '{poi_name}'")
+            # Parse JSONB data
+            data = row['data']
+            if isinstance(data, str):
+                data = json.loads(data)
+            
+            # Reconstruct Pydantic models
+            return self._reconstruct_data(data, operation)
         
         # For geocoding, try semantic matching
         if operation == "geocode" and "address" in params:
+            logger.debug(f"🔵 get({operation}): Trying semantic matching")
             similar_entry = await self._find_similar_geocode(params["address"])
-            if similar_entry and not similar_entry.is_expired():
-                similar_entry.hit_count += 1
+            if similar_entry:
                 self._stats['hits'] += 1
                 logger.debug(f"Cache hit via semantic matching for geocode: {params['address']}")
-                return self._reconstruct_data(similar_entry.data, operation)
+                data = similar_entry['data']
+                if isinstance(data, str):
+                    data = json.loads(data)
+                return self._reconstruct_data(data, operation)
         
         # For POI searches, try spatial matching
         elif operation == "poi_search" and all(k in params for k in ['latitude', 'longitude', 'radius']):
+            logger.debug(f"🔵 get({operation}): Trying spatial matching")
             spatial_entry = await self._find_spatial_poi_match(params)
-            if spatial_entry and not spatial_entry.is_expired():
-                spatial_entry.hit_count += 1
+            if spatial_entry:
                 self._stats['hits'] += 1
                 logger.debug(f"Cache hit via spatial matching for POI search")
-                return self._reconstruct_data(spatial_entry.data, operation)
+                data = spatial_entry['data']
+                if isinstance(data, str):
+                    data = json.loads(data)
+                return self._reconstruct_data(data, operation)
         
         self._stats['misses'] += 1
         logger.debug(f"Cache miss for {operation} with provider {provider.value}")
@@ -296,6 +345,7 @@ class UnifiedCache:
     def _reconstruct_data(self, data: Any, operation: str) -> Any:
         """Reconstruct Pydantic models from dictionaries loaded from cache."""
         if data is None:
+            logger.debug(f"🔎 _reconstruct_data({operation}): data is None, returning None")
             return None
         
         # Import models here to avoid circular imports
@@ -315,8 +365,12 @@ class UnifiedCache:
         
         # For poi_search, reconstruct list of POIs
         elif operation == "poi_search":
+            logger.debug(f"🔎 _reconstruct_data(poi_search): data type={type(data)}, len={len(data) if isinstance(data, list) else 'N/A'}")
             if isinstance(data, list):
-                return [POI(**item) if isinstance(item, dict) else item for item in data]
+                result = [POI(**item) if isinstance(item, dict) else item for item in data]
+                logger.debug(f"🔎 _reconstruct_data(poi_search): reconstructed {len(result)} POIs")
+                return result
+            logger.debug(f"🔎 _reconstruct_data(poi_search): data is not a list, returning as-is")
             return data
         
         # For poi_details, reconstruct POI
@@ -343,7 +397,6 @@ class UnifiedCache:
         key = cache_key.generate_key()
         
         ttl = self.ttl_config.get(operation, 3600)  # Default 1 hour
-        expires_at = datetime.utcnow() + timedelta(seconds=ttl)
         
         # Special logging for reverse_geocode
         if operation == "reverse_geocode":
@@ -351,33 +404,63 @@ class UnifiedCache:
             logger.info(f"💾 Original params: {params}")
             logger.info(f"💾 Normalized params: {normalized_params}")
             logger.info(f"💾 Generated key: {key}")
-            logger.info(f"💾 TTL: {ttl}s, expires: {expires_at.isoformat()}")
+            logger.info(f"💾 TTL: {ttl}s")
         
+        # Serialize data
         entry = CacheEntry(
             key=key,
             data=data,
             provider=provider,
             operation=operation,
             created_at=datetime.utcnow(),
-            expires_at=expires_at,
+            expires_at=datetime.utcnow() + timedelta(seconds=ttl),
             hit_count=0,
             params=params
         )
         
-        self._cache[key] = entry
-        self._stats['sets'] += 1
+        data_serialized = entry._serialize_data(data)
         
-        logger.debug(f"Cached {operation} data for provider {provider.value}, expires at {expires_at}")
+        pool = await self._get_pool()
+        
+        # Use a single transaction to avoid concurrency issues
+        try:
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    # Convert to JSON strings for JSONB columns
+                    await conn.execute(
+                        """
+                        INSERT INTO cache_entries (key, data, provider, operation, created_at, expires_at, hit_count, params)
+                        VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7, $8::jsonb)
+                        ON CONFLICT (key) DO UPDATE SET
+                            data = EXCLUDED.data,
+                            expires_at = EXCLUDED.expires_at,
+                            hit_count = 0
+                        """,
+                        key,
+                        json.dumps(data_serialized),
+                        provider.value,
+                        operation,
+                        entry.created_at,
+                        entry.expires_at,
+                        0,
+                        json.dumps(params)
+                    )
+            
+            self._stats['sets'] += 1
+            logger.debug(f"Cached {operation} data for provider {provider.value}, expires at {entry.expires_at}")
+            
+        except Exception as e:
+            logger.error(f"❌ set({operation}): Error caching data: {e}", exc_info=True)
+            # Don't fail the operation if cache fails
+            return
         
         # Clean up expired entries periodically
-        if len(self._cache) % 100 == 0:  # Every 100 sets
-            await self._cleanup_expired()
+        if self._stats['sets'] % 100 == 0:  # Every 100 sets
+            # Run cleanup in background to avoid blocking
+            import asyncio
+            asyncio.create_task(self._cleanup_expired())
     
-    def _get_entry(self, key: str) -> Optional[CacheEntry]:
-        """Get cache entry by key."""
-        return self._cache.get(key)
-    
-    async def _find_similar_geocode(self, address: str) -> Optional[CacheEntry]:
+    async def _find_similar_geocode(self, address: str) -> Optional[Dict[str, Any]]:
         """
         Find similar geocoding entries using semantic matching.
         
@@ -386,22 +469,35 @@ class UnifiedCache:
         """
         normalized_address = self._normalize_address(address)
         
-        # Look through geocoding entries for similar addresses
-        for entry in self._cache.values():
-            if entry.operation != "geocode" or entry.is_expired():
-                continue
+        pool = await self._get_pool()
+        
+        # Look through geocoding entries for similar addresses - simple read
+        rows = None
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT key, data, params
+                FROM cache_entries
+                WHERE operation = 'geocode'
+                AND expires_at > NOW()
+                AND params->>'address' IS NOT NULL
+                """
+            )
+        
+        for row in rows:
+            # Parse params if needed
+            params_data = row['params']
+            if isinstance(params_data, str):
+                params_data = json.loads(params_data)
             
-            if "address" not in entry.params:
-                continue
-            
-            cached_address = self._normalize_address(entry.params["address"])
+            cached_address = self._normalize_address(params_data.get('address', ''))
             if self._addresses_similar(normalized_address, cached_address):
-                logger.debug(f"Found similar address: '{address}' ~ '{entry.params['address']}'")
-                return entry
+                logger.debug(f"Found similar address: '{address}' ~ '{params_data['address']}'")
+                return dict(row)
         
         return None
     
-    async def _find_spatial_poi_match(self, params: Dict[str, Any]) -> Optional[CacheEntry]:
+    async def _find_spatial_poi_match(self, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         Find POI search results for nearby locations.
         
@@ -413,27 +509,45 @@ class UnifiedCache:
         target_radius = params['radius']
         target_categories = set(params.get('categories', []))
         
-        # Search for nearby POI cache entries
-        for entry in self._cache.values():
-            if entry.operation != "poi_search" or entry.is_expired():
+        pool = await self._get_pool()
+        
+        # Search for nearby POI cache entries - simple read
+        rows = None
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT key, data, params
+                FROM cache_entries
+                WHERE operation = 'poi_search'
+                AND expires_at > NOW()
+                AND params->>'latitude' IS NOT NULL
+                AND params->>'longitude' IS NOT NULL
+                AND params->>'radius' IS NOT NULL
+                """
+            )
+        
+        for row in rows:
+            try:
+                # Parse params if needed
+                params_data = row['params']
+                if isinstance(params_data, str):
+                    params_data = json.loads(params_data)
+                
+                cached_lat = float(params_data.get('latitude', 0))
+                cached_lon = float(params_data.get('longitude', 0))
+                cached_radius = float(params_data.get('radius', 0))
+                cached_categories = set(params_data.get('categories', []))
+                
+                # Check if locations are close enough
+                distance = self._calculate_distance(target_lat, target_lon, cached_lat, cached_lon)
+                
+                # If search areas overlap significantly and categories match
+                if (distance < (target_radius + cached_radius) / 2 and 
+                    target_categories == cached_categories):
+                    logger.debug(f"Found spatial POI match at distance {distance}m")
+                    return dict(row)
+            except (ValueError, KeyError):
                 continue
-            
-            if not all(k in entry.params for k in ['latitude', 'longitude', 'radius']):
-                continue
-            
-            cached_lat = entry.params['latitude']
-            cached_lon = entry.params['longitude']
-            cached_radius = entry.params['radius']
-            cached_categories = set(entry.params.get('categories', []))
-            
-            # Check if locations are close enough
-            distance = self._calculate_distance(target_lat, target_lon, cached_lat, cached_lon)
-            
-            # If search areas overlap significantly and categories match
-            if (distance < (target_radius + cached_radius) / 2 and 
-                target_categories == cached_categories):
-                logger.debug(f"Found spatial POI match at distance {distance}m")
-                return entry
         
         return None
     
@@ -490,6 +604,8 @@ class UnifiedCache:
     
     def _calculate_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         """Calculate approximate distance between two points in meters."""
+        import math
+        
         # Simplified distance calculation for cache matching
         # This is good enough for determining if POI search areas overlap
         lat_diff = abs(lat1 - lat2)
@@ -503,29 +619,36 @@ class UnifiedCache:
     
     async def _cleanup_expired(self) -> None:
         """Remove expired entries from cache."""
-        before_count = len(self._cache)
-        current_time = datetime.utcnow()
+        pool = await self._get_pool()
         
-        expired_keys = [
-            key for key, entry in self._cache.items()
-            if entry.expires_at < current_time
-        ]
-        
-        for key in expired_keys:
-            del self._cache[key]
-            self._stats['evictions'] += 1
-        
-        if expired_keys:
-            logger.debug(f"Cleaned up {len(expired_keys)} expired cache entries")
-    
-    def get_stats(self) -> Dict[str, Any]:
+        async with pool.acquire() as conn:
+            # Use transaction for DELETE operation
+            async with conn.transaction():
+                result = await conn.execute(
+                    "DELETE FROM cache_entries WHERE expires_at < NOW()"
+                )
+            
+            # Extract number of deleted rows
+            deleted_count = int(result.split()[-1]) if result else 0
+            
+            if deleted_count > 0:
+                self._stats['evictions'] += deleted_count
+                logger.debug(f"Cleaned up {deleted_count} expired cache entries")
+    async def get_stats(self) -> Dict[str, Any]:
         """Get cache statistics."""
+        pool = await self._get_pool()
+        
+        async with pool.acquire() as conn:
+            total_entries = await conn.fetchval(
+                "SELECT COUNT(*) FROM cache_entries WHERE expires_at > NOW()"
+            )
+        
         total_requests = self._stats['hits'] + self._stats['misses']
         hit_rate = (self._stats['hits'] / total_requests * 100) if total_requests > 0 else 0
         
         return {
             'backend': self.backend,
-            'total_entries': len(self._cache),
+            'total_entries': total_entries,
             'hits': self._stats['hits'],
             'misses': self._stats['misses'],
             'sets': self._stats['sets'],
@@ -536,7 +659,11 @@ class UnifiedCache:
     
     async def clear(self) -> None:
         """Clear all cache entries."""
-        self._cache.clear()
+        pool = await self._get_pool()
+        
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM cache_entries")
+        
         logger.info("Cache cleared")
     
     async def invalidate_pattern(self, pattern: str) -> int:
@@ -549,91 +676,36 @@ class UnifiedCache:
         Returns:
             Number of entries invalidated
         """
-        import fnmatch
+        pool = await self._get_pool()
         
-        matching_keys = [
-            key for key in self._cache.keys()
-            if fnmatch.fnmatch(key, pattern)
-        ]
+        # Convert fnmatch pattern to SQL LIKE pattern
+        sql_pattern = pattern.replace('*', '%').replace('?', '_')
         
-        for key in matching_keys:
-            del self._cache[key]
+        async with pool.acquire() as conn:
+            result = await conn.execute(
+                "DELETE FROM cache_entries WHERE key LIKE $1",
+                sql_pattern
+            )
+            
+            deleted_count = int(result.split()[-1]) if result else 0
         
-        logger.info(f"Invalidated {len(matching_keys)} cache entries matching pattern: {pattern}")
-        return len(matching_keys)
-
+        logger.info(f"Invalidated {deleted_count} cache entries matching pattern: {pattern}")
+        return deleted_count
     
-    def _load_from_file(self) -> None:
-        """Load cache from persistent storage on disk."""
-        if not os.path.exists(self.cache_file):
-            logger.info("No persistent cache file found, starting with empty cache")
-            return
+    async def close(self) -> None:
+        """Close all database connection pools from all threads."""
+        import threading
         
-        try:
-            with open(self.cache_file, 'r', encoding='utf-8') as f:
-                cache_data = json.load(f)
-            
-            # Reconstruct cache entries from stored data
-            loaded_count = 0
-            expired_count = 0
-            
-            for entry_dict in cache_data.get('entries', []):
-                try:
-                    entry = CacheEntry.from_dict(entry_dict)
-                    
-                    # Skip expired entries
-                    if entry.is_expired():
-                        expired_count += 1
-                        continue
-                    
-                    self._cache[entry.key] = entry
-                    loaded_count += 1
-                    
-                except Exception as e:
-                    logger.warning(f"Failed to load cache entry: {e}")
-                    continue
-            
-            # Load stats if available
-            if 'stats' in cache_data:
-                self._stats = cache_data['stats']
-            
-            logger.info(f"Loaded {loaded_count} cache entries from disk ({expired_count} expired entries skipped)")
-            
-        except Exception as e:
-            logger.error(f"Error loading cache from file: {e}")
-            logger.info("Starting with empty cache")
-    
-    def save_to_file(self) -> None:
-        """Save cache to persistent storage on disk."""
-        try:
-            # Clean up expired entries before saving
-            current_time = datetime.utcnow()
-            valid_entries = [
-                entry.to_dict()
-                for entry in self._cache.values()
-                if not entry.is_expired()
-            ]
-            
-            cache_data = {
-                'version': '1.0',
-                'saved_at': datetime.utcnow().isoformat(),
-                'backend': self.backend,
-                'stats': self._stats,
-                'entries': valid_entries
-            }
-            
-            # Write to temporary file first, then rename (atomic operation)
-            temp_file = self.cache_file + '.tmp'
-            with open(temp_file, 'w', encoding='utf-8') as f:
-                json.dump(cache_data, f, indent=2, ensure_ascii=False)
-            
-            # Atomic rename
-            os.replace(temp_file, self.cache_file)
-            
-            logger.info(f"Saved {len(valid_entries)} cache entries to disk at {self.cache_file}")
-            
-        except Exception as e:
-            logger.error(f"Error saving cache to file: {e}")
+        for thread_id, pool in list(self._pools.items()):
+            try:
+                await pool.close()
+                logger.info(f"PostgreSQL connection pool closed for thread {thread_id}")
+            except Exception as e:
+                logger.error(f"Error closing pool for thread {thread_id}: {e}")
+        
+        self._pools.clear()
+        self._pool_locks.clear()
+        logger.info("All PostgreSQL connection pools closed")
 
 
 # Import math for distance calculation

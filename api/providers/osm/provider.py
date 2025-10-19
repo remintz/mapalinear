@@ -322,8 +322,9 @@ class OSMProvider(GeoProvider):
                 operation="poi_search",
                 params=cache_key_params
             )
-            if cached_result:
-                logger.debug(f"🔎 Cache hit: retornando {len(cached_result)} POIs do cache")
+            logger.debug(f"🔎 Cache result type: {type(cached_result)}, value: {cached_result if not isinstance(cached_result, list) else f'list with {len(cached_result)} items'}")
+            if cached_result is not None:
+                logger.debug(f"🔎 Cache hit: retornando {len(cached_result) if isinstance(cached_result, list) else 'N/A'} POIs do cache")
                 return cached_result
         
         try:
