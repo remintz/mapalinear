@@ -41,15 +41,25 @@ export default function DebugSegmentsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [debugData, setDebugData] = useState<DebugData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [API_URL, setAPI_URL] = useState<string | null>(null);
+
+  // Detect API URL on client side - always use auto-detection
+  useEffect(() => {
+    const protocol = window.location.protocol;
+    const hostname = window.location.hostname;
+    const detectedUrl = `${protocol}//${hostname}:8001/api`;
+    setAPI_URL(detectedUrl);
+  }, []);
 
   useEffect(() => {
+    if (!API_URL) return; // Wait for API_URL to be detected
+
     const loadSegments = async () => {
       setIsLoading(true);
       setError(null);
 
       try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
-        const response = await fetch(`${apiUrl}/operations/debug/segments`);
+        const response = await fetch(`${API_URL}/operations/debug/segments`);
 
         if (!response.ok) {
           const errorData = await response.json();
@@ -70,7 +80,7 @@ export default function DebugSegmentsPage() {
     };
 
     loadSegments();
-  }, []);
+  }, [API_URL]);
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -84,8 +94,8 @@ export default function DebugSegmentsPage() {
           🔍 Debug: Visualizar Segmentos da Rota
         </h1>
         <p className="text-gray-600 mt-2">
-          Mostrando os segmentos do último mapa linear gerado.
-          Use para debugar se os POIs estão sendo corretamente associados aos segmentos.
+          Mostrando os segmentos do último mapa gerado.
+          Use para debugar se os pontos de interesse estão sendo corretamente associados aos segmentos.
         </p>
       </div>
 
@@ -110,7 +120,7 @@ export default function DebugSegmentsPage() {
           <CardContent>
             <p className="text-red-700 mb-4">{error}</p>
             <p className="text-sm text-gray-600">
-              Dica: Vá para a página de busca e gere um mapa linear primeiro.
+              Dica: Vá para a página de busca e gere um mapa primeiro.
             </p>
             <Link href="/search" className="inline-block mt-4">
               <Button>Ir para Busca</Button>

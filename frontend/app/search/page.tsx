@@ -75,7 +75,7 @@ export default function SearchPage() {
               <h3 className="text-sm font-semibold text-blue-900 mb-2">💡 Dica rápida</h3>
               <p className="text-xs text-blue-700">
                 Digite cidades no formato <strong>Cidade, UF</strong> (ex: São Paulo, SP).
-                Ajuste a distância máxima para encontrar POIs próximos à rota.
+                Ajuste a distância máxima para encontrar pontos de interesse próximos à rota.
               </p>
             </div>
 

@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { Card, CardContent, Button } from '@/components/ui';
+import { Card, CardContent } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/badge';
 import {
   Map,
@@ -31,31 +32,86 @@ export default function SavedMapsPage() {
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  const [API_URL, setAPI_URL] = useState<string | null>(null);
   const router = useRouter();
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
+  const addDebugLog = (message: string) => {
+    setDebugLogs(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`]);
+    console.log(message);
+  };
 
-  // Load saved maps on mount
+  // Detect API URL on client side
   useEffect(() => {
-    loadMaps();
+    addDebugLog('[INIT] Detecting API URL...');
+
+    // Always use auto-detection based on window.location
+    // This ensures the frontend works when accessed via IP address
+    const protocol = window.location.protocol;
+    const hostname = window.location.hostname;
+    const detectedUrl = `${protocol}//${hostname}:8001/api`;
+
+    addDebugLog(`[INIT] protocol: ${protocol}`);
+    addDebugLog(`[INIT] hostname: ${hostname}`);
+    addDebugLog(`[INIT] Detected URL: ${detectedUrl}`);
+
+    setAPI_URL(detectedUrl);
   }, []);
+
+  // Load saved maps when API_URL is ready
+  useEffect(() => {
+    // Only load when API_URL has been detected (not null)
+    if (API_URL) {
+      addDebugLog(`useEffect triggered, API_URL: ${API_URL}`);
+      try {
+        loadMaps();
+      } catch (error) {
+        console.error('Error in useEffect:', error);
+        setLoading(false);
+        setMaps([]);
+      }
+    } else {
+      addDebugLog('Waiting for API_URL to be detected...');
+    }
+  }, [API_URL]);
 
   const loadMaps = async () => {
     try {
       setLoading(true);
+      setError(null);
+
+      addDebugLog('1. Iniciando carregamento');
+      addDebugLog(`2. API_URL: ${API_URL}`);
+      addDebugLog(`3. Full URL: ${API_URL}/maps`);
+
       const response = await fetch(`${API_URL}/maps`);
+      addDebugLog(`4. Fetch completo, status: ${response.status}`);
 
       if (!response.ok) {
-        throw new Error('Erro ao carregar mapas salvos');
+        addDebugLog('5. Response não OK');
+        throw new Error(`Erro ${response.status}: ${response.statusText}`);
       }
 
+      addDebugLog('6. Response OK, fazendo parse JSON');
       const data = await response.json();
+      addDebugLog(`7. JSON parseado, ${data.length} mapas encontrados`);
+
       setMaps(data);
+      addDebugLog('8. Maps setados com sucesso');
     } catch (error) {
-      console.error('Error loading maps:', error);
-      toast.error('Erro ao carregar mapas salvos');
+      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+      addDebugLog(`❌ Erro: ${errorMessage}`);
+      addDebugLog(`❌ Error type: ${typeof error}`);
+      if (error instanceof Error && error.stack) {
+        addDebugLog(`❌ Stack: ${error.stack.substring(0, 200)}`);
+      }
+      setError(errorMessage);
+      toast.error(`Erro ao carregar mapas: ${errorMessage}`);
+      setMaps([]);
     } finally {
       setLoading(false);
+      addDebugLog('9. Loading finalizado');
     }
   };
 
@@ -65,10 +121,6 @@ export default function SavedMapsPage() {
   };
 
   const handleDeleteMap = async (mapId: string) => {
-    if (!confirm('Tem certeza que deseja deletar este mapa?')) {
-      return;
-    }
-
     try {
       setDeletingId(mapId);
       const response = await fetch(`${API_URL}/maps/${mapId}`, {
@@ -91,10 +143,6 @@ export default function SavedMapsPage() {
   };
 
   const handleRegenerateMap = async (mapId: string) => {
-    if (!confirm('Tem certeza que deseja regenerar este mapa? O mapa atual será substituído.')) {
-      return;
-    }
-
     try {
       setRegeneratingId(mapId);
       const response = await fetch(`${API_URL}/maps/${mapId}/regenerate`, {
@@ -119,14 +167,22 @@ export default function SavedMapsPage() {
   };
 
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return new Intl.DateTimeFormat('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    }).format(date);
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) {
+        return 'Data inválida';
+      }
+      return new Intl.DateTimeFormat('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      }).format(date);
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return 'Data inválida';
+    }
   };
 
   if (loading) {
@@ -134,6 +190,27 @@ export default function SavedMapsPage() {
       <div className="container mx-auto p-6">
         <div className="flex items-center justify-center min-h-[400px]">
           <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="text-center max-w-2xl w-full">
+          <div className="text-6xl mb-4">⚠️</div>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">Erro ao carregar mapas</h2>
+          <p className="text-sm text-gray-600 mb-4">{error}</p>
+          <Button onClick={() => loadMaps()} className="mb-6">Tentar Novamente</Button>
+
+          {/* Debug Logs */}
+          <div className="bg-black text-green-400 p-4 rounded-lg text-left text-xs font-mono max-h-96 overflow-y-auto">
+            <div className="font-bold mb-2">Debug Logs:</div>
+            {debugLogs.map((log, index) => (
+              <div key={index}>{log}</div>
+            ))}
+          </div>
         </div>
       </div>
     );
@@ -170,7 +247,7 @@ export default function SavedMapsPage() {
             <Map className="h-20 w-20 text-gray-300 mb-4" />
             <h2 className="text-lg font-semibold text-gray-700 mb-2">Nenhum mapa salvo</h2>
             <p className="text-sm text-gray-500 mb-6 max-w-xs">
-              Crie seu primeiro mapa linear para começar
+              Crie seu primeiro mapa para começar
             </p>
             <Button onClick={() => router.push('/search')}>
               Criar Novo Mapa
@@ -193,7 +270,7 @@ export default function SavedMapsPage() {
                       </span>
                       <span className="flex items-center gap-1">
                         <MapPin className="h-3 w-3" />
-                        {map.milestone_count} POIs
+                        {map.milestone_count} pontos
                       </span>
                       <Badge variant="secondary" className="bg-blue-100 text-blue-800 text-xs">
                         {map.total_length_km.toFixed(1)} km

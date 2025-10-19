@@ -25,15 +25,18 @@ async def log_requests(request: Request, call_next):
     path = request.url.path
     method = request.method
     
-    # Log mais conciso evitando strings repetitivas
-    # logger.info(f"🔔 REQ#{req_id} INICIADA: {method} {path}")
-    
+    # Skip logging for polling endpoints (too verbose)
+    skip_logging = method == "GET" and path.startswith("/api/operations")
+
+    if not skip_logging:
+        logger.info(f"🔔 {method} {path}")
+
     try:
         response = await call_next(request)
-        
+
         process_time = time.time() - start_time
         status_code = response.status_code
-        
+
         # Status code colorido por categoria
         if status_code < 400:
             status_str = f"✅ {status_code}"
@@ -41,8 +44,9 @@ async def log_requests(request: Request, call_next):
             status_str = f"⚠️ {status_code}"
         else:
             status_str = f"❌ {status_code}"
-            
-        # logger.info(f"🏁 REQ#{req_id} COMPLETA: {method} {path} - Status: {status_str} - Tempo: {process_time:.4f}s")
+
+        if not skip_logging:
+            logger.info(f"🏁 {method} {path} - {status_str} - {process_time:.3f}s")
         return response
     except Exception as e:
         process_time = time.time() - start_time

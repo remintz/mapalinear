@@ -34,14 +34,22 @@ export default function MapPage() {
 
   // Active filters stored as a Set of filter IDs
   const [activeFilters, setActiveFilters] = useState<Set<string>>(
-    new Set(['gas_station', 'restaurant', 'camping', 'toll_booth', 'city', 'town', 'village'])
+    new Set(['gas_station', 'restaurant', 'hotel', 'camping', 'hospital', 'toll_booth', 'city', 'town', 'village'])
   );
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
+  const [API_URL, setAPI_URL] = useState<string | null>(null);
+
+  // Detect API URL on client side - always use auto-detection
+  useEffect(() => {
+    const protocol = window.location.protocol;
+    const hostname = window.location.hostname;
+    const detectedUrl = `${protocol}//${hostname}:8001/api`;
+    setAPI_URL(detectedUrl);
+  }, []);
 
   // Load saved map if mapId is provided
   useEffect(() => {
-    if (mapId) {
+    if (mapId && API_URL) {
       const loadSavedMap = async () => {
         try {
           setIsLoading(true);
@@ -82,7 +90,7 @@ export default function MapPage() {
 
   // Monitor async operation if operationId is provided
   useEffect(() => {
-    if (operationId && !mapId) {
+    if (operationId && !mapId && API_URL) {
       let pollingInterval: NodeJS.Timeout | null = null;
 
       const pollOperationStatus = async () => {
@@ -351,7 +359,7 @@ export default function MapPage() {
       if (tool === 'umap') {
         toast.info('uMap aberto! Clique em "Importar dados" e carregue o arquivo GeoJSON baixado');
       } else {
-        toast.info('Overpass Turbo aberto! Veja os POIs existentes na região da rota');
+        toast.info('Overpass Turbo aberto! Veja os pontos de interesse existentes na região da rota');
       }
     } catch (error) {
       console.error('Erro ao abrir ferramenta web:', error);
@@ -502,7 +510,7 @@ export default function MapPage() {
         {/* POI Feed */}
         <POIFeed
           pois={filteredPOIs}
-          emptyMessage="Nenhum POI encontrado com os filtros selecionados"
+          emptyMessage="Nenhum ponto de interesse encontrado com os filtros selecionados"
         />
       </main>
 
@@ -664,7 +672,7 @@ export default function MapPage() {
                 <ul className="text-xs text-blue-700 space-y-1">
                   <li>• <strong>GeoJSON:</strong> Importar no uMap para visualização interativa</li>
                   <li>• <strong>GPX:</strong> Usar em apps de navegação GPS</li>
-                  <li>• <strong>PDF:</strong> Imprimir lista de POIs</li>
+                  <li>• <strong>PDF:</strong> Imprimir lista de pontos de interesse</li>
                 </ul>
               </div>
             </div>

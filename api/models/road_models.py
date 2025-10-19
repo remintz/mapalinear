@@ -65,6 +65,11 @@ class RoadMilestone(BaseModel):
     amenities: List[str] = Field(default_factory=list, description="Comodidades disponíveis (ex: 'wi-fi', 'estacionamento')")
     quality_score: Optional[float] = Field(None, description="Score de qualidade (0.0 a 1.0) baseado na completude dos dados")
 
+    # Informações de entroncamento (para POIs afastados)
+    junction_distance_km: Optional[float] = Field(None, description="Distância do entroncamento/saída desde a origem (para POIs afastados da estrada)")
+    junction_coordinates: Optional[Coordinates] = Field(None, description="Coordenadas do entroncamento onde sair da estrada principal")
+    requires_detour: bool = Field(False, description="Se True, POI requer sair da estrada principal (>500m de distância)")
+
 
 class LinearRoadSegment(BaseModel):
     id: str = Field(..., description="ID do segmento no mapa linear")

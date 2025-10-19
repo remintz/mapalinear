@@ -12,11 +12,11 @@ export function Navigation({ className }: NavigationProps) {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16">
           <div className="flex items-center">
-            <Link 
-              href="/" 
+            <Link
+              href="/"
               className="text-xl font-bold text-blue-600 hover:text-blue-700"
             >
-              MapaLinear
+              OraPOIS
             </Link>
           </div>
           
@@ -32,12 +32,6 @@ export function Navigation({ className }: NavigationProps) {
               className="text-gray-600 hover:text-gray-900 transition-colors"
             >
               Mapas Salvos
-            </Link>
-            <Link
-              href="/history"
-              className="text-gray-600 hover:text-gray-900 transition-colors"
-            >
-              Histórico
             </Link>
           </div>
         </div>
