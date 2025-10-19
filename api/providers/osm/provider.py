@@ -26,16 +26,11 @@ class OSMProvider(GeoProvider):
     
     def __init__(self, cache: Optional[UnifiedCache] = None):
         """Initialize OSM provider with required clients."""
-        import httpx
         import asyncio
         import time
         from geopy.geocoders import Nominatim
         
         self._cache = cache
-        self._http_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(30.0),
-            headers={'User-Agent': 'mapalinear/1.0 (https://github.com/your-repo)'}
-        )
         
         # Nominatim geolocator for geocoding
         self.geolocator = Nominatim(user_agent="mapalinear/1.0")
@@ -70,6 +65,19 @@ class OSMProvider(GeoProvider):
             'fast_food': POICategory.FOOD,
             'cafe': POICategory.FOOD
         }
+    
+    def _get_http_client(self):
+        """
+        Create a new HTTP client for the current async context.
+        
+        Returns a context manager that provides an httpx.AsyncClient
+        configured for OSM API requests.
+        """
+        import httpx
+        return httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0),
+            headers={'User-Agent': 'mapalinear/1.0 (https://github.com/your-repo)'}
+        )
     
     async def geocode(self, address: str) -> Optional[GeoLocation]:
         """Convert address to coordinates using Nominatim."""
@@ -428,38 +436,40 @@ class OSMProvider(GeoProvider):
         logger.debug(f"🗺️ Consultando OSRM: {osrm_url}")
         
         try:
-            response = await self._http_client.get(osrm_url, params=params, timeout=30)
-            
-            if response.status_code != 200:
-                logger.warning(f"🗺️ OSRM retornou status {response.status_code}")
-                return None
-            
-            data = response.json()
-            
-            if data.get('code') != 'Ok':
-                logger.warning(f"🗺️ OSRM erro: {data.get('message', 'Unknown error')}")
-                return None
-            
-            if not data.get('routes'):
-                logger.warning(f"🗺️ OSRM não retornou rotas")
-                return None
-            
-            route = data['routes'][0]
-            geometry = route['geometry']['coordinates']
-            
-            # Convert to (lat, lon) format
-            geometry_converted = [(coord[1], coord[0]) for coord in geometry]
-            
-            distance = route['distance']  # meters
-            duration = route['duration']  # seconds
-            
-            logger.debug(f"🗺️ OSRM: {distance/1000:.1f}km, {len(geometry_converted)} pontos na geometria")
-            
-            return {
-                'distance': distance,
-                'duration': duration, 
-                'geometry': geometry_converted
-            }
+            # Use context manager to ensure proper client lifecycle
+            async with self._get_http_client() as client:
+                response = await client.get(osrm_url, params=params, timeout=30)
+                
+                if response.status_code != 200:
+                    logger.warning(f"🗺️ OSRM retornou status {response.status_code}")
+                    return None
+                
+                data = response.json()
+                
+                if data.get('code') != 'Ok':
+                    logger.warning(f"🗺️ OSRM erro: {data.get('message', 'Unknown error')}")
+                    return None
+                
+                if not data.get('routes'):
+                    logger.warning(f"🗺️ OSRM não retornou rotas")
+                    return None
+                
+                route = data['routes'][0]
+                geometry = route['geometry']['coordinates']
+                
+                # Convert to (lat, lon) format
+                geometry_converted = [(coord[1], coord[0]) for coord in geometry]
+                
+                distance = route['distance']  # meters
+                duration = route['duration']  # seconds
+                
+                logger.debug(f"🗺️ OSRM: {distance/1000:.1f}km, {len(geometry_converted)} pontos na geometria")
+                
+                return {
+                    'distance': distance,
+                    'duration': duration, 
+                    'geometry': geometry_converted
+                }
             
         except Exception as e:
             logger.warning(f"🗺️ Erro na requisição OSRM: {e}")
@@ -519,33 +529,22 @@ class OSMProvider(GeoProvider):
             
             try:
                 logger.debug(f"Trying Overpass endpoint: {endpoint}")
-                # logger.debug(f"🌐 Enviando query para {endpoint}")
                 
-                response = await self._http_client.post(
-                    endpoint,
-                    data={'data': query},
-                    headers={'Content-Type': 'application/x-www-form-urlencoded'}
-                )
-                
-                # logger.debug(f"🌐 Response status: {response.status_code}")
-                response.raise_for_status()
-                
-                result = response.json()
-                logger.info(f"🌐 Overpass response: {len(result.get('elements', []))} elementos retornados")
-                
-                # # Log alguns elementos para debug
-                # elements = result.get('elements', [])
-                # if elements:
-                #     logger.debug(f"🌐 Primeiro elemento: {elements[0]}")
-                #     if len(elements) > 1:
-                #         logger.debug(f"🌐 Segundo elemento: {elements[1]}")
-                # else:
-                #     logger.warning(f"🌐 ATENÇÃO: Overpass retornou resposta vazia!")
-                #     logger.debug(f"🌐 Resposta completa: {result}")
-                
-                # # Success - log and return
-                logger.debug(f"Overpass request successful using {endpoint}")
-                return result
+                # Use context manager to ensure proper client lifecycle
+                async with self._get_http_client() as client:
+                    response = await client.post(
+                        endpoint,
+                        data={'data': query},
+                        headers={'Content-Type': 'application/x-www-form-urlencoded'}
+                    )
+                    
+                    response.raise_for_status()
+                    
+                    result = response.json()
+                    logger.info(f"🌐 Overpass response: {len(result.get('elements', []))} elementos retornados")
+                    
+                    logger.debug(f"Overpass request successful using {endpoint}")
+                    return result
                 
             except Exception as e:
                 last_exception = e
@@ -586,14 +585,14 @@ class OSMProvider(GeoProvider):
             # Skip abandoned POIs
             if self._is_poi_abandoned(tags):
                 return None
-            
-            # Calculate quality score
+
+            # Calculate quality score (always calculate for metadata)
             quality_score = self._calculate_poi_quality_score(tags)
-            
-            # Check if meets quality threshold
-            if not self._meets_quality_threshold(tags, quality_score):
-                return None
-            
+
+            # TEMPORARILY DISABLED: Quality threshold filtering
+            # if not self._meets_quality_threshold(tags, quality_score):
+            #     return None
+
             # Get coordinates
             if 'lat' in element and 'lon' in element:
                 lat, lon = element['lat'], element['lon']
@@ -671,6 +670,8 @@ class OSMProvider(GeoProvider):
             POICategory.RESTAURANT: ['restaurant', 'fast_food'],
             POICategory.FOOD: ['restaurant', 'fast_food', 'cafe', 'food_court'],
             POICategory.HOTEL: ['hotel'],
+            POICategory.LODGING: ['hotel', 'motel', 'hostel', 'guest_house'],
+            POICategory.CAMPING: ['camp_site', 'caravan_site'],
             POICategory.HOSPITAL: ['hospital'],
             POICategory.PHARMACY: ['pharmacy'],
             POICategory.BANK: ['bank'],

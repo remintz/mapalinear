@@ -11,10 +11,35 @@ import { toast } from 'sonner';
 export default function SearchPage() {
   const { searchRoute, isLoading, error, data, reset, progressMessage, progressPercent, estimatedCompletion } = useAsyncRouteSearch();
   const [isExporting, setIsExporting] = useState(false);
+  const [poiFilters, setPoiFilters] = useState({
+    includeGasStations: true,
+    includeRestaurants: true,
+    includeHotels: false,
+    includeCamping: true,
+    includeHospitals: false,
+    includeTollBooths: true,
+  });
 
   const handleSearch = (formData: any) => {
     searchRoute(formData);
   };
+
+  // Filter POIs based on user preferences
+  const getFilteredPOIs = () => {
+    if (!data?.pois) return [];
+
+    return data.pois.filter((poi) => {
+      if (poi.type === 'gas_station' && !poiFilters.includeGasStations) return false;
+      if (['restaurant', 'fast_food', 'cafe'].includes(poi.type) && !poiFilters.includeRestaurants) return false;
+      if (poi.type === 'hotel' && !poiFilters.includeHotels) return false;
+      if (poi.type === 'camping' && !poiFilters.includeCamping) return false;
+      if (poi.type === 'hospital' && !poiFilters.includeHospitals) return false;
+      if (poi.type === 'toll_booth' && !poiFilters.includeTollBooths) return false;
+      return true;
+    });
+  };
+
+  const filteredPOIs = getFilteredPOIs();
 
   // Função para download de arquivos
   const downloadFile = async (format: 'geojson' | 'gpx', routeData: any) => {
@@ -30,7 +55,7 @@ export default function SearchPage() {
           destination: routeData.destination,
           total_distance_km: routeData.total_distance_km,
           segments: routeData.segments || [],
-          pois: routeData.pois || []
+          pois: filteredPOIs  // Use filtered POIs instead of all POIs
         }),
       });
 
@@ -175,40 +200,120 @@ export default function SearchPage() {
                     </div>
                   </div>
                   
-                  {/* POI Summary */}
+                  {/* Interactive POI Filters */}
                   <div className="border-t pt-6">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Pontos de Interesse</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-center">
-                      <div className="p-3 bg-gray-50 rounded">
-                        <p className="text-2xl font-bold text-blue-600">{data.pois?.length || 0}</p>
-                        <p className="text-sm text-gray-600">Total</p>
-                      </div>
-                      <div className="p-3 bg-gray-50 rounded">
-                        <p className="text-2xl font-bold text-green-600">
-                          {data.pois?.filter(poi => poi.type === 'gas_station').length || 0}
-                        </p>
-                        <p className="text-sm text-gray-600">Postos</p>
-                      </div>
-                      <div className="p-3 bg-gray-50 rounded">
-                        <p className="text-2xl font-bold text-orange-600">
-                          {data.pois?.filter(poi => poi.type === 'restaurant').length || 0}
-                        </p>
-                        <p className="text-sm text-gray-600">Restaurantes</p>
-                      </div>
-                      <div className="p-3 bg-gray-50 rounded">
-                        <p className="text-2xl font-bold text-purple-600">
-                          {data.pois?.filter(poi => poi.type === 'toll_booth').length || 0}
-                        </p>
-                        <p className="text-sm text-gray-600">Pedágios</p>
-                      </div>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Filtrar Pontos de Interesse</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {/* Gas Stations */}
+                      <label className="flex items-center gap-3 p-3 border rounded hover:bg-gray-50 cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={poiFilters.includeGasStations}
+                          onChange={(e) => setPoiFilters({...poiFilters, includeGasStations: e.target.checked})}
+                          className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                        />
+                        <span className="flex-1 flex items-center justify-between">
+                          <span className="text-sm font-medium text-gray-700">⛽ Postos</span>
+                          <span className="text-sm font-bold text-blue-600">
+                            ({data.pois?.filter(p => p.type === 'gas_station').length || 0})
+                          </span>
+                        </span>
+                      </label>
+
+                      {/* Restaurants (includes fast_food and cafe) */}
+                      <label className="flex items-center gap-3 p-3 border rounded hover:bg-gray-50 cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={poiFilters.includeRestaurants}
+                          onChange={(e) => setPoiFilters({...poiFilters, includeRestaurants: e.target.checked})}
+                          className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                        />
+                        <span className="flex-1 flex items-center justify-between">
+                          <span className="text-sm font-medium text-gray-700">🍽️ Restaurantes</span>
+                          <span className="text-sm font-bold text-orange-600">
+                            ({data.pois?.filter(p => ['restaurant', 'fast_food', 'cafe'].includes(p.type)).length || 0})
+                          </span>
+                        </span>
+                      </label>
+
+                      {/* Hotels */}
+                      <label className="flex items-center gap-3 p-3 border rounded hover:bg-gray-50 cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={poiFilters.includeHotels}
+                          onChange={(e) => setPoiFilters({...poiFilters, includeHotels: e.target.checked})}
+                          className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                        />
+                        <span className="flex-1 flex items-center justify-between">
+                          <span className="text-sm font-medium text-gray-700">🏨 Hotéis</span>
+                          <span className="text-sm font-bold text-purple-600">
+                            ({data.pois?.filter(p => p.type === 'hotel').length || 0})
+                          </span>
+                        </span>
+                      </label>
+
+                      {/* Camping */}
+                      <label className="flex items-center gap-3 p-3 border rounded hover:bg-gray-50 cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={poiFilters.includeCamping}
+                          onChange={(e) => setPoiFilters({...poiFilters, includeCamping: e.target.checked})}
+                          className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                        />
+                        <span className="flex-1 flex items-center justify-between">
+                          <span className="text-sm font-medium text-gray-700">⛺ Camping</span>
+                          <span className="text-sm font-bold text-green-600">
+                            ({data.pois?.filter(p => p.type === 'camping').length || 0})
+                          </span>
+                        </span>
+                      </label>
+
+                      {/* Hospitals */}
+                      <label className="flex items-center gap-3 p-3 border rounded hover:bg-gray-50 cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={poiFilters.includeHospitals}
+                          onChange={(e) => setPoiFilters({...poiFilters, includeHospitals: e.target.checked})}
+                          className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                        />
+                        <span className="flex-1 flex items-center justify-between">
+                          <span className="text-sm font-medium text-gray-700">🏥 Hospitais</span>
+                          <span className="text-sm font-bold text-red-600">
+                            ({data.pois?.filter(p => p.type === 'hospital').length || 0})
+                          </span>
+                        </span>
+                      </label>
+
+                      {/* Toll Booths */}
+                      <label className="flex items-center gap-3 p-3 border rounded hover:bg-gray-50 cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={poiFilters.includeTollBooths}
+                          onChange={(e) => setPoiFilters({...poiFilters, includeTollBooths: e.target.checked})}
+                          className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                        />
+                        <span className="flex-1 flex items-center justify-between">
+                          <span className="text-sm font-medium text-gray-700">🛣️ Pedágios</span>
+                          <span className="text-sm font-bold text-gray-600">
+                            ({data.pois?.filter(p => p.type === 'toll_booth').length || 0})
+                          </span>
+                        </span>
+                      </label>
+                    </div>
+
+                    {/* Total filtered count */}
+                    <div className="mt-4 p-3 bg-blue-50 rounded-lg text-center">
+                      <p className="text-sm text-gray-600">
+                        Mostrando <span className="font-bold text-blue-600">{filteredPOIs.length}</span> de <span className="font-bold">{data.pois?.length || 0}</span> pontos de interesse
+                      </p>
                     </div>
                   </div>
 
                   {/* POI List */}
-                  {data.pois && data.pois.length > 0 && (
+                  {filteredPOIs.length > 0 && (
                     <div className="border-t pt-6">
                       <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                        Todos os Pontos de Interesse ({data.pois.length})
+                        Pontos de Interesse Selecionados ({filteredPOIs.length})
                       </h3>
                       <div className="overflow-x-auto max-h-96 overflow-y-auto border rounded">
                         <table className="min-w-full divide-y divide-gray-200">
@@ -227,15 +332,15 @@ export default function SearchPage() {
                                 Cidade
                               </th>
                               <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Lado
+                                Qualidade
                               </th>
                               <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Operadora
+                                Extra
                               </th>
                             </tr>
                           </thead>
                           <tbody className="bg-white divide-y divide-gray-200">
-                            {data.pois.map((poi) => (
+                            {filteredPOIs.map((poi) => (
                               <tr key={poi.id} className="hover:bg-gray-50">
                                 <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
                                   {poi.distance_from_origin_km?.toFixed(1) || '0.0'}
@@ -247,7 +352,9 @@ export default function SearchPage() {
                                   {poi.type === 'cafe' && '☕ Café'}
                                   {poi.type === 'toll_booth' && '🛣️ Pedágio'}
                                   {poi.type === 'hotel' && '🏨 Hotel'}
-                                  {!['gas_station', 'restaurant', 'fast_food', 'cafe', 'toll_booth', 'hotel'].includes(poi.type) && poi.type}
+                                  {poi.type === 'camping' && '⛺ Camping'}
+                                  {poi.type === 'hospital' && '🏥 Hospital'}
+                                  {!['gas_station', 'restaurant', 'fast_food', 'cafe', 'toll_booth', 'hotel', 'camping', 'hospital'].includes(poi.type) && poi.type}
                                 </td>
                                 <td className="px-3 py-2 text-sm text-gray-900">
                                   {poi.name || 'Nome não disponível'}
@@ -255,11 +362,18 @@ export default function SearchPage() {
                                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-600">
                                   {poi.city || '-'}
                                 </td>
-                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-600">
-                                  {poi.side === 'left' && '← Esquerda'}
-                                  {poi.side === 'right' && 'Direita →'}
-                                  {poi.side === 'center' && '↕️ Centro'}
-                                  {!['left', 'right', 'center'].includes(poi.side) && poi.side}
+                                <td className="px-3 py-2 whitespace-nowrap text-sm">
+                                  {poi.quality_score !== undefined ? (
+                                    <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${
+                                      poi.quality_score >= 0.7 ? 'bg-green-100 text-green-800' :
+                                      poi.quality_score >= 0.4 ? 'bg-yellow-100 text-yellow-800' :
+                                      'bg-red-100 text-red-800'
+                                    }`}>
+                                      {(poi.quality_score * 100).toFixed(0)}%
+                                    </span>
+                                  ) : (
+                                    <span className="text-gray-400">-</span>
+                                  )}
                                 </td>
                                 <td className="px-3 py-2 text-sm text-gray-600">
                                   {poi.operator || poi.brand || '-'}
@@ -377,11 +491,11 @@ export default function SearchPage() {
                 </div>
                 <div className="flex items-start gap-3">
                   <span className="flex-shrink-0 w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-semibold">3</span>
-                  <p>Escolha quais tipos de pontos de interesse você quer encontrar</p>
+                  <p>Defina a distância máxima da rota para buscar pontos próximos</p>
                 </div>
                 <div className="flex items-start gap-3">
                   <span className="flex-shrink-0 w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-semibold">4</span>
-                  <p>Defina a distância máxima da rota para buscar pontos próximos</p>
+                  <p>Após a busca, filtre os tipos de pontos de interesse que deseja visualizar</p>
                 </div>
               </div>
             </CardContent>

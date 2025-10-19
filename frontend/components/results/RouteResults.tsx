@@ -31,6 +31,7 @@ interface POI {
   brand?: string;
   operator?: string;
   opening_hours?: string;
+  quality_score?: number;
 }
 
 interface RouteSegment {
@@ -299,12 +300,24 @@ export function RouteResults({ origin, destination, totalDistance, segments, poi
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <h4 className="font-medium truncate">{poi.name}</h4>
-                      <Badge 
-                        variant="secondary" 
+                      <Badge
+                        variant="secondary"
                         className={`text-xs ${POI_COLORS[poi.type as keyof typeof POI_COLORS] || "bg-gray-100 text-gray-800"}`}
                       >
                         {poi.type.replace('_', ' ')}
                       </Badge>
+                      {poi.quality_score !== undefined && (
+                        <Badge
+                          variant="outline"
+                          className={`text-xs ${
+                            poi.quality_score >= 0.7 ? 'bg-green-50 text-green-700 border-green-300' :
+                            poi.quality_score >= 0.4 ? 'bg-yellow-50 text-yellow-700 border-yellow-300' :
+                            'bg-red-50 text-red-700 border-red-300'
+                          }`}
+                        >
+                          Q: {(poi.quality_score * 100).toFixed(0)}%
+                        </Badge>
+                      )}
                     </div>
                     <div className="text-sm text-gray-600">
                       {poi.distance_from_origin_km.toFixed(1)}km do início
