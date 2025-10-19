@@ -174,7 +174,10 @@ class OSMProvider(GeoProvider):
                 params=cache_params
             )
             if cached_result:
+                logger.info(f"✅ Cache HIT for reverse_geocode: {poi_name or 'no name'} at ({latitude:.4f}, {longitude:.4f})")
                 return cached_result
+        
+        logger.info(f"❌ Cache MISS for reverse_geocode: {poi_name or 'no name'} at ({latitude:.4f}, {longitude:.4f}) - fetching from API")
         
         try:
             await self._wait_before_request()
@@ -218,6 +221,7 @@ class OSMProvider(GeoProvider):
                     params=cache_params,
                     data=result
                 )
+                logger.info(f"💾 Cached reverse_geocode result for: {poi_name or 'no name'}")
             
             return result
             
