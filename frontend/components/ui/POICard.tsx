@@ -56,7 +56,7 @@ function getPoiTypeName(type: string): string {
 function getFriendlyPoiName(name: string | null | undefined, type: string): string {
   // List of generic names from OSM that should be replaced
   const genericNames = [
-    'fuel', 'gas_station', 'restaurant', 'cafe', 'fast_food', 'hotel',
+    'fuel', 'gas_station', 'restaurant', 'cafe', 'fast_food', 'food_court', 'hotel',
     'camping', 'hospital', 'toll_booth', 'rest_area', 'city', 'town',
     'village', 'police', 'motel', 'guest_house', 'hostel', 'pharmacy',
     'atm', 'bank', 'parking', 'post_office', 'convenience', 'supermarket'
@@ -69,6 +69,7 @@ function getFriendlyPoiName(name: string | null | undefined, type: string): stri
     restaurant: 'Restaurante',
     cafe: 'Café',
     fast_food: 'Lanchonete',
+    food_court: 'Praça de Alimentação',
     hotel: 'Hotel',
     motel: 'Motel',
     guest_house: 'Pousada',
