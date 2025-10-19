@@ -60,8 +60,8 @@ export default function SavedMapsPage() {
   };
 
   const handleOpenMap = (mapId: string) => {
-    // Navigate to search page with the map ID to load it
-    router.push(`/search?mapId=${mapId}`);
+    // Navigate to map page to view the saved map
+    router.push(`/map?mapId=${mapId}`);
   };
 
   const handleDeleteMap = async (mapId: string) => {
@@ -106,10 +106,10 @@ export default function SavedMapsPage() {
       }
 
       const data = await response.json();
-      toast.success('Regeneração iniciada! Acompanhe o progresso na página de busca.');
+      toast.success('Regeneração iniciada! Acompanhe o progresso.');
 
-      // Navigate to search page to show progress
-      router.push(`/search?operationId=${data.operation_id}`);
+      // Navigate to map page to show progress
+      router.push(`/map?operationId=${data.operation_id}`);
     } catch (error) {
       console.error('Error regenerating map:', error);
       toast.error('Erro ao regenerar mapa');
