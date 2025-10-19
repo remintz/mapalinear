@@ -96,12 +96,16 @@ class CacheEntry:
         """Convert data to JSON-serializable format."""
         if data is None:
             return None
-        
+
         # Check if it's a Pydantic model (has model_dump or dict method)
         if hasattr(data, 'model_dump'):
-            return data.model_dump()
+            # Use mode='json' to ensure Enums and other types are properly serialized
+            serialized = data.model_dump(mode='json')
+            # Recursively serialize nested structures
+            return self._serialize_data(serialized)
         elif hasattr(data, 'dict'):
-            return data.dict()
+            serialized = data.dict()
+            return self._serialize_data(serialized)
         
         # Handle Enums (like POICategory)
         elif hasattr(data, 'value'):
