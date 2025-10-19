@@ -33,6 +33,8 @@ export enum POIType {
   CAFE = 'cafe',
   TOLL_BOOTH = 'toll_booth',
   HOTEL = 'hotel',
+  CAMPING = 'camping',
+  HOSPITAL = 'hospital',
   REST_AREA = 'rest_area'
 }
 
@@ -96,11 +98,12 @@ export interface Milestone {
 
 export enum MilestoneType {
   CITY = 'city',
-  TOWN = 'town', 
+  TOWN = 'town',
   VILLAGE = 'village',
   GAS_STATION = 'gas_station',
   RESTAURANT = 'restaurant',
   HOTEL = 'hotel',
+  CAMPING = 'camping',
   REST_AREA = 'rest_area',
   TOLL_BOOTH = 'toll_booth',
   HOSPITAL = 'hospital',
@@ -114,9 +117,6 @@ export enum MilestoneType {
 export interface RouteSearchRequest {
   origin: string;
   destination: string;
-  include_gas_stations?: boolean;
-  include_food?: boolean;
-  include_toll_booths?: boolean;
   max_distance?: number;
 }
 

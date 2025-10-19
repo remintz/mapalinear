@@ -10,9 +10,6 @@ export const searchFormSchema = z.object({
     .string()
     .min(1, 'Destino é obrigatório')
     .regex(/^.+,\s*[A-Z]{2}$/, 'Formato: Cidade, UF (ex: Rio de Janeiro, RJ)'),
-  includeGasStations: z.boolean(),
-  includeRestaurants: z.boolean(),
-  includeTollBooths: z.boolean(),
   maxDistance: z
     .number()
     .min(1, 'Distância deve ser maior que 0')

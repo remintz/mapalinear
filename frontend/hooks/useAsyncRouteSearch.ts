@@ -77,7 +77,7 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
           // Map API response fields to expected frontend fields
           
           // Filter milestones to get only POIs (gas stations, restaurants, toll booths, etc.)
-          const poiTypes = ['gas_station', 'restaurant', 'fast_food', 'cafe', 'toll_booth', 'hotel', 'rest_area'];
+          const poiTypes = ['gas_station', 'restaurant', 'fast_food', 'cafe', 'toll_booth', 'hotel', 'camping', 'hospital', 'rest_area'];
           const filteredMilestones = operation.result.milestones?.filter((milestone: any) =>
             poiTypes.includes(milestone.type)
           ) || [];
@@ -159,12 +159,10 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
       setEstimatedCompletion(null);
       
       // Convert form data to API request format
+      // Note: Backend always searches for all POI types, frontend filters display
       const requestData: RouteSearchRequest = {
         origin: formData.origin,
         destination: formData.destination,
-        include_gas_stations: formData.includeGasStations,
-        include_food: formData.includeRestaurants,
-        include_toll_booths: formData.includeTollBooths,
         max_distance: formData.maxDistance,
       };
 

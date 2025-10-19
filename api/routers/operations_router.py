@@ -25,10 +25,11 @@ async def get_operation(operation_id: str):
 async def start_async_linear_map(request: LinearMapRequest, background_tasks: BackgroundTasks):
     """
     Inicia uma operação assíncrona para gerar um mapa linear de uma estrada.
+    Backend sempre busca todos os tipos de POI - filtros são aplicados no frontend.
     """
     import logging
     logger = logging.getLogger(__name__)
-    logger.info(f"🔍 DEBUG - Requisição recebida: include_food={request.include_food}, include_gas_stations={request.include_gas_stations}, include_toll_booths={request.include_toll_booths}")
+    logger.info(f"🔍 Requisição recebida: origin={request.origin}, destination={request.destination}")
 
     # Criar uma nova operação
     operation = AsyncService.create_operation("linear_map")
@@ -36,15 +37,12 @@ async def start_async_linear_map(request: LinearMapRequest, background_tasks: Ba
     # Definir a função que executará o processamento em segundo plano
     def process_linear_map(progress_callback=None):
         try:
-            # Gerar o mapa linear
+            # Gerar o mapa linear (sempre busca todos os tipos de POI)
             result = road_service.generate_linear_map(
                 origin=request.origin,
                 destination=request.destination,
                 road_id=request.road_id,
                 include_cities=request.include_cities,
-                include_gas_stations=request.include_gas_stations,
-                include_food=request.include_food,
-                include_toll_booths=request.include_toll_booths,
                 max_distance_from_road=request.max_distance_from_road,
                 min_distance_from_origin_km=request.min_distance_from_origin_km,
                 progress_callback=progress_callback

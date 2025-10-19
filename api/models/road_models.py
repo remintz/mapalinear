@@ -25,6 +25,7 @@ class MilestoneType(str, Enum):
     BAKERY = "bakery"
     ICE_CREAM = "ice_cream"
     HOTEL = "hotel"
+    CAMPING = "camping"
     REST_AREA = "rest_area"
     TOLL_BOOTH = "toll_booth"
     HOSPITAL = "hospital"
@@ -39,9 +40,6 @@ class LinearMapRequest(BaseModel):
     destination: str = Field(..., description="Ponto de destino (ex: 'Rio de Janeiro, RJ')")
     road_id: Optional[str] = Field(None, description="ID da estrada (se já conhecido)")
     include_cities: bool = Field(True, description="Incluir cidades como marcos")
-    include_gas_stations: bool = Field(True, description="Incluir postos de gasolina como marcos")
-    include_food: bool = Field(False, description="Incluir estabelecimentos de alimentação como marcos (restaurantes, fast food, cafés, etc.)")
-    include_toll_booths: bool = Field(True, description="Incluir pedágios como marcos")
     max_distance_from_road: float = Field(1000, description="Distância máxima em metros da estrada para considerar pontos de interesse")
     min_distance_from_origin_km: float = Field(0.0, description="Distância mínima em km da origem (não mais usado - filtramos por cidade de origem)")
 
