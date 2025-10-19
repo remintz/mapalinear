@@ -189,6 +189,73 @@ npm run lighthouse:perf
 8. **Mobile-First Design**: UI optimized for mobile usage during travel, with touch-friendly interfaces
 9. **Progressive Enhancement**: Core functionality works on all devices, enhanced features on modern browsers
 
+## Critical Technical Details
+
+### Cache System Architecture
+
+The Unified Cache (`api/providers/cache.py`) is critical for performance and cost optimization:
+
+**Key Classes:**
+- `CacheKey`: Generates consistent cache keys with parameter normalization
+  - Coordinates rounded to 3 decimal places (~111m precision)
+  - Strings normalized (lowercase, trimmed)
+  - Lists sorted for consistency
+- `CacheEntry`: Stores cached data with metadata and expiration
+  - Handles JSON serialization of Pydantic models, Enums, tuples, sets
+  - Implements `_serialize_data()` for robust type conversion
+  - Implements `_reconstruct_data()` to rebuild Pydantic objects on load
+- `UnifiedCache`: Main cache interface with intelligent matching
+  - **Exact matching**: Hash-based lookup for identical parameters
+  - **Semantic matching**: For geocoding with similar addresses
+  - **Spatial matching**: For POI searches in nearby locations
+  - **Persistence**: Saves to `cache/unified_cache.json` on disk
+
+**Cache Hit Criteria:**
+- **Geocoding/Reverse Geocoding**: Exact match on normalized address or coordinates
+- **POI Search**: Either exact match OR spatial match (distance < avg radius && same categories)
+- **Routes**: Exact match on origin/destination coordinates and waypoints
+
+**Important:** When modifying cache logic, ensure `_serialize_data()` handles all Pydantic model types to avoid "not JSON serializable" errors.
+
+### Provider System
+
+Located in `api/providers/`, follows factory pattern:
+
+**Structure:**
+- `base.py`: Abstract `GeoProvider` interface that all providers must implement
+- `models.py`: Unified Pydantic models (`GeoLocation`, `Route`, `POI`, `POICategory`)
+- `manager.py`: Provider factory with singleton pattern
+- `osm/provider.py`: OpenStreetMap implementation (Nominatim, Overpass API, OSRM)
+- `here/provider.py`: HERE Maps implementation
+
+**Adding a new provider:**
+1. Create new directory under `api/providers/`
+2. Implement `GeoProvider` abstract methods
+3. Register in `manager.py`
+4. Add configuration to `settings.py`
+
+**Provider methods all providers must implement:**
+- `geocode(address)`: Address → coordinates
+- `reverse_geocode(lat, lon, poi_name?)`: Coordinates → address
+- `calculate_route(origin, destination, waypoints?, avoid?)`: Route calculation
+- `search_pois(location, radius, categories, limit)`: Find POIs
+- `get_poi_details(poi_id)`: Get detailed POI info
+
+### Async Operations Pattern
+
+Long-running operations use async tasks stored in `cache/async_operations/`:
+
+**Flow:**
+1. API endpoint starts async task → returns operation_id immediately
+2. Client polls `/api/operations/{operation_id}` for status
+3. Operation updates progress in JSON file
+4. On completion, result stored in same JSON file
+5. Frontend shows progress bar during polling
+
+**Key files:**
+- `api/services/async_service.py`: Manages async operations lifecycle
+- Each operation saved as `cache/async_operations/{uuid}.json`
+
 ## Important Notes
 
 ### Backend
@@ -198,6 +265,7 @@ npm run lighthouse:perf
 - Geographic provider is selected via `GEO_PRIMARY_PROVIDER` environment variable
 - Cache files in `cache/` directory can be safely deleted to force fresh data retrieval
 - Unified cache works across all providers with intelligent key generation
+- **Cache persistence**: Cache is saved to disk at end of `generate_linear_map()` operation
 
 ### Frontend PWA
 - PWA works offline after initial load and route caching
@@ -205,6 +273,12 @@ npm run lighthouse:perf
 - Service worker caches map data and route information for offline use
 - Background sync updates cached data when connection is restored
 - Push notifications can alert users about recommended stops (requires user permission)
+
+### Logging System
+- **Main log**: `logs/app.log` - rotating file handler (10MB max, 3 backups)
+- **Operation logs**: `logs/mapalinear_YYYYMMDD_HHMMSS.log` - per-operation logs for debugging specific map generation runs
+- Configuration: `api/config/logging_config.yaml`
+- Debug mode: Use `api/config/logging_config.debug.yaml` for verbose output
 
 ### Express instructions from developer
 - Just commit code under my request
@@ -227,7 +301,33 @@ When working with geographic data:
 5. Test with multiple providers when implementing new features
 6. Maintain >90% test coverage for provider-related code
 
+### Test-Driven Development (TDD)
 - IMPORTANTE: Implemente usando Test Driven Development (TDD)
 - os testes automáticos devem sempre passar 100%
 - se um teste automático está falhando descubra a causa raiz. O objetivo não é simplesmente passar nos testes mas assegurar que o sistema está funcionando conforme desejado
 - só faça commit se eu pedir
+
+## Common Pitfalls & Solutions
+
+### Cache Serialization Issues
+**Problem:** "Object of type X is not JSON serializable"
+**Solution:** Update `CacheEntry._serialize_data()` to handle the new type. Already handles:
+- Pydantic models (via `.model_dump()`)
+- Enums (via `.value`)
+- Tuples/sets → lists
+- Bytes → base64
+
+### Provider Rate Limiting
+**Problem:** OSM Overpass API returns 429 (Too Many Requests)
+**Solution:**
+- Ensure `_wait_before_request()` is called before each request
+- Check `_query_delay` (default 1 second between requests)
+- Consider switching to HERE Maps provider for high-volume usage
+
+### Coordinate Precision in Cache
+**Problem:** Cache miss for nearly identical coordinates
+**Solution:** Coordinates are rounded to 3 decimal places (~111m) in cache keys. This is intentional for cache efficiency. If exact precision needed, check normalized params in cache logs.
+
+### POI Name Issues
+**Problem:** POI comes from OSM without proper name (shows category instead)
+**Solution:** OSM data limitation. Many POIs lack names. Code handles this in `_parse_osm_element_to_poi()` with fallback to amenity type.
