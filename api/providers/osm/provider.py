@@ -483,7 +483,7 @@ class OSMProvider(GeoProvider):
         # Convert radius to degrees (approximate)
         radius_deg = radius / 111000  # Rough conversion
 
-        # Calculate bounding box
+        # Calculate bounding box for regular POIs (gas stations, restaurants, etc)
         bbox = {
             'south': location.latitude - radius_deg,
             'west': location.longitude - radius_deg,
@@ -491,7 +491,15 @@ class OSMProvider(GeoProvider):
             'east': location.longitude + radius_deg
         }
 
-        # logger.debug(f"🔧 Bounding box: {bbox}")
+        # Use larger radius for places (cities/towns/villages) - 5km instead of 1km
+        # City centers may be far from highways but still relevant
+        place_radius_deg = (radius * 5) / 111000
+        bbox_places = {
+            'south': location.latitude - place_radius_deg,
+            'west': location.longitude - place_radius_deg,
+            'north': location.latitude + place_radius_deg,
+            'east': location.longitude + place_radius_deg
+        }
 
         # Map categories to OSM amenity tags (use set to avoid duplicates)
         amenity_filters = set()
@@ -506,28 +514,29 @@ class OSMProvider(GeoProvider):
         amenity_filters = list(amenity_filters)  # Convert back to list
         logger.info(f"🔧 Amenities OSM únicos para busca: {amenity_filters}")
         if include_places:
-            logger.info(f"🏙️ Incluindo busca por cidades (place=city/town/village)")
+            logger.info(f"🏙️ Incluindo busca por cidades com raio de {radius * 5}m (place=city/town/village)")
 
         # Build query
         bbox_str = f"{bbox['south']},{bbox['west']},{bbox['north']},{bbox['east']}"
+        bbox_places_str = f"{bbox_places['south']},{bbox_places['west']},{bbox_places['north']},{bbox_places['east']}"
 
         query_parts = ['[out:json];', '(']
 
-        # Add amenity searches
+        # Add amenity searches (normal radius)
         for amenity in amenity_filters:
             query_parts.append(f'  node["amenity"="{amenity}"]({bbox_str});')
             query_parts.append(f'  way["amenity"="{amenity}"]({bbox_str});')
 
-        # Add place searches (cities, towns, villages) if SERVICES category is present
+        # Add place searches with LARGER radius (cities, towns, villages)
         if include_places:
             for place_type in ['city', 'town', 'village']:
-                query_parts.append(f'  node["place"="{place_type}"]({bbox_str});')
-                query_parts.append(f'  way["place"="{place_type}"]({bbox_str});')
+                query_parts.append(f'  node["place"="{place_type}"]({bbox_places_str});')
+                query_parts.append(f'  way["place"="{place_type}"]({bbox_places_str});')
 
         query_parts.extend([');', 'out meta;'])
 
         final_query = '\n'.join(query_parts)
-        # logger.debug(f"🔧 Query final:\n{final_query}")
+        logger.info(f"🔧 Query Overpass:\n{final_query}")
         return final_query
     
     async def _make_overpass_request(self, query: str) -> dict:

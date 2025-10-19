@@ -18,6 +18,9 @@ export default function SearchPage() {
     includeCamping: true,
     includeHospitals: false,
     includeTollBooths: true,
+    includeCities: true,
+    includeTowns: true,
+    includeVillages: true,
   });
 
   const handleSearch = (formData: any) => {
@@ -35,6 +38,9 @@ export default function SearchPage() {
       if (poi.type === 'camping' && !poiFilters.includeCamping) return false;
       if (poi.type === 'hospital' && !poiFilters.includeHospitals) return false;
       if (poi.type === 'toll_booth' && !poiFilters.includeTollBooths) return false;
+      if (poi.type === 'city' && !poiFilters.includeCities) return false;
+      if (poi.type === 'town' && !poiFilters.includeTowns) return false;
+      if (poi.type === 'village' && !poiFilters.includeVillages) return false;
       return true;
     });
   };
@@ -296,6 +302,54 @@ export default function SearchPage() {
                           <span className="text-sm font-medium text-gray-700">🛣️ Pedágios</span>
                           <span className="text-sm font-bold text-gray-600">
                             ({data.pois?.filter(p => p.type === 'toll_booth').length || 0})
+                          </span>
+                        </span>
+                      </label>
+
+                      {/* Cities */}
+                      <label className="flex items-center gap-3 p-3 border rounded hover:bg-gray-50 cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={poiFilters.includeCities}
+                          onChange={(e) => setPoiFilters({...poiFilters, includeCities: e.target.checked})}
+                          className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                        />
+                        <span className="flex-1 flex items-center justify-between">
+                          <span className="text-sm font-medium text-gray-700">🏙️ Cidades</span>
+                          <span className="text-sm font-bold text-indigo-600">
+                            ({data.pois?.filter(p => p.type === 'city').length || 0})
+                          </span>
+                        </span>
+                      </label>
+
+                      {/* Towns */}
+                      <label className="flex items-center gap-3 p-3 border rounded hover:bg-gray-50 cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={poiFilters.includeTowns}
+                          onChange={(e) => setPoiFilters({...poiFilters, includeTowns: e.target.checked})}
+                          className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                        />
+                        <span className="flex-1 flex items-center justify-between">
+                          <span className="text-sm font-medium text-gray-700">🏘️ Vilas</span>
+                          <span className="text-sm font-bold text-indigo-600">
+                            ({data.pois?.filter(p => p.type === 'town').length || 0})
+                          </span>
+                        </span>
+                      </label>
+
+                      {/* Villages */}
+                      <label className="flex items-center gap-3 p-3 border rounded hover:bg-gray-50 cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={poiFilters.includeVillages}
+                          onChange={(e) => setPoiFilters({...poiFilters, includeVillages: e.target.checked})}
+                          className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                        />
+                        <span className="flex-1 flex items-center justify-between">
+                          <span className="text-sm font-medium text-gray-700">🏡 Povoados</span>
+                          <span className="text-sm font-bold text-indigo-600">
+                            ({data.pois?.filter(p => p.type === 'village').length || 0})
                           </span>
                         </span>
                       </label>

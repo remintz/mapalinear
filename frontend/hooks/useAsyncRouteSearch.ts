@@ -76,8 +76,8 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
           // Validate and sanitize the result data
           // Map API response fields to expected frontend fields
           
-          // Filter milestones to get only POIs (gas stations, restaurants, toll booths, etc.)
-          const poiTypes = ['gas_station', 'restaurant', 'fast_food', 'cafe', 'toll_booth', 'hotel', 'camping', 'hospital', 'rest_area'];
+          // Filter milestones to get only POIs (gas stations, restaurants, toll booths, cities, etc.)
+          const poiTypes = ['gas_station', 'restaurant', 'fast_food', 'cafe', 'toll_booth', 'hotel', 'camping', 'hospital', 'rest_area', 'city', 'town', 'village'];
           const filteredMilestones = operation.result.milestones?.filter((milestone: any) =>
             poiTypes.includes(milestone.type)
           ) || [];
