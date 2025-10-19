@@ -2,10 +2,9 @@
 
 import React, { useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui';
 import { SearchForm } from '@/components/forms/SearchForm';
 import { useAsyncRouteSearch } from '@/hooks/useAsyncRouteSearch';
-import { ArrowLeft, Bug } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 
 export default function SearchPage() {
@@ -36,30 +35,29 @@ export default function SearchPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-      <div className="container mx-auto px-4 py-8">
-        {/* Header */}
-        <header className="mb-8">
-          <div className="flex justify-between items-start mb-4">
-            <Link href="/" className="inline-flex items-center gap-2 text-blue-600 hover:text-blue-700">
-              <ArrowLeft className="h-4 w-4" />
-              Voltar ao início
+    <div className="min-h-screen bg-gray-50">
+      {/* Mobile-First Header - Sticky */}
+      <header className="sticky top-0 z-20 bg-white border-b border-gray-200 shadow-sm">
+        <div className="px-4 py-4">
+          <div className="flex items-center gap-3 mb-2">
+            <Link
+              href="/"
+              className="text-blue-600 hover:text-blue-700"
+            >
+              <ArrowLeft className="h-5 w-5" />
             </Link>
-            <Link href="/debug-segments" className="inline-flex items-center gap-2 text-gray-600 hover:text-gray-800 text-sm">
-              <Bug className="h-4 w-4" />
-              Debug: Ver Segmentos
-            </Link>
+            <div>
+              <h1 className="text-xl font-bold text-gray-900">Criar Mapa</h1>
+              <p className="text-sm text-gray-600">Configure sua rota</p>
+            </div>
           </div>
-          <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">
-            Criar Mapa
-          </h1>
-          <p className="text-lg text-gray-600">
-            Digite sua origem e destino para criar um mapa linear da rota.
-          </p>
-        </header>
+        </div>
+      </header>
 
+      {/* Main Content */}
+      <main className="px-4 py-6">
         {/* Search Form */}
-        <div className="mb-8">
+        <div className="mb-6">
           <SearchForm
             onSubmit={handleSearch}
             isLoading={isLoading}
@@ -70,39 +68,29 @@ export default function SearchPage() {
           />
         </div>
 
-        {/* Instructions */}
+        {/* Quick Help - Only show when not loading */}
         {!isLoading && (
-          <Card className="max-w-2xl mx-auto">
-            <CardHeader>
-              <CardTitle>Como usar</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4 text-sm text-gray-600">
-                <div className="flex items-start gap-3">
-                  <span className="flex-shrink-0 w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-semibold">1</span>
-                  <p>Digite a cidade de origem no formato "Cidade, UF" (ex: São Paulo, SP)</p>
-                </div>
-                <div className="flex items-start gap-3">
-                  <span className="flex-shrink-0 w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-semibold">2</span>
-                  <p>Digite a cidade de destino no mesmo formato (ex: Rio de Janeiro, RJ)</p>
-                </div>
-                <div className="flex items-start gap-3">
-                  <span className="flex-shrink-0 w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-semibold">3</span>
-                  <p>Defina a distância máxima da rota para buscar pontos próximos</p>
-                </div>
-                <div className="flex items-start gap-3">
-                  <span className="flex-shrink-0 w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-semibold">4</span>
-                  <p>Aguarde enquanto criamos seu mapa linear personalizado</p>
-                </div>
-                <div className="flex items-start gap-3">
-                  <span className="flex-shrink-0 w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-semibold">5</span>
-                  <p>Você será redirecionado automaticamente para visualizar e filtrar os pontos de interesse</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <div className="max-w-2xl mx-auto">
+            <div className="p-4 bg-blue-50 rounded-lg border border-blue-100">
+              <h3 className="text-sm font-semibold text-blue-900 mb-2">💡 Dica rápida</h3>
+              <p className="text-xs text-blue-700">
+                Digite cidades no formato <strong>Cidade, UF</strong> (ex: São Paulo, SP).
+                Ajuste a distância máxima para encontrar POIs próximos à rota.
+              </p>
+            </div>
+
+            {/* Link to saved maps */}
+            <div className="mt-6 text-center">
+              <Link
+                href="/maps"
+                className="text-sm text-gray-600 hover:text-gray-800 underline"
+              >
+                Ver mapas salvos
+              </Link>
+            </div>
+          </div>
         )}
-      </div>
+      </main>
     </div>
   );
 }
