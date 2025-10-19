@@ -613,12 +613,14 @@ class RoadService:
                 
                 # Convert POIs to milestones
                 converted_count = 0
+                duplicates_count = 0
                 for j, poi in enumerate(pois):
                     try:
                         # Check if POI already exists
                         existing_milestone = next((m for m in milestones if m.id == poi.id), None)
 
                         if existing_milestone:
+                            duplicates_count += 1
                             # POI já existe - verificar se o ponto atual está mais próximo
                             current_distance_to_poi = self._calculate_distance_meters(
                                 poi.location.latitude, poi.location.longitude,
@@ -637,7 +639,7 @@ class RoadService:
                                 existing_milestone.distance_from_road_meters = current_distance_to_poi
                             else:
                                 logger.debug(
-                                    f"🔍 POI {poi.name} já existe com ponto mais próximo "
+                                    f"⏭️  Ignorando POI {poi.name} - já existe com ponto mais próximo "
                                     f"({existing_milestone.distance_from_road_meters:.0f}m vs {current_distance_to_poi:.0f}m)"
                                 )
                             continue
@@ -661,8 +663,9 @@ class RoadService:
                         import traceback
                         logger.error(f"🔍 Traceback: {traceback.format_exc()}")
                         continue
-                
-                logger.info(f"📍 Ponto {i}: {converted_count} milestones criados")
+
+                if converted_count > 0 or duplicates_count > 0:
+                    logger.debug(f"📍 Ponto {i}: {converted_count} novos, {duplicates_count} duplicatas")
                 
             except Exception as e:
                 total_errors += 1
