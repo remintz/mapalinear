@@ -27,6 +27,7 @@ class POICategory(Enum):
     FUEL = "fuel"
     FOOD = "food"
     LODGING = "lodging"
+    CAMPING = "camping"
     SERVICES = "services"
 
 

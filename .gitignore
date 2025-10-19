@@ -131,3 +131,4 @@ debug_outputs/
 
 # Serena (AI coding assistant) configuration
 .serena/
+saved_maps/

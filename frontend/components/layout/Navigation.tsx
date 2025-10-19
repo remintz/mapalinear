@@ -21,14 +21,20 @@ export function Navigation({ className }: NavigationProps) {
           </div>
           
           <div className="flex items-center space-x-6">
-            <Link 
-              href="/search" 
+            <Link
+              href="/search"
               className="text-gray-600 hover:text-gray-900 transition-colors"
             >
-              Buscar Rota
+              Criar Mapa
             </Link>
-            <Link 
-              href="/history" 
+            <Link
+              href="/maps"
+              className="text-gray-600 hover:text-gray-900 transition-colors"
+            >
+              Mapas Salvos
+            </Link>
+            <Link
+              href="/history"
               className="text-gray-600 hover:text-gray-900 transition-colors"
             >
               Histórico

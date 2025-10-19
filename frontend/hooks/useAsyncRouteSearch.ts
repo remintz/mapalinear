@@ -8,6 +8,7 @@ interface UseAsyncRouteSearchReturn {
   isLoading: boolean;
   error: string | null;
   data: RouteSearchResponse | null;
+  setData: (data: RouteSearchResponse | null) => void;
   reset: () => void;
   progressMessage: string;
   progressPercent: number;
@@ -18,7 +19,7 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<RouteSearchResponse | null>(null);
-  const [progressMessage, setProgressMessage] = useState<string>('Buscar Rota');
+  const [progressMessage, setProgressMessage] = useState<string>('Criar Mapa');
   const [progressPercent, setProgressPercent] = useState<number>(0);
   const [estimatedCompletion, setEstimatedCompletion] = useState<string | null>(null);
   
@@ -57,7 +58,7 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
       if (operation.status === 'completed') {
         clearPolling();
         setIsLoading(false);
-        setProgressMessage('Buscar Rota');
+        setProgressMessage('Criar Mapa');
         setProgressPercent(100);
         
         if (operation.result) {
@@ -76,8 +77,8 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
           // Validate and sanitize the result data
           // Map API response fields to expected frontend fields
           
-          // Filter milestones to get only POIs (gas stations, restaurants, toll booths, etc.)
-          const poiTypes = ['gas_station', 'restaurant', 'fast_food', 'cafe', 'toll_booth', 'hotel', 'rest_area'];
+          // Filter milestones to get only POIs (gas stations, restaurants, toll booths, cities, etc.)
+          const poiTypes = ['gas_station', 'restaurant', 'fast_food', 'cafe', 'toll_booth', 'hotel', 'camping', 'hospital', 'rest_area', 'city', 'town', 'village'];
           const filteredMilestones = operation.result.milestones?.filter((milestone: any) =>
             poiTypes.includes(milestone.type)
           ) || [];
@@ -126,7 +127,7 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
       } else if (operation.status === 'failed') {
         clearPolling();
         setIsLoading(false);
-        setProgressMessage('Buscar Rota');
+        setProgressMessage('Criar Mapa');
         setProgressPercent(0);
         setError(operation.error || 'Erro na busca da rota.');
       }
@@ -159,12 +160,10 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
       setEstimatedCompletion(null);
       
       // Convert form data to API request format
+      // Note: Backend always searches for all POI types, frontend filters display
       const requestData: RouteSearchRequest = {
         origin: formData.origin,
         destination: formData.destination,
-        include_gas_stations: formData.includeGasStations,
-        include_food: formData.includeRestaurants,
-        include_toll_booths: formData.includeTollBooths,
         max_distance: formData.maxDistance,
       };
 
@@ -176,7 +175,7 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
       
     } catch (err) {
       setIsLoading(false);
-      setProgressMessage('Buscar Rota');
+      setProgressMessage('Criar Mapa');
       setProgressPercent(0);
       
       const errorMessage = err instanceof Error ? err.message : 'Erro ao iniciar busca da rota.';
@@ -190,7 +189,7 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
     setIsLoading(false);
     setError(null);
     setData(null);
-    setProgressMessage('Buscar Rota');
+    setProgressMessage('Criar Mapa');
     setProgressPercent(0);
     setEstimatedCompletion(null);
   }, [clearPolling]);
@@ -200,6 +199,7 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
     isLoading,
     error,
     data,
+    setData,
     reset,
     progressMessage,
     progressPercent,

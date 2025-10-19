@@ -39,15 +39,16 @@ class CacheKey:
     def _normalize_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize parameters for consistent hashing."""
         normalized = {}
-        
+
         for key, value in params.items():
             if isinstance(value, str):
                 # Normalize strings: lowercase, remove extra spaces
                 normalized[key] = ' '.join(value.lower().split())
             elif isinstance(value, (int, float)):
-                # Round coordinates to 6 decimal places for consistency
+                # Round coordinates to 3 decimal places (~111m precision)
+                # This allows POIs within ~100m to share the same cache
                 if key in ('latitude', 'longitude', 'lat', 'lon'):
-                    normalized[key] = round(float(value), 6)
+                    normalized[key] = round(float(value), 3)
                 else:
                     normalized[key] = value
             elif isinstance(value, list):
@@ -55,7 +56,7 @@ class CacheKey:
                 normalized[key] = sorted(value) if value else []
             else:
                 normalized[key] = value
-        
+
         return normalized
 
 
@@ -77,9 +78,12 @@ class CacheEntry:
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for storage."""
+        # Convert data to JSON-serializable format
+        data_serialized = self._serialize_data(self.data)
+        
         return {
             'key': self.key,
-            'data': self.data,
+            'data': data_serialized,
             'provider': self.provider.value,
             'operation': self.operation,
             'created_at': self.created_at.isoformat(),
@@ -88,12 +92,61 @@ class CacheEntry:
             'params': self.params
         }
     
+    def _serialize_data(self, data: Any) -> Any:
+        """Convert data to JSON-serializable format."""
+        if data is None:
+            return None
+        
+        # Check if it's a Pydantic model (has model_dump or dict method)
+        if hasattr(data, 'model_dump'):
+            return data.model_dump()
+        elif hasattr(data, 'dict'):
+            return data.dict()
+        
+        # Handle Enums (like POICategory)
+        elif hasattr(data, 'value'):
+            return data.value
+        
+        # Handle tuples (convert to lists for JSON)
+        elif isinstance(data, tuple):
+            return [self._serialize_data(item) for item in data]
+        
+        # Handle sets (convert to lists for JSON)
+        elif isinstance(data, set):
+            return [self._serialize_data(item) for item in sorted(data)]
+        
+        # Handle lists
+        elif isinstance(data, list):
+            return [self._serialize_data(item) for item in data]
+        
+        # Handle dicts
+        elif isinstance(data, dict):
+            return {k: self._serialize_data(v) for k, v in data.items()}
+        
+        # Handle bytes (convert to base64 string)
+        elif isinstance(data, bytes):
+            import base64
+            return base64.b64encode(data).decode('utf-8')
+        
+        # Handle primitives (str, int, float, bool)
+        elif isinstance(data, (str, int, float, bool)):
+            return data
+        
+        # Unknown type - log warning and convert to string
+        else:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Cache serialization: unknown type {type(data)}, converting to string")
+            return str(data)
+    
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'CacheEntry':
         """Create cache entry from dictionary."""
+        # Note: data will be stored as dictionaries and reconstructed on-demand
+        # by the provider when retrieved from cache
         return cls(
             key=data['key'],
-            data=data['data'],
+            data=data['data'],  # Keep as dict, will be reconstructed by provider
             provider=ProviderType(data['provider']),
             operation=data['operation'],
             created_at=datetime.fromisoformat(data['created_at']),
@@ -145,6 +198,17 @@ class UnifiedCache:
         }
         
         logger.info(f"Initialized unified cache with backend: {backend}")
+
+        
+        # Persistent cache configuration
+        self.cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'cache')
+        self.cache_file = os.path.join(self.cache_dir, 'unified_cache.json')
+        
+        # Ensure cache directory exists
+        os.makedirs(self.cache_dir, exist_ok=True)
+        
+        # Load existing cache from disk if available
+        self._load_from_file()
     
     async def get(self, provider: ProviderType, operation: str, params: Dict[str, Any]) -> Optional[Any]:
         """
@@ -160,6 +224,7 @@ class UnifiedCache:
         """
         # Generate primary key
         cache_key = CacheKey(provider=provider, operation=operation, params=params)
+        normalized_params = cache_key._normalize_params(params)
         primary_key = cache_key.generate_key()
         
         # Try exact match first
@@ -168,7 +233,39 @@ class UnifiedCache:
             entry.hit_count += 1
             self._stats['hits'] += 1
             logger.debug(f"Cache hit for {operation} with provider {provider.value}")
-            return entry.data
+            # Reconstruct Pydantic models if data came from disk
+            return self._reconstruct_data(entry.data, operation)
+        
+        # Special logging for reverse_geocode when cache miss
+        if operation == "reverse_geocode":
+            poi_name = params.get("poi_name")
+            logger.info(f"🔍 Cache MISS for reverse_geocode")
+            logger.info(f"🔍 Original params: {params}")
+            logger.info(f"🔍 Normalized params: {normalized_params}")
+            logger.info(f"🔍 Generated key: {primary_key}")
+            
+            # Find all reverse_geocode entries with same poi_name
+            if poi_name:
+                matching_entries = []
+                for key, entry in self._cache.items():
+                    if entry.operation == "reverse_geocode" and entry.params.get("poi_name") == poi_name:
+                        matching_entries.append({
+                            "key": key,
+                            "params": entry.params,
+                            "is_expired": entry.is_expired(),
+                            "created_at": entry.created_at.isoformat()
+                        })
+                
+                if matching_entries:
+                    logger.info(f"🔍 Found {len(matching_entries)} cache entries with same POI name '{poi_name}':")
+                    for i, match in enumerate(matching_entries, 1):
+                        logger.info(f"🔍   Entry {i}:")
+                        logger.info(f"🔍     Key: {match['key']}")
+                        logger.info(f"🔍     Params: {match['params']}")
+                        logger.info(f"🔍     Expired: {match['is_expired']}")
+                        logger.info(f"🔍     Created: {match['created_at']}")
+                else:
+                    logger.info(f"🔍 No cache entries found with POI name '{poi_name}'")
         
         # For geocoding, try semantic matching
         if operation == "geocode" and "address" in params:
@@ -177,7 +274,7 @@ class UnifiedCache:
                 similar_entry.hit_count += 1
                 self._stats['hits'] += 1
                 logger.debug(f"Cache hit via semantic matching for geocode: {params['address']}")
-                return similar_entry.data
+                return self._reconstruct_data(similar_entry.data, operation)
         
         # For POI searches, try spatial matching
         elif operation == "poi_search" and all(k in params for k in ['latitude', 'longitude', 'radius']):
@@ -186,11 +283,46 @@ class UnifiedCache:
                 spatial_entry.hit_count += 1
                 self._stats['hits'] += 1
                 logger.debug(f"Cache hit via spatial matching for POI search")
-                return spatial_entry.data
+                return self._reconstruct_data(spatial_entry.data, operation)
         
         self._stats['misses'] += 1
         logger.debug(f"Cache miss for {operation} with provider {provider.value}")
         return None
+
+    def _reconstruct_data(self, data: Any, operation: str) -> Any:
+        """Reconstruct Pydantic models from dictionaries loaded from cache."""
+        if data is None:
+            return None
+        
+        # Import models here to avoid circular imports
+        from .models import GeoLocation, Route, POI
+        
+        # For reverse_geocode and geocode operations, reconstruct GeoLocation
+        if operation in ["reverse_geocode", "geocode"]:
+            if isinstance(data, dict):
+                return GeoLocation(**data)
+            return data
+        
+        # For route operations, reconstruct Route
+        elif operation == "route":
+            if isinstance(data, dict):
+                return Route(**data)
+            return data
+        
+        # For poi_search, reconstruct list of POIs
+        elif operation == "poi_search":
+            if isinstance(data, list):
+                return [POI(**item) if isinstance(item, dict) else item for item in data]
+            return data
+        
+        # For poi_details, reconstruct POI
+        elif operation == "poi_details":
+            if isinstance(data, dict):
+                return POI(**data)
+            return data
+        
+        # Return as-is for unknown operations
+        return data
     
     async def set(self, provider: ProviderType, operation: str, params: Dict[str, Any], data: Any) -> None:
         """
@@ -203,10 +335,19 @@ class UnifiedCache:
             data: Data to cache
         """
         cache_key = CacheKey(provider=provider, operation=operation, params=params)
+        normalized_params = cache_key._normalize_params(params)
         key = cache_key.generate_key()
         
         ttl = self.ttl_config.get(operation, 3600)  # Default 1 hour
         expires_at = datetime.utcnow() + timedelta(seconds=ttl)
+        
+        # Special logging for reverse_geocode
+        if operation == "reverse_geocode":
+            logger.info(f"💾 Storing reverse_geocode in cache")
+            logger.info(f"💾 Original params: {params}")
+            logger.info(f"💾 Normalized params: {normalized_params}")
+            logger.info(f"💾 Generated key: {key}")
+            logger.info(f"💾 TTL: {ttl}s, expires: {expires_at.isoformat()}")
         
         entry = CacheEntry(
             key=key,
@@ -416,6 +557,79 @@ class UnifiedCache:
         
         logger.info(f"Invalidated {len(matching_keys)} cache entries matching pattern: {pattern}")
         return len(matching_keys)
+
+    
+    def _load_from_file(self) -> None:
+        """Load cache from persistent storage on disk."""
+        if not os.path.exists(self.cache_file):
+            logger.info("No persistent cache file found, starting with empty cache")
+            return
+        
+        try:
+            with open(self.cache_file, 'r', encoding='utf-8') as f:
+                cache_data = json.load(f)
+            
+            # Reconstruct cache entries from stored data
+            loaded_count = 0
+            expired_count = 0
+            
+            for entry_dict in cache_data.get('entries', []):
+                try:
+                    entry = CacheEntry.from_dict(entry_dict)
+                    
+                    # Skip expired entries
+                    if entry.is_expired():
+                        expired_count += 1
+                        continue
+                    
+                    self._cache[entry.key] = entry
+                    loaded_count += 1
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to load cache entry: {e}")
+                    continue
+            
+            # Load stats if available
+            if 'stats' in cache_data:
+                self._stats = cache_data['stats']
+            
+            logger.info(f"Loaded {loaded_count} cache entries from disk ({expired_count} expired entries skipped)")
+            
+        except Exception as e:
+            logger.error(f"Error loading cache from file: {e}")
+            logger.info("Starting with empty cache")
+    
+    def save_to_file(self) -> None:
+        """Save cache to persistent storage on disk."""
+        try:
+            # Clean up expired entries before saving
+            current_time = datetime.utcnow()
+            valid_entries = [
+                entry.to_dict()
+                for entry in self._cache.values()
+                if not entry.is_expired()
+            ]
+            
+            cache_data = {
+                'version': '1.0',
+                'saved_at': datetime.utcnow().isoformat(),
+                'backend': self.backend,
+                'stats': self._stats,
+                'entries': valid_entries
+            }
+            
+            # Write to temporary file first, then rename (atomic operation)
+            temp_file = self.cache_file + '.tmp'
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(cache_data, f, indent=2, ensure_ascii=False)
+            
+            # Atomic rename
+            os.replace(temp_file, self.cache_file)
+            
+            logger.info(f"Saved {len(valid_entries)} cache entries to disk at {self.cache_file}")
+            
+        except Exception as e:
+            logger.error(f"Error saving cache to file: {e}")
 
 
 # Import math for distance calculation

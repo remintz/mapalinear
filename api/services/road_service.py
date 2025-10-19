@@ -104,28 +104,33 @@ class RoadService:
     
     def _build_milestone_categories(
         self,
-        include_cities: bool,
-        include_gas_stations: bool,
-        include_food: bool,
-        include_toll_booths: bool
+        include_cities: bool
     ) -> List[POICategory]:
         """
-        Build list of milestone categories based on user preferences.
-        
+        Build list of all POI categories. Always includes all POI types for comprehensive search.
+        Frontend will filter which ones to display.
+
         Returns:
             List of POICategory enums
         """
         categories = []
-        
+
+        # Always include all POI types
+        categories.extend([
+            POICategory.GAS_STATION,
+            POICategory.FUEL,
+            POICategory.RESTAURANT,
+            POICategory.FOOD,
+            POICategory.HOTEL,
+            POICategory.LODGING,
+            POICategory.CAMPING,
+            POICategory.HOSPITAL
+        ])
+
+        # Cities/services based on parameter
         if include_cities:
             categories.extend([POICategory.SERVICES])
-        if include_gas_stations:
-            categories.extend([POICategory.GAS_STATION, POICategory.FUEL])
-        if include_food:
-            categories.extend([POICategory.RESTAURANT, POICategory.FOOD])
-        if include_toll_booths:
-            categories.extend([POICategory.SERVICES])
-        
+
         return categories
     
     def _assign_milestones_to_segments(
@@ -164,9 +169,6 @@ class RoadService:
         destination: str,
         road_id: Optional[str] = None,
         include_cities: bool = True,
-        include_gas_stations: bool = True,
-        include_food: bool = False,
-        include_toll_booths: bool = True,
         max_distance_from_road: float = 3000,
         min_distance_from_origin_km: float = 0.0,  # Deprecated - kept for backwards compatibility
         progress_callback: Optional[Callable[[float], None]] = None,
@@ -212,10 +214,8 @@ class RoadService:
         # Step 3: Process route into linear segments
         linear_segments = self._process_route_into_segments(route, segment_length_km)
         
-        # Step 4: Find milestones along the route
-        milestone_categories = self._build_milestone_categories(
-            include_cities, include_gas_stations, include_food, include_toll_booths
-        )
+        # Step 4: Find milestones along the route (always search all POI types)
+        milestone_categories = self._build_milestone_categories(include_cities)
         
         logger.info(f"🛣️ Categorias de milestone solicitadas: "
                    f"{[cat.value for cat in milestone_categories]}")
@@ -224,7 +224,8 @@ class RoadService:
             linear_segments,
             milestone_categories,
             max_distance_from_road,
-            exclude_cities=[origin_city]
+            exclude_cities=[origin_city],
+            progress_callback=progress_callback
         ))
         
         # Step 5: Sort and assign milestones to segments
@@ -245,6 +246,23 @@ class RoadService:
         logger.info(f"🛣️ Mapa linear concluído: {len(linear_segments)} segmentos, "
                    f"{len(all_milestones)} milestones")
         self._log_milestone_statistics(all_milestones)
+
+        # Save cache to disk
+        try:
+            from ..providers import get_manager
+            manager = get_manager()
+            manager.cache.save_to_file()
+            logger.info("💾 Cache salvo em disco com sucesso")
+        except Exception as e:
+            logger.error(f"❌ Erro ao salvar cache em disco: {e}")
+
+        # Save linear map to disk
+        try:
+            from .map_storage_service import get_storage_service
+            storage = get_storage_service()
+            storage.save_map(linear_map)
+        except Exception as e:
+            logger.error(f"❌ Erro ao salvar mapa linear em disco: {e}")
 
         return linear_map
 
@@ -377,23 +395,58 @@ class RoadService:
         Returns:
             RoadMilestone object
         """
-        milestone_type = self._poi_category_to_milestone_type(poi.category)
-        
+        # Determine milestone type - check if it's a place (city/town/village) first
+        milestone_type = None
+        if poi.provider_data and 'osm_tags' in poi.provider_data:
+            osm_tags = poi.provider_data['osm_tags']
+            place_type = osm_tags.get('place', '')
+            if place_type == 'city':
+                milestone_type = MilestoneType.CITY
+            elif place_type == 'town':
+                milestone_type = MilestoneType.TOWN
+            elif place_type == 'village':
+                milestone_type = MilestoneType.VILLAGE
+
+        # If not a place, use category mapping
+        if not milestone_type:
+            milestone_type = self._poi_category_to_milestone_type(poi.category)
+
         # Calculate distance from POI to route point
         distance_from_road = self._calculate_distance_meters(
             poi.location.latitude, poi.location.longitude,
             route_point[0], route_point[1]
         )
-        
+
         # Extract city from POI tags (quick, no API call)
         city = None
         if poi.provider_data:
-            city = (poi.provider_data.get('addr:city') or
-                   poi.provider_data.get('address:city') or
-                   poi.provider_data.get('addr:municipality'))
+            # For cities and towns, the city field is the place name itself
+            if milestone_type in [MilestoneType.CITY, MilestoneType.TOWN]:
+                city = poi.name  # The place name is the city name
+            # For villages, city should be the municipality name (from tags or reverse geocoding)
+            elif milestone_type == MilestoneType.VILLAGE:
+                # Try to extract municipality from OSM tags
+                osm_tags = poi.provider_data.get('osm_tags', {})
+                city = (osm_tags.get('addr:city') or
+                       osm_tags.get('is_in:city') or
+                       osm_tags.get('is_in') or
+                       poi.provider_data.get('addr:city') or
+                       poi.provider_data.get('address:city') or
+                       poi.provider_data.get('addr:municipality'))
+                # If no city found in tags, reverse geocoding will fill it later
+            else:
+                # For other POIs (gas stations, restaurants, etc), try to extract city from address tags
+                city = (poi.provider_data.get('addr:city') or
+                       poi.provider_data.get('address:city') or
+                       poi.provider_data.get('addr:municipality'))
             if city:
                 logger.debug(f"🏙️ POI {poi.name}: cidade '{city}' extraída das tags OSM")
         
+        # Extract quality_score from provider_data
+        quality_score = None
+        if poi.provider_data:
+            quality_score = poi.provider_data.get('quality_score')
+
         return RoadMilestone(
             id=poi.id,
             name=poi.name,
@@ -413,7 +466,7 @@ class RoadService:
             phone=poi.phone,
             website=poi.website,
             amenities=poi.amenities,
-            quality_score=poi.rating
+            quality_score=quality_score
         )
     
     async def _enrich_milestones_with_cities(self, milestones: List[RoadMilestone]):
@@ -431,7 +484,8 @@ class RoadService:
             try:
                 reverse_loc = await self.geo_provider.reverse_geocode(
                     milestone.coordinates.latitude,
-                    milestone.coordinates.longitude
+                    milestone.coordinates.longitude,
+                    poi_name=milestone.name
                 )
                 if reverse_loc and reverse_loc.city:
                     milestone.city = reverse_loc.city
@@ -500,7 +554,8 @@ class RoadService:
         segments: List[LinearRoadSegment],
         categories: List[POICategory],
         max_distance_from_road: float,
-        exclude_cities: Optional[List[Optional[str]]] = None
+        exclude_cities: Optional[List[Optional[str]]] = None,
+        progress_callback: Optional[Callable[[float], None]] = None
     ) -> List[RoadMilestone]:
         """
         Find POI milestones along the route using segment start/end points.
@@ -526,14 +581,20 @@ class RoadService:
         
         # Extract search points from segments
         search_points = self._extract_search_points_from_segments(segments)
-        
+        total_points = len(search_points)
+
         # Search for POIs and convert to milestones
         milestones = []
         total_errors = 0
         total_requests = 0
         consecutive_errors = 0
-        
+
         for i, (point, distance_from_origin) in enumerate(search_points):
+            # Update progress based on points processed
+            # Progress goes from 10% to 90% during POI search (leaving 10% for enrichment and filtering)
+            if progress_callback:
+                progress = round(10.0 + (i / total_points) * 80.0)
+                progress_callback(progress)
             logger.debug(f"🔍 Ponto {i}: lat={point[0]:.6f}, lon={point[1]:.6f}, "
                         f"dist={distance_from_origin:.1f}km")
             total_requests += 1
@@ -552,19 +613,43 @@ class RoadService:
                 
                 # Convert POIs to milestones
                 converted_count = 0
+                duplicates_count = 0
                 for j, poi in enumerate(pois):
                     try:
-                        # Skip if already exists (avoid duplicates)
-                        if any(m.id == poi.id for m in milestones):
-                            logger.debug(f"🔍 POI {poi.name} já existe, ignorando")
+                        # Check if POI already exists
+                        existing_milestone = next((m for m in milestones if m.id == poi.id), None)
+
+                        if existing_milestone:
+                            duplicates_count += 1
+                            # POI já existe - verificar se o ponto atual está mais próximo
+                            current_distance_to_poi = self._calculate_distance_meters(
+                                poi.location.latitude, poi.location.longitude,
+                                point[0], point[1]
+                            )
+
+                            # Se o ponto atual está mais próximo, atualizar o milestone
+                            if current_distance_to_poi < existing_milestone.distance_from_road_meters:
+                                logger.debug(
+                                    f"🔄 Atualizando {poi.name}: "
+                                    f"distância melhorada de {existing_milestone.distance_from_road_meters:.0f}m "
+                                    f"para {current_distance_to_poi:.0f}m (km {distance_from_origin:.1f})"
+                                )
+                                # Atualizar com o ponto de referência mais próximo
+                                existing_milestone.distance_from_origin_km = distance_from_origin
+                                existing_milestone.distance_from_road_meters = current_distance_to_poi
+                            else:
+                                logger.debug(
+                                    f"⏭️  Ignorando POI {poi.name} - já existe com ponto mais próximo "
+                                    f"({existing_milestone.distance_from_road_meters:.0f}m vs {current_distance_to_poi:.0f}m)"
+                                )
                             continue
-                        
+
                         # Validate POI category
                         if not isinstance(poi.category, POICategory):
                             logger.error(f"🔍 POI {j}: categoria inválida! "
                                        f"Valor: {poi.category}, tipo: {type(poi.category)}")
                             continue
-                        
+
                         # Create milestone
                         milestone = self._create_milestone_from_poi(poi, distance_from_origin, point)
                         milestones.append(milestone)
@@ -578,8 +663,9 @@ class RoadService:
                         import traceback
                         logger.error(f"🔍 Traceback: {traceback.format_exc()}")
                         continue
-                
-                logger.info(f"📍 Ponto {i}: {converted_count} milestones criados")
+
+                if converted_count > 0 or duplicates_count > 0:
+                    logger.debug(f"📍 Ponto {i}: {converted_count} novos, {duplicates_count} duplicatas")
                 
             except Exception as e:
                 total_errors += 1
@@ -617,9 +703,17 @@ class RoadService:
                 logger.warning(f"High error rate detected. Consider checking Overpass API status.")
         
         logger.info(f"🎯 RESULTADO FINAL: {len(milestones)} milestones encontrados ao longo da rota")
-        
+
+        # Update progress - POI search completed (90%)
+        if progress_callback:
+            progress_callback(90)
+
         # Enrich milestones with cities (reverse geocoding)
         await self._enrich_milestones_with_cities(milestones)
+
+        # Update progress - enrichment completed (95%)
+        if progress_callback:
+            progress_callback(95)
         
         # Filter out POIs in excluded cities
         milestones = self._filter_excluded_cities(milestones, exclude_cities_filtered)
@@ -639,6 +733,9 @@ class RoadService:
             POICategory.RESTAURANT: MilestoneType.RESTAURANT,
             POICategory.FOOD: MilestoneType.RESTAURANT,
             POICategory.HOTEL: MilestoneType.HOTEL,
+            POICategory.LODGING: MilestoneType.HOTEL,
+            POICategory.CAMPING: MilestoneType.CAMPING,
+            POICategory.HOSPITAL: MilestoneType.HOSPITAL,
             POICategory.SERVICES: MilestoneType.OTHER,
             POICategory.PARKING: MilestoneType.OTHER,
         }
@@ -876,37 +973,29 @@ class RoadService:
         self,
         origin: str,
         destination: str,
-        include_gas_stations: bool = True,
-        include_food: bool = True,
-        include_toll_booths: bool = True,
         max_distance_from_road: float = 1000
     ) -> 'RouteStatisticsResponse':
         """
         Gera estatísticas detalhadas de uma rota.
-        
+        Sempre busca todos os tipos de POI para estatísticas completas.
+
         Args:
             origin: Ponto de origem
             destination: Ponto de destino
-            include_gas_stations: Incluir postos nas estatísticas
-            include_food: Incluir estabelecimentos de alimentação nas estatísticas
-            include_toll_booths: Incluir pedágios nas estatísticas
             max_distance_from_road: Distância máxima da estrada para considerar POIs
-            
+
         Returns:
             Estatísticas completas da rota
         """
         from api.models.road_models import (
             RouteStatisticsResponse, POIStatistics, RouteStopRecommendation
         )
-        
-        # Gerar mapa linear para obter dados
+
+        # Gerar mapa linear para obter dados (sempre busca todos os POI)
         linear_map = self.generate_linear_map(
             origin=origin,
             destination=destination,
             include_cities=True,
-            include_gas_stations=include_gas_stations,
-            include_food=include_food,
-            include_toll_booths=include_toll_booths,
             max_distance_from_road=max_distance_from_road
         )
         

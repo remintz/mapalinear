@@ -70,6 +70,19 @@ export function CardTitle({ children, className }: CardTitleProps) {
   );
 }
 
+interface CardDescriptionProps {
+  children: React.ReactNode;
+  className?: string;
+}
+
+export function CardDescription({ children, className }: CardDescriptionProps) {
+  return (
+    <p className={cn('text-sm text-gray-600 mt-1', className)}>
+      {children}
+    </p>
+  );
+}
+
 interface CardContentProps {
   children: React.ReactNode;
   className?: string;

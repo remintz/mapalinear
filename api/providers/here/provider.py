@@ -129,23 +129,37 @@ class HEREProvider(GeoProvider):
             logger.error(f"Error geocoding address '{address}': {e}")
             return None
     
-    async def reverse_geocode(self, latitude: float, longitude: float) -> Optional[GeoLocation]:
+    async def reverse_geocode(
+        self,
+        latitude: float,
+        longitude: float,
+        poi_name: Optional[str] = None
+    ) -> Optional[GeoLocation]:
         """
         Convert coordinates to address using HERE Reverse Geocoding API.
-        
+
         Args:
             latitude: Latitude coordinate
             longitude: Longitude coordinate
-            
+            poi_name: Optional POI name for cache key differentiation
+
         Returns:
             GeoLocation with address details
         """
+        # Build cache params - include poi_name if provided
+        cache_params = {
+            "latitude": latitude,
+            "longitude": longitude
+        }
+        if poi_name:
+            cache_params["poi_name"] = poi_name
+
         # Check cache first
         if self._cache:
             cached_result = await self._cache.get(
                 provider=self.provider_type,
                 operation="reverse_geocode",
-                params={"latitude": latitude, "longitude": longitude}
+                params=cache_params
             )
             if cached_result is not None:
                 return cached_result
@@ -184,7 +198,7 @@ class HEREProvider(GeoProvider):
                 await self._cache.set(
                     provider=self.provider_type,
                     operation="reverse_geocode",
-                    params={"latitude": latitude, "longitude": longitude},
+                    params=cache_params,
                     data=result
                 )
             

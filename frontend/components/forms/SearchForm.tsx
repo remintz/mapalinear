@@ -16,11 +16,11 @@ interface SearchFormProps {
   estimatedCompletion?: string | null;
 }
 
-export function SearchForm({ 
-  onSubmit, 
-  isLoading = false, 
-  error, 
-  progressMessage = 'Buscar Rota',
+export function SearchForm({
+  onSubmit,
+  isLoading = false,
+  error,
+  progressMessage = 'Criar Mapa',
   progressPercent = 0,
   estimatedCompletion
 }: SearchFormProps) {
@@ -35,9 +35,6 @@ export function SearchForm({
     defaultValues: {
       origin: '',
       destination: '',
-      includeGasStations: true,
-      includeRestaurants: true,
-      includeTollBooths: true,
       maxDistance: 5,
     },
   });
@@ -60,7 +57,7 @@ export function SearchForm({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Search className="h-5 w-5" />
-          Buscar Rota
+          Criar Mapa
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -125,46 +122,6 @@ export function SearchForm({
             >
               ⇄ Trocar origem e destino
             </Button>
-          </div>
-
-          {/* POI Options */}
-          <div className="space-y-4">
-            <div className="flex items-center gap-2">
-              <Settings className="h-4 w-4 text-gray-600" />
-              <span className="text-sm font-medium text-gray-700">Pontos de Interesse</span>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <label className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  {...register('includeGasStations')}
-                  disabled={isLoading}
-                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-                <span className="text-sm text-gray-700">Postos de Gasolina</span>
-              </label>
-
-              <label className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  {...register('includeRestaurants')}
-                  disabled={isLoading}
-                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-                <span className="text-sm text-gray-700">Restaurantes</span>
-              </label>
-
-              <label className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  {...register('includeTollBooths')}
-                  disabled={isLoading}
-                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-                <span className="text-sm text-gray-700">Pedágios</span>
-              </label>
-            </div>
           </div>
 
           {/* Max Distance */}

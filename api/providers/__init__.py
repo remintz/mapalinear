@@ -11,16 +11,17 @@ for the business logic.
 
 from .base import GeoProvider, ProviderType
 from .models import GeoLocation, Route, RouteSegment, POI, POICategory
-from .manager import GeoProviderManager, create_provider
+from .manager import GeoProviderManager, create_provider, get_manager
 
 __all__ = [
     'GeoProvider',
     'ProviderType',
     'GeoLocation',
     'Route',
-    'RouteSegment', 
+    'RouteSegment',
     'POI',
     'POICategory',
     'GeoProviderManager',
-    'create_provider'
+    'create_provider',
+    'get_manager'
 ]

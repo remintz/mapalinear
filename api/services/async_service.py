@@ -48,7 +48,7 @@ class AsyncService:
             type=operation_type,
             status=OperationStatus.IN_PROGRESS,
             started_at=datetime.now(),
-            progress_percent=0.0,
+            progress_percent=0,
             estimated_completion=datetime.now() + timedelta(minutes=5)  # Estimativa inicial
         )
         
@@ -147,7 +147,7 @@ class AsyncService:
             return
         
         operation.status = OperationStatus.COMPLETED
-        operation.progress_percent = 100.0
+        operation.progress_percent = 100
         operation.result = result
         operation.estimated_completion = None
         
@@ -234,7 +234,7 @@ class AsyncService:
         def _worker():
             try:
                 # Atualiza para 5% para mostrar que iniciou
-                _update_progress(5.0)
+                _update_progress(5)
                 
                 # Executa a função com o callback de progresso
                 result = function(

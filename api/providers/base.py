@@ -41,14 +41,20 @@ class GeoProvider(ABC):
         pass
     
     @abstractmethod
-    async def reverse_geocode(self, latitude: float, longitude: float) -> Optional[GeoLocation]:
+    async def reverse_geocode(
+        self,
+        latitude: float,
+        longitude: float,
+        poi_name: Optional[str] = None
+    ) -> Optional[GeoLocation]:
         """
         Convert geographic coordinates to address.
-        
+
         Args:
             latitude: Latitude coordinate (-90 to 90)
             longitude: Longitude coordinate (-180 to 180)
-            
+            poi_name: Optional POI name for cache key differentiation
+
         Returns:
             GeoLocation object with address details, or None if not found
         """

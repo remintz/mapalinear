@@ -26,16 +26,11 @@ class OSMProvider(GeoProvider):
     
     def __init__(self, cache: Optional[UnifiedCache] = None):
         """Initialize OSM provider with required clients."""
-        import httpx
         import asyncio
         import time
         from geopy.geocoders import Nominatim
         
         self._cache = cache
-        self._http_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(30.0),
-            headers={'User-Agent': 'mapalinear/1.0 (https://github.com/your-repo)'}
-        )
         
         # Nominatim geolocator for geocoding
         self.geolocator = Nominatim(user_agent="mapalinear/1.0")
@@ -49,8 +44,6 @@ class OSMProvider(GeoProvider):
         self.overpass_endpoints = [
             "https://overpass-api.de/api/interpreter",
             "https://overpass.kumi.systems/api/interpreter",
-            "https://overpass.openstreetmap.ru/api/interpreter",
-            "https://overpass.osm.ch/api/interpreter"
         ]
         self.current_endpoint_index = 0
         
@@ -70,6 +63,19 @@ class OSMProvider(GeoProvider):
             'fast_food': POICategory.FOOD,
             'cafe': POICategory.FOOD
         }
+    
+    def _get_http_client(self):
+        """
+        Create a new HTTP client for the current async context.
+        
+        Returns a context manager that provides an httpx.AsyncClient
+        configured for OSM API requests.
+        """
+        import httpx
+        return httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0),
+            headers={'User-Agent': 'mapalinear/1.0 (https://github.com/your-repo)'}
+        )
     
     async def geocode(self, address: str) -> Optional[GeoLocation]:
         """Convert address to coordinates using Nominatim."""
@@ -143,19 +149,35 @@ class OSMProvider(GeoProvider):
             logger.error(f"Geocoding error for '{address}': {e}")
             return None
     
-    async def reverse_geocode(self, latitude: float, longitude: float) -> Optional[GeoLocation]:
+    async def reverse_geocode(
+        self,
+        latitude: float,
+        longitude: float,
+        poi_name: Optional[str] = None
+    ) -> Optional[GeoLocation]:
         """Convert coordinates to address using Nominatim."""
         import asyncio
-        
+
+        # Build cache params - include poi_name if provided
+        cache_params = {
+            "latitude": latitude,
+            "longitude": longitude
+        }
+        if poi_name:
+            cache_params["poi_name"] = poi_name
+
         # Check cache first
         if self._cache:
             cached_result = await self._cache.get(
                 provider=ProviderType.OSM,
                 operation="reverse_geocode",
-                params={"latitude": latitude, "longitude": longitude}
+                params=cache_params
             )
             if cached_result:
+                logger.info(f"✅ Cache HIT for reverse_geocode: {poi_name or 'no name'} at ({latitude:.4f}, {longitude:.4f})")
                 return cached_result
+        
+        logger.info(f"❌ Cache MISS for reverse_geocode: {poi_name or 'no name'} at ({latitude:.4f}, {longitude:.4f}) - fetching from API")
         
         try:
             await self._wait_before_request()
@@ -196,9 +218,10 @@ class OSMProvider(GeoProvider):
                 await self._cache.set(
                     provider=ProviderType.OSM,
                     operation="reverse_geocode",
-                    params={"latitude": latitude, "longitude": longitude},
+                    params=cache_params,
                     data=result
                 )
+                logger.info(f"💾 Cached reverse_geocode result for: {poi_name or 'no name'}")
             
             return result
             
@@ -428,38 +451,40 @@ class OSMProvider(GeoProvider):
         logger.debug(f"🗺️ Consultando OSRM: {osrm_url}")
         
         try:
-            response = await self._http_client.get(osrm_url, params=params, timeout=30)
-            
-            if response.status_code != 200:
-                logger.warning(f"🗺️ OSRM retornou status {response.status_code}")
-                return None
-            
-            data = response.json()
-            
-            if data.get('code') != 'Ok':
-                logger.warning(f"🗺️ OSRM erro: {data.get('message', 'Unknown error')}")
-                return None
-            
-            if not data.get('routes'):
-                logger.warning(f"🗺️ OSRM não retornou rotas")
-                return None
-            
-            route = data['routes'][0]
-            geometry = route['geometry']['coordinates']
-            
-            # Convert to (lat, lon) format
-            geometry_converted = [(coord[1], coord[0]) for coord in geometry]
-            
-            distance = route['distance']  # meters
-            duration = route['duration']  # seconds
-            
-            logger.debug(f"🗺️ OSRM: {distance/1000:.1f}km, {len(geometry_converted)} pontos na geometria")
-            
-            return {
-                'distance': distance,
-                'duration': duration, 
-                'geometry': geometry_converted
-            }
+            # Use context manager to ensure proper client lifecycle
+            async with self._get_http_client() as client:
+                response = await client.get(osrm_url, params=params, timeout=30)
+                
+                if response.status_code != 200:
+                    logger.warning(f"🗺️ OSRM retornou status {response.status_code}")
+                    return None
+                
+                data = response.json()
+                
+                if data.get('code') != 'Ok':
+                    logger.warning(f"🗺️ OSRM erro: {data.get('message', 'Unknown error')}")
+                    return None
+                
+                if not data.get('routes'):
+                    logger.warning(f"🗺️ OSRM não retornou rotas")
+                    return None
+                
+                route = data['routes'][0]
+                geometry = route['geometry']['coordinates']
+                
+                # Convert to (lat, lon) format
+                geometry_converted = [(coord[1], coord[0]) for coord in geometry]
+                
+                distance = route['distance']  # meters
+                duration = route['duration']  # seconds
+                
+                logger.debug(f"🗺️ OSRM: {distance/1000:.1f}km, {len(geometry_converted)} pontos na geometria")
+                
+                return {
+                    'distance': distance,
+                    'duration': duration, 
+                    'geometry': geometry_converted
+                }
             
         except Exception as e:
             logger.warning(f"🗺️ Erro na requisição OSRM: {e}")
@@ -469,42 +494,75 @@ class OSMProvider(GeoProvider):
     def _generate_overpass_query(self, location: GeoLocation, radius: float, categories: List[POICategory]) -> str:
         """Generate Overpass query for POI search."""
         logger.debug(f"🔧 Gerando query Overpass para categorias: {[cat.value for cat in categories]}")
-        
+
         # Convert radius to degrees (approximate)
         radius_deg = radius / 111000  # Rough conversion
-        
-        # Calculate bounding box
+
+        # Calculate bounding box for regular POIs (gas stations, restaurants, etc)
         bbox = {
             'south': location.latitude - radius_deg,
             'west': location.longitude - radius_deg,
             'north': location.latitude + radius_deg,
             'east': location.longitude + radius_deg
         }
-        
-        # logger.debug(f"🔧 Bounding box: {bbox}")
-        
+
+        # Use larger radius for places (cities/towns/villages) - 5km instead of 1km
+        # City centers may be far from highways but still relevant
+        place_radius_deg = (radius * 5) / 111000
+        bbox_places = {
+            'south': location.latitude - place_radius_deg,
+            'west': location.longitude - place_radius_deg,
+            'north': location.latitude + place_radius_deg,
+            'east': location.longitude + place_radius_deg
+        }
+
         # Map categories to OSM amenity tags (use set to avoid duplicates)
         amenity_filters = set()
+        tourism_filters = set()
+        include_places = False
         for category in categories:
+            if category == POICategory.SERVICES:
+                include_places = True  # SERVICES category includes cities/towns/villages
             osm_amenities = self._get_osm_amenities_for_category(category)
+            osm_tourism = self._get_osm_tourism_tags_for_category(category)
             # logger.debug(f"🔧 Categoria {category.value} -> amenities OSM: {osm_amenities}")
             amenity_filters.update(osm_amenities)
-        
+            tourism_filters.update(osm_tourism)
+
         amenity_filters = list(amenity_filters)  # Convert back to list
+        tourism_filters = list(tourism_filters)
         logger.info(f"🔧 Amenities OSM únicos para busca: {amenity_filters}")
-        
+        if tourism_filters:
+            logger.info(f"🔧 Tourism tags OSM para busca: {tourism_filters}")
+        if include_places:
+            logger.info(f"🏙️ Incluindo busca por cidades com raio de {radius * 5}m (place=city/town/village)")
+
         # Build query
         bbox_str = f"{bbox['south']},{bbox['west']},{bbox['north']},{bbox['east']}"
-        
+        bbox_places_str = f"{bbox_places['south']},{bbox_places['west']},{bbox_places['north']},{bbox_places['east']}"
+
         query_parts = ['[out:json];', '(']
+
+        # Add amenity searches (normal radius)
         for amenity in amenity_filters:
             query_parts.append(f'  node["amenity"="{amenity}"]({bbox_str});')
             query_parts.append(f'  way["amenity"="{amenity}"]({bbox_str});')
-        
+
+        # Add tourism tag searches (normal radius)
+        for tourism in tourism_filters:
+            query_parts.append(f'  node["tourism"="{tourism}"]({bbox_str});')
+            query_parts.append(f'  way["tourism"="{tourism}"]({bbox_str});')
+
+        # Add place searches with LARGER radius (cities, towns, villages)
+        if include_places:
+            for place_type in ['city', 'town', 'village']:
+                query_parts.append(f'  node["place"="{place_type}"]({bbox_places_str});')
+                query_parts.append(f'  way["place"="{place_type}"]({bbox_places_str});')
+
         query_parts.extend([');', 'out meta;'])
-        
+
         final_query = '\n'.join(query_parts)
-        # logger.debug(f"🔧 Query final:\n{final_query}")
+        # logger.debug(f"🔧 Query Overpass:\n{final_query}")
         return final_query
     
     async def _make_overpass_request(self, query: str) -> dict:
@@ -519,33 +577,22 @@ class OSMProvider(GeoProvider):
             
             try:
                 logger.debug(f"Trying Overpass endpoint: {endpoint}")
-                # logger.debug(f"🌐 Enviando query para {endpoint}")
                 
-                response = await self._http_client.post(
-                    endpoint,
-                    data={'data': query},
-                    headers={'Content-Type': 'application/x-www-form-urlencoded'}
-                )
-                
-                # logger.debug(f"🌐 Response status: {response.status_code}")
-                response.raise_for_status()
-                
-                result = response.json()
-                logger.info(f"🌐 Overpass response: {len(result.get('elements', []))} elementos retornados")
-                
-                # # Log alguns elementos para debug
-                # elements = result.get('elements', [])
-                # if elements:
-                #     logger.debug(f"🌐 Primeiro elemento: {elements[0]}")
-                #     if len(elements) > 1:
-                #         logger.debug(f"🌐 Segundo elemento: {elements[1]}")
-                # else:
-                #     logger.warning(f"🌐 ATENÇÃO: Overpass retornou resposta vazia!")
-                #     logger.debug(f"🌐 Resposta completa: {result}")
-                
-                # # Success - log and return
-                logger.debug(f"Overpass request successful using {endpoint}")
-                return result
+                # Use context manager to ensure proper client lifecycle
+                async with self._get_http_client() as client:
+                    response = await client.post(
+                        endpoint,
+                        data={'data': query},
+                        headers={'Content-Type': 'application/x-www-form-urlencoded'}
+                    )
+                    
+                    response.raise_for_status()
+                    
+                    result = response.json()
+                    logger.info(f"🌐 Overpass response: {len(result.get('elements', []))} elementos retornados")
+                    
+                    logger.debug(f"Overpass request successful using {endpoint}")
+                    return result
                 
             except Exception as e:
                 last_exception = e
@@ -578,22 +625,22 @@ class OSMProvider(GeoProvider):
         """Parse OSM element to POI object with quality filtering."""
         try:
             tags = element.get('tags', {})
-            
-            # Skip elements without required data
-            if not tags.get('name') and not tags.get('amenity'):
+
+            # Skip elements without required data (must have name OR amenity OR place)
+            if not tags.get('name') and not tags.get('amenity') and not tags.get('place'):
                 return None
-            
+
             # Skip abandoned POIs
             if self._is_poi_abandoned(tags):
                 return None
-            
-            # Calculate quality score
+
+            # Calculate quality score (always calculate for metadata)
             quality_score = self._calculate_poi_quality_score(tags)
-            
-            # Check if meets quality threshold
-            if not self._meets_quality_threshold(tags, quality_score):
-                return None
-            
+
+            # TEMPORARILY DISABLED: Quality threshold filtering
+            # if not self._meets_quality_threshold(tags, quality_score):
+            #     return None
+
             # Get coordinates
             if 'lat' in element and 'lon' in element:
                 lat, lon = element['lat'], element['lon']
@@ -601,15 +648,32 @@ class OSMProvider(GeoProvider):
                 lat, lon = element['center']['lat'], element['center']['lon']
             else:
                 return None
-            
-            # Determine category
-            category = self._map_osm_amenity_to_category(tags.get('amenity', ''))
-            if not category:
-                category = POICategory.SERVICES  # Default category
-            
+
+            # Determine category - try place first, then tourism, then amenity
+            place_type = tags.get('place', '')
+            if place_type in ['city', 'town', 'village']:
+                # Map place types to POICategory.SERVICES
+                category = POICategory.SERVICES
+            else:
+                # Try tourism mapping first (for hotels, etc)
+                tourism_type = tags.get('tourism', '')
+                category = self._map_osm_tourism_to_category(tourism_type)
+
+                # If no tourism match, try amenity mapping
+                if not category:
+                    category = self._map_osm_amenity_to_category(tags.get('amenity', ''))
+
+                # Default category if nothing matches
+                if not category:
+                    category = POICategory.SERVICES
+
             # Create POI
             poi_id = f"{element['type']}/{element['id']}"
-            name = tags.get('name', tags.get('amenity', 'Unknown POI'))
+            # For places, use the name. For other POIs, fallback to amenity/place type if no name
+            if place_type:
+                name = tags.get('name', f"{place_type.title()} sem nome")
+            else:
+                name = tags.get('name', tags.get('amenity', 'Unknown POI'))
             
             # Extract amenities using improved method
             amenities = self._extract_amenities_from_tags(tags)
@@ -662,6 +726,19 @@ class OSMProvider(GeoProvider):
     def _map_osm_amenity_to_category(self, amenity: str) -> Optional[POICategory]:
         """Map OSM amenity tag to our POI category."""
         return self._category_mapping.get(amenity)
+
+    def _map_osm_tourism_to_category(self, tourism: str) -> Optional[POICategory]:
+        """Map OSM tourism tag to our POI category."""
+        tourism_mapping = {
+            'hotel': POICategory.HOTEL,
+            'motel': POICategory.HOTEL,
+            'hostel': POICategory.LODGING,
+            'guest_house': POICategory.LODGING,
+            'apartment': POICategory.LODGING,
+            'camp_site': POICategory.CAMPING,
+            'caravan_site': POICategory.CAMPING,
+        }
+        return tourism_mapping.get(tourism)
     
     def _get_osm_amenities_for_category(self, category: POICategory) -> List[str]:
         """Get OSM amenity tags for a given category."""
@@ -671,15 +748,26 @@ class OSMProvider(GeoProvider):
             POICategory.RESTAURANT: ['restaurant', 'fast_food'],
             POICategory.FOOD: ['restaurant', 'fast_food', 'cafe', 'food_court'],
             POICategory.HOTEL: ['hotel'],
+            POICategory.LODGING: ['hotel', 'motel', 'hostel', 'guest_house'],
+            POICategory.CAMPING: ['camp_site', 'caravan_site'],
             POICategory.HOSPITAL: ['hospital'],
             POICategory.PHARMACY: ['pharmacy'],
             POICategory.BANK: ['bank'],
             POICategory.ATM: ['atm'],
             POICategory.SHOPPING: ['shop'],
             POICategory.PARKING: ['parking'],
-            POICategory.SERVICES: ['townhall', 'community_centre', 'post_office', 'police']  # Added missing mapping for services
+            POICategory.SERVICES: ['police']  # Only police amenity for SERVICES category
         }
         return category_to_amenities.get(category, [])
+
+    def _get_osm_tourism_tags_for_category(self, category: POICategory) -> List[str]:
+        """Get OSM tourism tags for a given category."""
+        category_to_tourism = {
+            POICategory.HOTEL: ['hotel', 'motel'],
+            POICategory.LODGING: ['hotel', 'motel', 'hostel', 'guest_house', 'apartment'],
+            POICategory.CAMPING: ['camp_site', 'caravan_site'],
+        }
+        return category_to_tourism.get(category, [])
     
     def _extract_city_from_address(self, address: str) -> Optional[str]:
         """Extract city from address string."""
