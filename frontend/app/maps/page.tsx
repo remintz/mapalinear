@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, Button } from '@/components/ui';
+import { Card, CardContent, Button } from '@/components/ui';
 import { Badge } from '@/components/ui/badge';
 import {
   Map,
@@ -140,99 +140,110 @@ export default function SavedMapsPage() {
   }
 
   return (
-    <div className="container mx-auto p-6 max-w-6xl">
-      <div className="mb-8">
-        <div className="flex items-center gap-3 mb-2">
-          <Map className="h-8 w-8 text-blue-600" />
-          <h1 className="text-3xl font-bold">Mapas Salvos</h1>
+    <div className="min-h-screen bg-gray-50">
+      {/* Mobile-First Header - Sticky */}
+      <header className="sticky top-0 z-20 bg-white border-b border-gray-200 shadow-sm">
+        <div className="px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Map className="h-6 w-6 text-blue-600" />
+              <div>
+                <h1 className="text-xl font-bold text-gray-900">Mapas Salvos</h1>
+                <p className="text-xs text-gray-600">{maps.length} {maps.length === 1 ? 'mapa' : 'mapas'}</p>
+              </div>
+            </div>
+            <Button
+              onClick={() => router.push('/search')}
+              size="sm"
+              className="text-xs"
+            >
+              + Novo
+            </Button>
+          </div>
         </div>
-        <p className="text-gray-600">Gerencie seus mapas lineares salvos</p>
-      </div>
+      </header>
 
-      {maps.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <Map className="h-16 w-16 text-gray-300 mb-4" />
-            <p className="text-gray-500 text-lg mb-2">Nenhum mapa salvo ainda</p>
-            <p className="text-gray-400 text-sm mb-4">
-              Crie um novo mapa na página de busca
+      {/* Main Content */}
+      <main className="px-4 py-4">
+        {maps.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+            <Map className="h-20 w-20 text-gray-300 mb-4" />
+            <h2 className="text-lg font-semibold text-gray-700 mb-2">Nenhum mapa salvo</h2>
+            <p className="text-sm text-gray-500 mb-6 max-w-xs">
+              Crie seu primeiro mapa linear para começar
             </p>
             <Button onClick={() => router.push('/search')}>
-              Ir para Busca
+              Criar Novo Mapa
             </Button>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid gap-4">
-          {maps.map((map) => (
-            <Card key={map.id} className="hover:shadow-lg transition-shadow">
-              <CardHeader>
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <CardTitle className="text-xl mb-2">
+          </div>
+        ) : (
+          <div className="space-y-3 pb-20">
+            {maps.map((map) => (
+              <Card key={map.id} className="hover:shadow-md transition-shadow">
+                <CardContent className="p-4">
+                  {/* Route Info */}
+                  <div className="mb-3">
+                    <h3 className="text-base font-semibold text-gray-900 mb-1">
                       {map.origin} → {map.destination}
-                    </CardTitle>
-                    <CardDescription className="flex items-center gap-4 text-sm">
+                    </h3>
+                    <div className="flex items-center gap-3 text-xs text-gray-600">
                       <span className="flex items-center gap-1">
-                        <Calendar className="h-4 w-4" />
+                        <Calendar className="h-3 w-3" />
                         {formatDate(map.creation_date)}
                       </span>
                       <span className="flex items-center gap-1">
-                        <MapPin className="h-4 w-4" />
-                        {map.milestone_count} pontos
+                        <MapPin className="h-3 w-3" />
+                        {map.milestone_count} POIs
                       </span>
-                    </CardDescription>
+                      <Badge variant="secondary" className="bg-blue-100 text-blue-800 text-xs">
+                        {map.total_length_km.toFixed(1)} km
+                      </Badge>
+                    </div>
                   </div>
-                  <Badge variant="secondary" className="bg-blue-100 text-blue-800">
-                    {map.total_length_km.toFixed(1)} km
-                  </Badge>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="flex gap-2">
-                  <Button
-                    onClick={() => handleOpenMap(map.id)}
-                    className="flex-1"
-                    variant="default"
-                  >
-                    <FolderOpen className="h-4 w-4 mr-2" />
-                    Abrir
-                  </Button>
-                  <Button
-                    onClick={() => handleRegenerateMap(map.id)}
-                    className="flex-1"
-                    variant="outline"
-                    disabled={regeneratingId === map.id}
-                  >
-                    {regeneratingId === map.id ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Regenerando...
-                      </>
-                    ) : (
-                      <>
-                        <RefreshCw className="h-4 w-4 mr-2" />
-                        Regenerar
-                      </>
-                    )}
-                  </Button>
-                  <Button
-                    onClick={() => handleDeleteMap(map.id)}
-                    variant="destructive"
-                    disabled={deletingId === map.id}
-                  >
-                    {deletingId === map.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4" />
-                    )}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+
+                  {/* Action Buttons */}
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={() => handleOpenMap(map.id)}
+                      className="flex-1"
+                      size="sm"
+                    >
+                      <FolderOpen className="h-4 w-4 mr-1" />
+                      Abrir
+                    </Button>
+                    <Button
+                      onClick={() => handleRegenerateMap(map.id)}
+                      size="sm"
+                      variant="outline"
+                      disabled={regeneratingId === map.id}
+                      className="px-3"
+                    >
+                      {regeneratingId === map.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4" />
+                      )}
+                    </Button>
+                    <Button
+                      onClick={() => handleDeleteMap(map.id)}
+                      size="sm"
+                      variant="destructive"
+                      disabled={deletingId === map.id}
+                      className="px-3"
+                    >
+                      {deletingId === map.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+      </main>
     </div>
   );
 }
