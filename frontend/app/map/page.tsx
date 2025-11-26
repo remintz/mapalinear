@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Button, Card, CardContent } from '@/components/ui';
-import { MapPin, ArrowLeft, Bug, Loader2, Menu, Download, X } from 'lucide-react';
+import { MapPin, ArrowLeft, Bug, Loader2, Menu, Download, X, Fuel, Utensils, Bed, Tent, Hospital, Ticket, Building2, Home } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { POIFeed } from '@/components/ui/POIFeed';
@@ -173,15 +173,15 @@ export default function MapPage() {
     if (!data?.pois) return [];
 
     const filters = [
-      { id: 'gas_station', label: 'Postos', emoji: '⛽' },
-      { id: 'restaurant', label: 'Restaurantes', emoji: '🍽️', includeTypes: ['restaurant', 'fast_food', 'cafe'] },
-      { id: 'hotel', label: 'Hotéis', emoji: '🏨' },
-      { id: 'camping', label: 'Camping', emoji: '⛺' },
-      { id: 'hospital', label: 'Hospitais', emoji: '🏥' },
-      { id: 'toll_booth', label: 'Pedágios', emoji: '🛣️' },
-      { id: 'city', label: 'Cidades', emoji: '🏙️' },
-      { id: 'town', label: 'Vilas', emoji: '🏘️' },
-      { id: 'village', label: 'Povoados', emoji: '🏡' },
+      { id: 'gas_station', label: 'Postos', icon: Fuel },
+      { id: 'restaurant', label: 'Restaurantes', icon: Utensils, includeTypes: ['restaurant', 'fast_food', 'cafe'] },
+      { id: 'hotel', label: 'Hotéis', icon: Bed },
+      { id: 'camping', label: 'Camping', icon: Tent },
+      { id: 'hospital', label: 'Hospitais', icon: Hospital },
+      { id: 'toll_booth', label: 'Pedágios', icon: Ticket },
+      { id: 'city', label: 'Cidades', icon: Building2 },
+      { id: 'town', label: 'Vilas', icon: Home },
+      { id: 'village', label: 'Povoados', icon: Home },
     ];
 
     return filters.map(filter => ({
@@ -275,18 +275,6 @@ export default function MapPage() {
   const downloadPDF = async (routeData: any) => {
     setIsExporting(true);
     try {
-      // Get active filter types
-      const activeFilters: string[] = [];
-      if (poiFilters.includeGasStations) activeFilters.push('gas_station');
-      if (poiFilters.includeRestaurants) activeFilters.push('restaurant', 'fast_food', 'cafe');
-      if (poiFilters.includeHotels) activeFilters.push('hotel');
-      if (poiFilters.includeCamping) activeFilters.push('camping');
-      if (poiFilters.includeHospitals) activeFilters.push('hospital');
-      if (poiFilters.includeTollBooths) activeFilters.push('toll_booth');
-      if (poiFilters.includeCities) activeFilters.push('city');
-      if (poiFilters.includeTowns) activeFilters.push('town');
-      if (poiFilters.includeVillages) activeFilters.push('village');
-
       const response = await fetch(`${API_URL}/export/pdf`, {
         method: 'POST',
         headers: {
@@ -463,24 +451,13 @@ export default function MapPage() {
       {/* Mobile-First Header - Sticky */}
       <header className="sticky top-0 z-20 bg-white border-b border-gray-200 shadow-sm">
         <div className="px-4 py-3">
-          <div className="flex items-center justify-between mb-2">
-            <Link
-              href="/search"
-              className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-700 text-sm font-medium"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Novo Mapa
-            </Link>
-            <button
-              onClick={() => setIsAdminMenuOpen(true)}
-              className="inline-flex items-center gap-1 text-gray-600 hover:text-gray-800 text-sm font-medium"
-            >
-              <Menu className="h-5 w-5" />
-              Menu
-            </button>
-          </div>
           <div>
-            <p className="text-sm text-gray-500">Rota</p>
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-gray-500">Rota</p>
+              <span className="text-sm font-medium text-zinc-900 bg-zinc-100 px-2 py-0.5 rounded-full">
+                {data.total_distance_km ? data.total_distance_km.toFixed(1) : '0.0'} km
+              </span>
+            </div>
             <p className="text-base font-semibold text-gray-900 truncate">
               {data.origin} → {data.destination}
             </p>
@@ -491,14 +468,7 @@ export default function MapPage() {
       {/* Main Content - POI Feed */}
       <main className="px-4 py-4">
         {/* Route Summary Card */}
-        <div className="mb-4 p-4 bg-white rounded-lg shadow-sm border border-gray-200">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-gray-600">Distância Total</span>
-            <span className="font-bold text-blue-600 text-lg">
-              {data.total_distance_km ? data.total_distance_km.toFixed(1) : '0.0'} km
-            </span>
-          </div>
-        </div>
+
 
         {/* POI Filters */}
         <POIFilters
@@ -512,6 +482,16 @@ export default function MapPage() {
           pois={filteredPOIs}
           emptyMessage="Nenhum ponto de interesse encontrado com os filtros selecionados"
         />
+
+        {/* Debug Link */}
+        <div className="mt-8 pb-8 text-center">
+          <button
+            onClick={() => setIsAdminMenuOpen(true)}
+            className="text-xs text-gray-400 hover:text-gray-600 underline"
+          >
+            debug
+          </button>
+        </div>
       </main>
 
       {/* Admin/Debug Slide-out Menu */}
@@ -638,32 +618,6 @@ export default function MapPage() {
                     Ver Segmentos da Rota
                   </Button>
                 </Link>
-              </div>
-
-              {/* Quick Actions */}
-              <div className="pt-6 border-t border-gray-200">
-                <div className="space-y-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      router.push('/search');
-                      setIsAdminMenuOpen(false);
-                    }}
-                    className="w-full"
-                  >
-                    Criar Novo Mapa
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      router.push('/maps');
-                      setIsAdminMenuOpen(false);
-                    }}
-                    className="w-full"
-                  >
-                    Ver Mapas Salvos
-                  </Button>
-                </div>
               </div>
 
               {/* Info Box */}

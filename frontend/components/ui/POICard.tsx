@@ -1,32 +1,37 @@
 import React from 'react';
 import { POI, Milestone } from '@/lib/types';
+import {
+  Fuel, Utensils, Coffee, Bed, Tent, Hospital, Ticket,
+  Building2, Home, MapPin, Shield, Signpost, LogOut,
+  UtensilsCrossed, ParkingCircle, Landmark
+} from 'lucide-react';
 
 interface POICardProps {
   poi: POI | Milestone;
   onClick?: () => void;
 }
 
-// Helper function to get emoji for POI type
-function getPoiEmoji(type: string): string {
-  const emojiMap: Record<string, string> = {
-    gas_station: '⛽',
-    restaurant: '🍽️',
-    fast_food: '🍔',
-    cafe: '☕',
-    hotel: '🏨',
-    camping: '⛺',
-    hospital: '🏥',
-    toll_booth: '🛣️',
-    rest_area: '🅿️',
-    city: '🏙️',
-    town: '🏘️',
-    village: '🏡',
-    police: '👮',
-    intersection: '🔀',
-    exit: '🚪',
-    other: '📍'
+// Helper function to get icon for POI type
+function getPoiIcon(type: string): React.ElementType {
+  const iconMap: Record<string, React.ElementType> = {
+    gas_station: Fuel,
+    restaurant: Utensils,
+    fast_food: UtensilsCrossed,
+    cafe: Coffee,
+    hotel: Bed,
+    camping: Tent,
+    hospital: Hospital,
+    toll_booth: Ticket,
+    rest_area: ParkingCircle,
+    city: Building2,
+    town: Home,
+    village: Home,
+    police: Shield,
+    intersection: Signpost,
+    exit: LogOut,
+    other: MapPin
   };
-  return emojiMap[type] || '📍';
+  return iconMap[type] || MapPin;
 }
 
 // Helper function to get display name for POI type
@@ -108,7 +113,7 @@ function getFriendlyPoiName(name: string | null | undefined, type: string): stri
 
 export function POICard({ poi, onClick }: POICardProps) {
   const type = 'type' in poi ? poi.type : (poi as Milestone).type;
-  const emoji = getPoiEmoji(type);
+  const Icon = getPoiIcon(type);
   const typeName = getPoiTypeName(type);
 
   // Check if POI requires detour (has junction information)
@@ -126,43 +131,44 @@ export function POICard({ poi, onClick }: POICardProps) {
       className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer active:scale-[0.98] transition-transform"
       onClick={onClick}
     >
-        <div className="flex items-start gap-3">
-          {/* Icon/Emoji Section */}
-          <div className="flex-shrink-0 text-4xl" role="img" aria-label={typeName}>
-            {emoji}
+      <div className="flex items-start gap-3">
+        {/* Icon Section */}
+        <div className="flex-shrink-0 w-10 h-10 rounded-full bg-zinc-100 flex items-center justify-center text-zinc-600">
+          <Icon className="w-5 h-5" />
+        </div>
+
+        {/* Main Content Section */}
+        <div className="flex-1 min-w-0">
+          {/* Header: Distance + Type */}
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <div className="flex items-center gap-2">
+              <span className="text-lg font-bold text-zinc-900">
+                {kmFormatted} km
+              </span>
+              {hasJunction && (
+                <span className="text-xs text-zinc-500 flex items-center gap-1">
+                  <span>{directionArrow}</span>
+                  <span>{((poi.distance_from_road_meters || 0) / 1000).toFixed(1)}km</span>
+                </span>
+              )}
+            </div>
+            <span className="text-xs font-medium text-zinc-500 uppercase tracking-wide">
+              {typeName}
+            </span>
           </div>
 
-          {/* Main Content Section */}
-          <div className="flex-1 min-w-0">
-            {/* Header: Distance + Type */}
-            <div className="flex items-center justify-between gap-2 mb-1">
-              <div className="flex items-center gap-2">
-                <span className="text-lg font-bold text-blue-600">
-                  {kmFormatted} km
-                </span>
-                {hasJunction && (
-                  <span className="text-xs text-gray-600 flex items-center gap-1">
-                    <span>{directionArrow}</span>
-                    <span>{((poi.distance_from_road_meters || 0) / 1000).toFixed(1)}km</span>
-                  </span>
-                )}
-              </div>
-              <span className="text-sm text-gray-500">
-                {typeName}
-              </span>
-            </div>
+          {/* POI Name */}
+          <h3 className="text-base font-semibold text-zinc-800 mb-1 truncate">
+            {getFriendlyPoiName(poi.name, type)}
+          </h3>
 
-            {/* POI Name */}
-            <h3 className="text-base font-semibold text-gray-900 mb-1 truncate">
-              {getFriendlyPoiName(poi.name, type)}
-            </h3>
-
-            {/* City */}
-            <div className="text-sm text-gray-600 truncate">
-              {poi.city || '-'}
-            </div>
+          {/* City */}
+          <div className="text-sm text-zinc-500 truncate flex items-center gap-1">
+            <MapPin className="w-3 h-3" />
+            {poi.city || '-'}
           </div>
         </div>
+      </div>
     </div>
   );
 }
