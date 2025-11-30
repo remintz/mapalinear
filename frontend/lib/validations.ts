@@ -1,8 +1,5 @@
 import { z } from 'zod';
 
-// POI Provider enum values
-export const poiProviderValues = ['osm', 'google'] as const;
-
 // Search form validation schema
 export const searchFormSchema = z.object({
   origin: z
@@ -17,7 +14,6 @@ export const searchFormSchema = z.object({
     .number()
     .min(1, 'Distância deve ser maior que 0')
     .max(20, 'Distância máxima: 20km'),
-  poiProvider: z.enum(poiProviderValues),
 });
 
 export type SearchFormData = z.infer<typeof searchFormSchema>;

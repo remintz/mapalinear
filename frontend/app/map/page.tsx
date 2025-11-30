@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Button, Card, CardContent } from '@/components/ui';
-import { MapPin, ArrowLeft, Bug, Loader2, Menu, Download, X, Fuel, Utensils, Bed, Tent, Hospital, Ticket, Building2, Home, FileText, ParkingCircle } from 'lucide-react';
+import { MapPin, ArrowLeft, Bug, Loader2, Menu, Download, X, Fuel, Utensils, Bed, Tent, Hospital, Ticket, Building2, Home, FileText } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { POIFeed } from '@/components/ui/POIFeed';
@@ -34,7 +34,7 @@ export default function MapPage() {
 
   // Active filters stored as a Set of filter IDs
   const [activeFilters, setActiveFilters] = useState<Set<string>>(
-    new Set(['gas_station', 'restaurant', 'hotel', 'camping', 'hospital', 'toll_booth', 'rest_area', 'city', 'town', 'village'])
+    new Set(['gas_station', 'restaurant', 'hotel', 'camping', 'hospital', 'toll_booth', 'city', 'town', 'village'])
   );
 
   const [API_URL, setAPI_URL] = useState<string | null>(null);
@@ -179,7 +179,6 @@ export default function MapPage() {
       { id: 'camping', label: 'Camping', icon: Tent },
       { id: 'hospital', label: 'Hospitais', icon: Hospital },
       { id: 'toll_booth', label: 'Pedágios', icon: Ticket },
-      { id: 'rest_area', label: 'Áreas de Descanso', icon: ParkingCircle },
       { id: 'city', label: 'Cidades', icon: Building2 },
       { id: 'town', label: 'Vilas', icon: Home },
       { id: 'village', label: 'Povoados', icon: Home },

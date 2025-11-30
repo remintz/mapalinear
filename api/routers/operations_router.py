@@ -29,7 +29,7 @@ async def start_async_linear_map(request: LinearMapRequest, background_tasks: Ba
     """
     import logging
     logger = logging.getLogger(__name__)
-    logger.info(f"🔍 Requisição recebida: origin={request.origin}, destination={request.destination}, poi_provider={request.poi_provider}")
+    logger.info(f"🔍 Requisição recebida: origin={request.origin}, destination={request.destination}")
 
     # Criar uma nova operação
     operation = AsyncService.create_operation("linear_map")
@@ -45,8 +45,7 @@ async def start_async_linear_map(request: LinearMapRequest, background_tasks: Ba
                 include_cities=request.include_cities,
                 max_distance_from_road=request.max_distance_from_road,
                 min_distance_from_origin_km=request.min_distance_from_origin_km,
-                progress_callback=progress_callback,
-                poi_provider=request.poi_provider
+                progress_callback=progress_callback
             )
             
             # Converter para dicionário para armazenamento

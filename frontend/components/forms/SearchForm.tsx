@@ -3,7 +3,7 @@
 import React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Search, MapPin } from 'lucide-react';
+import { Search, MapPin, Settings } from 'lucide-react';
 import { Button, Input, Card, CardHeader, CardTitle, CardContent } from '@/components/ui';
 import { searchFormSchema, SearchFormData } from '@/lib/validations';
 
@@ -36,7 +36,6 @@ export function SearchForm({
       origin: '',
       destination: '',
       maxDistance: 5,
-      poiProvider: 'osm',
     },
   });
 
@@ -138,8 +137,8 @@ export function SearchForm({
                   </button>
                   <div className="invisible group-hover:visible absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg whitespace-nowrap z-10">
                     <div className="max-w-xs">
-                      Define a que distância da rodovia buscar por postos, restaurantes e pedágios.
-                      Valores menores (1-2km) mostram apenas POIs muito próximos.
+                      Define a que distância da rodovia buscar por postos, restaurantes e pedágios. 
+                      Valores menores (1-2km) mostram apenas POIs muito próximos. 
                       Valores maiores (10-20km) incluem estabelecimentos em centros urbanos próximos.
                     </div>
                     <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
@@ -163,61 +162,6 @@ export function SearchForm({
             {errors.maxDistance && (
               <p className="text-sm text-red-600">{errors.maxDistance.message}</p>
             )}
-          </div>
-
-          {/* POI Provider Selection */}
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-gray-700">
-              <span className="flex items-center gap-2">
-                Fonte dos pontos de interesse
-                <div className="group relative">
-                  <button type="button" className="text-gray-400 hover:text-gray-600">
-                    <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-                    </svg>
-                  </button>
-                  <div className="invisible group-hover:visible absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg z-10">
-                    <div className="max-w-xs whitespace-normal">
-                      <strong>OpenStreetMap:</strong> Dados gratuitos da comunidade, sem avaliações.<br/>
-                      <strong>Google Places:</strong> Inclui avaliações e número de reviews dos estabelecimentos.
-                    </div>
-                    <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
-                  </div>
-                </div>
-              </span>
-            </label>
-            <div className="flex gap-2">
-              <label
-                className={`flex-1 cursor-pointer ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-              >
-                <input
-                  type="radio"
-                  {...register('poiProvider')}
-                  value="osm"
-                  disabled={isLoading}
-                  className="sr-only peer"
-                />
-                <div className="px-4 py-3 border-2 rounded-lg text-center transition-all peer-checked:border-blue-500 peer-checked:bg-blue-50 hover:border-gray-400">
-                  <div className="font-medium text-gray-900">OpenStreetMap</div>
-                  <div className="text-xs text-gray-500">Gratuito</div>
-                </div>
-              </label>
-              <label
-                className={`flex-1 cursor-pointer ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-              >
-                <input
-                  type="radio"
-                  {...register('poiProvider')}
-                  value="google"
-                  disabled={isLoading}
-                  className="sr-only peer"
-                />
-                <div className="px-4 py-3 border-2 rounded-lg text-center transition-all peer-checked:border-blue-500 peer-checked:bg-blue-50 hover:border-gray-400">
-                  <div className="font-medium text-gray-900">Google Places</div>
-                  <div className="text-xs text-gray-500">Com avaliações</div>
-                </div>
-              </label>
-            </div>
           </div>
 
           {/* Submit Button */}

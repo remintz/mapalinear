@@ -2,10 +2,6 @@ import uvicorn
 import os
 import signal
 import threading
-from dotenv import load_dotenv
-
-# Carregar variáveis de ambiente do .env
-load_dotenv()
 
 from api.config.logging_setup import setup_logging
 

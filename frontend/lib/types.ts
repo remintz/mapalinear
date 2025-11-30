@@ -26,11 +26,6 @@ export interface POI {
   junction_distance_km?: number;
   junction_coordinates?: { latitude: number; longitude: number };
   requires_detour?: boolean;
-  // Google Places data
-  google_place_id?: string;
-  google_rating?: number;
-  google_review_count?: number;
-  google_maps_url?: string;
 }
 
 // Enums
@@ -45,11 +40,6 @@ export enum POIType {
   CAMPING = 'camping',
   HOSPITAL = 'hospital',
   REST_AREA = 'rest_area'
-}
-
-export enum POIProvider {
-  OSM = 'osm',
-  GOOGLE = 'google'
 }
 
 // Export types
@@ -112,11 +102,6 @@ export interface Milestone {
   junction_distance_km?: number;
   junction_coordinates?: { latitude: number; longitude: number };
   requires_detour?: boolean;
-  // Google Places data
-  google_place_id?: string;
-  google_rating?: number;
-  google_review_count?: number;
-  google_maps_url?: string;
 }
 
 export enum MilestoneType {
@@ -140,8 +125,7 @@ export enum MilestoneType {
 export interface RouteSearchRequest {
   origin: string;
   destination: string;
-  max_distance_from_road?: number;
-  poi_provider?: POIProvider;
+  max_distance?: number;
 }
 
 export interface RouteSearchResponse {
