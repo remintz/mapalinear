@@ -334,15 +334,15 @@ def export_to_pdf(
 ) -> bytes:
     """
     Exporta lista de POIs para formato PDF.
-    
+
     Args:
         route_response: Resposta completa da rota linear
         output_file: Caminho opcional para salvar o arquivo
         poi_types_filter: Lista opcional de tipos de POI para incluir no PDF
-        
+
     Returns:
         Bytes do arquivo PDF gerado
-        
+
     O PDF contém uma lista formatada de todos os POIs da rota com:
     - Nome do POI
     - Tipo
@@ -354,28 +354,68 @@ def export_to_pdf(
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import cm
-    from reportlab.lib.enums import TA_LEFT, TA_CENTER
+    from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
     from reportlab.lib import colors
     from reportlab.platypus import (
         SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
     )
-    
+    from reportlab.platypus.doctemplate import PageTemplate, BaseDocTemplate, Frame
+    from reportlab.platypus.tableofcontents import TableOfContents
+
     # Criar buffer de memória para o PDF
     buffer = BytesIO()
-    
-    # Configurar documento PDF
+
+    # Informações para header/footer
+    route_info = f"{route_response.origin} → {route_response.destination}"
+    current_year = datetime.now().year
+
+    def add_header_footer(canvas, doc):
+        """Adiciona header e footer em cada página."""
+        canvas.saveState()
+
+        # Header
+        canvas.setFont('Helvetica-Bold', 10)
+        canvas.setFillColor(colors.HexColor('#2563eb'))
+        canvas.drawString(2*cm, A4[1] - 1.2*cm, "OraPOIS")
+
+        canvas.setFont('Helvetica', 8)
+        canvas.setFillColor(colors.HexColor('#6b7280'))
+        canvas.drawRightString(A4[0] - 2*cm, A4[1] - 1.2*cm, route_info)
+
+        # Linha separadora do header
+        canvas.setStrokeColor(colors.HexColor('#e5e7eb'))
+        canvas.setLineWidth(0.5)
+        canvas.line(2*cm, A4[1] - 1.5*cm, A4[0] - 2*cm, A4[1] - 1.5*cm)
+
+        # Footer
+        canvas.setFont('Helvetica', 8)
+        canvas.setFillColor(colors.HexColor('#9ca3af'))
+
+        # Copyright à esquerda
+        canvas.drawString(2*cm, 1*cm, f"© {current_year} OraPOIS - Seu auxílio nas estradas")
+
+        # Número da página à direita
+        page_num = canvas.getPageNumber()
+        canvas.drawRightString(A4[0] - 2*cm, 1*cm, f"Página {page_num}")
+
+        # Linha separadora do footer
+        canvas.line(2*cm, 1.4*cm, A4[0] - 2*cm, 1.4*cm)
+
+        canvas.restoreState()
+
+    # Configurar documento PDF com margens ajustadas para header/footer
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
         rightMargin=2*cm,
         leftMargin=2*cm,
-        topMargin=2*cm,
-        bottomMargin=2*cm
+        topMargin=2.5*cm,  # Mais espaço para header
+        bottomMargin=2*cm   # Mais espaço para footer
     )
-    
+
     # Estilos
     styles = getSampleStyleSheet()
-    
+
     # Estilo personalizado para título
     title_style = ParagraphStyle(
         'CustomTitle',
@@ -386,7 +426,7 @@ def export_to_pdf(
         alignment=TA_CENTER,
         fontName='Helvetica-Bold'
     )
-    
+
     # Estilo para subtítulo
     subtitle_style = ParagraphStyle(
         'CustomSubtitle',
@@ -396,7 +436,7 @@ def export_to_pdf(
         spaceAfter=20,
         alignment=TA_CENTER
     )
-    
+
     # Estilo para cabeçalhos de seção
     section_style = ParagraphStyle(
         'SectionHeader',
@@ -407,17 +447,17 @@ def export_to_pdf(
         spaceBefore=20,
         fontName='Helvetica-Bold'
     )
-    
+
     # Elementos do documento
     elements = []
-    
+
     # Título
     title = Paragraph(
         f"Lista de Pontos de Interesse",
         title_style
     )
     elements.append(title)
-    
+
     # Subtítulo com informações da rota
     subtitle = Paragraph(
         f"{route_response.origin} → {route_response.destination}<br/>"
@@ -426,12 +466,13 @@ def export_to_pdf(
     )
     elements.append(subtitle)
     elements.append(Spacer(1, 0.5*cm))
-    
+
     # Filtrar POIs se necessário
     milestones = route_response.milestones
     if poi_types_filter:
-        milestones = [m for m in milestones if str(m.type) in poi_types_filter]
-    
+        # Usar m.type.value para comparar com o filtro (enum -> string)
+        milestones = [m for m in milestones if (m.type.value if hasattr(m.type, 'value') else str(m.type)) in poi_types_filter]
+
     # Informação sobre POIs
     info_text = Paragraph(
         f"Total de POIs: {len(milestones)}<br/>"
@@ -452,105 +493,175 @@ def export_to_pdf(
         "lodging": "Hospedagem",
         "camping": "Camping",
         "hospital": "Hospital",
+        "rest_area": "Área de Descanso",
         "city": "Cidade",
         "town": "Vila",
         "village": "Povoado",
+        "police": "Polícia",
+        "intersection": "Cruzamento",
+        "exit": "Saída",
         "other": "Outro"
     }
+
+    # Nomes genéricos do OSM que devem ser substituídos (igual ao frontend)
+    generic_names = [
+        'fuel', 'gas_station', 'restaurant', 'cafe', 'fast_food', 'food_court', 'hotel',
+        'camping', 'hospital', 'toll_booth', 'rest_area', 'city', 'town',
+        'village', 'police', 'motel', 'guest_house', 'hostel', 'pharmacy',
+        'atm', 'bank', 'parking', 'post_office', 'convenience', 'supermarket'
+    ]
+
+    # Nomes amigáveis para tipos de POI genéricos
+    friendly_names = {
+        'fuel': 'Posto de Combustível',
+        'gas_station': 'Posto de Combustível',
+        'restaurant': 'Restaurante',
+        'cafe': 'Café',
+        'fast_food': 'Lanchonete',
+        'food_court': 'Praça de Alimentação',
+        'hotel': 'Hotel',
+        'motel': 'Motel',
+        'guest_house': 'Pousada',
+        'hostel': 'Hostel',
+        'camping': 'Área de Camping',
+        'hospital': 'Hospital',
+        'pharmacy': 'Farmácia',
+        'toll_booth': 'Pedágio',
+        'rest_area': 'Área de Descanso',
+        'city': 'Cidade',
+        'town': 'Vila',
+        'village': 'Povoado',
+        'police': 'Delegacia',
+        'atm': 'Caixa Eletrônico',
+        'bank': 'Banco',
+        'parking': 'Estacionamento',
+        'post_office': 'Correios',
+        'convenience': 'Conveniência',
+        'supermarket': 'Supermercado'
+    }
+
+    def get_friendly_poi_name(name: str, poi_type_str: str) -> str:
+        """Converte nomes genéricos para nomes amigáveis (igual ao frontend)."""
+        if not name or name.strip() == '':
+            return friendly_names.get(poi_type_str, type_display.get(poi_type_str, poi_type_str.replace('_', ' ').title()))
+
+        name_lower = name.lower().strip()
+        if name_lower in generic_names:
+            return friendly_names.get(name_lower, friendly_names.get(poi_type_str, type_display.get(poi_type_str, poi_type_str.replace('_', ' ').title())))
+
+        return name
 
     # Criar tabela única com todos os POIs
     table_data = []
 
-    # Cabeçalho da tabela
+    # Cabeçalho da tabela (estilo leve)
+    header_style = ParagraphStyle('TableHeader', parent=styles['Normal'], textColor=colors.HexColor('#374151'), fontName='Helvetica-Bold', fontSize=9)
     table_data.append([
-        Paragraph('<b>KM</b>', styles['Normal']),
-        Paragraph('<b>Tipo</b>', styles['Normal']),
-        Paragraph('<b>Nome</b>', styles['Normal']),
-        Paragraph('<b>Detalhes</b>', styles['Normal'])
+        Paragraph('KM', header_style),
+        Paragraph('Tipo', header_style),
+        Paragraph('Nome', header_style),
+        Paragraph('Cidade', header_style)
     ])
 
-    # Ordenar todos os POIs por distância
-    milestones_sorted = sorted(milestones, key=lambda p: p.distance_from_origin_km)
+    # Função para obter a distância de exibição (igual ao frontend)
+    def get_display_distance(poi):
+        """Retorna junction_distance_km para POIs com desvio, senão distance_from_origin_km."""
+        has_junction = (
+            hasattr(poi, 'requires_detour') and poi.requires_detour and
+            hasattr(poi, 'junction_distance_km') and poi.junction_distance_km is not None
+        )
+        if has_junction:
+            return poi.junction_distance_km
+        return poi.distance_from_origin_km
+
+    # Ordenar todos os POIs por distância de exibição (igual ao frontend)
+    milestones_sorted = sorted(milestones, key=lambda p: get_display_distance(p))
+
+    # Estilo para células
+    cell_style = ParagraphStyle('TableCell', parent=styles['Normal'], fontSize=9, leading=11)
+    cell_style_small = ParagraphStyle('TableCellSmall', parent=styles['Normal'], fontSize=8, textColor=colors.HexColor('#6b7280'))
 
     for poi in milestones_sorted:
-        # Distância
-        distance = Paragraph(
-            f"<b>{poi.distance_from_origin_km:.1f}</b>",
-            styles['Normal']
-        )
-
         # Tipo do POI - extrair o valor do enum corretamente
         if hasattr(poi.type, 'value'):
             poi_type_str = poi.type.value
         else:
             poi_type_str = str(poi.type).lower()
 
+        # Verificar se POI requer desvio
+        has_junction = (
+            hasattr(poi, 'requires_detour') and poi.requires_detour and
+            hasattr(poi, 'junction_distance_km') and poi.junction_distance_km is not None
+        )
+
+        # Distância de exibição (igual ao frontend)
+        display_distance = get_display_distance(poi)
+
+        # Formatar distância com indicação de desvio na mesma linha
+        if has_junction:
+            detour_km = (poi.distance_from_road_meters or 0) / 1000
+            side_arrow = '←' if getattr(poi, 'side', None) == 'left' else '→' if getattr(poi, 'side', None) == 'right' else '→'
+            distance = Paragraph(f"<b>{display_distance:.1f}</b> <font size='7' color='#9ca3af'>{side_arrow} {detour_km:.1f}</font>", cell_style)
+        else:
+            distance = Paragraph(f"<b>{display_distance:.1f}</b>", cell_style)
+
         type_label = type_display.get(poi_type_str, poi_type_str.replace('_', ' ').title())
-        poi_type = Paragraph(type_label, styles['Normal'])
+        poi_type = Paragraph(type_label, cell_style)
 
-        # Nome do POI
-        name = Paragraph(poi.name or 'Sem nome', styles['Normal'])
+        # Nome do POI - usar nome amigável (igual ao frontend)
+        friendly_name = get_friendly_poi_name(poi.name, poi_type_str)
+        name = Paragraph(friendly_name, cell_style)
 
-        # Detalhes adicionais
-        details = []
-        if hasattr(poi, 'brand') and poi.brand:
-            details.append(f"<b>Marca:</b> {poi.brand}")
-        if hasattr(poi, 'operator') and poi.operator:
-            details.append(f"<b>Operador:</b> {poi.operator}")
-        if hasattr(poi, 'opening_hours') and poi.opening_hours:
-            details.append(f"<b>Horário:</b> {poi.opening_hours}")
+        # Cidade (sem bullet)
+        city_text = poi.city if hasattr(poi, 'city') and poi.city else '-'
+        city = Paragraph(city_text, cell_style)
 
-        details_text = '<br/>'.join(details) if details else '-'
-        details_para = Paragraph(details_text, styles['Normal'])
+        table_data.append([distance, poi_type, name, city])
 
-        table_data.append([distance, poi_type, name, details_para])
-
-    # Criar e estilizar tabela
-    table = Table(table_data, colWidths=[2*cm, 3.5*cm, 5.5*cm, 6*cm])
+    # Criar e estilizar tabela com layout leve e moderno
+    table = Table(table_data, colWidths=[2.5*cm, 2.5*cm, 7*cm, 5*cm], repeatRows=1)
     table.setStyle(TableStyle([
-        # Cabeçalho
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2563eb')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        # Cabeçalho - estilo leve
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f9fafb')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#374151')),
         ('ALIGN', (0, 0), (-1, 0), 'LEFT'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 10),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
-        ('TOPPADDING', (0, 0), (-1, 0), 10),
+        ('FONTSIZE', (0, 0), (-1, 0), 9),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+        ('TOPPADDING', (0, 0), (-1, 0), 8),
 
         # Células de dados
         ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
         ('FONTSIZE', (0, 1), (-1, -1), 9),
-        ('ALIGN', (0, 1), (0, -1), 'CENTER'),  # Centralizar coluna KM
-        ('VALIGN', (0, 1), (-1, -1), 'TOP'),
-        ('TOPPADDING', (0, 1), (-1, -1), 8),
-        ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
-        ('LEFTPADDING', (0, 1), (-1, -1), 6),
-        ('RIGHTPADDING', (0, 1), (-1, -1), 6),
+        ('VALIGN', (0, 1), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 1), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+        ('LEFTPADDING', (0, 0), (-1, -1), 8),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 8),
 
-        # Bordas
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#d1d5db')),
-
-        # Linhas alternadas
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f3f4f6')])
+        # Bordas leves - apenas linhas horizontais
+        ('LINEBELOW', (0, 0), (-1, 0), 1, colors.HexColor('#e5e7eb')),
+        ('LINEBELOW', (0, 1), (-1, -2), 0.5, colors.HexColor('#f3f4f6')),
+        ('LINEBELOW', (0, -1), (-1, -1), 1, colors.HexColor('#e5e7eb')),
     ]))
 
     elements.append(table)
-    
-    # Construir PDF
-    doc.build(elements)
-    
+
+    # Construir PDF com header/footer em cada página
+    doc.build(elements, onFirstPage=add_header_footer, onLaterPages=add_header_footer)
+
     # Obter bytes do PDF
     pdf_bytes = buffer.getvalue()
     buffer.close()
-    
+
     # Salvar arquivo se especificado
     if output_file:
         output_path = Path(output_file)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         with open(output_path, 'wb') as f:
             f.write(pdf_bytes)
-        
+
         print(f"📄 PDF exportado para: {output_path}")
-    
+
     return pdf_bytes

@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Button, Card, CardContent } from '@/components/ui';
-import { MapPin, ArrowLeft, Bug, Loader2, Menu, Download, X, Fuel, Utensils, Bed, Tent, Hospital, Ticket, Building2, Home } from 'lucide-react';
+import { MapPin, ArrowLeft, Bug, Loader2, Menu, Download, X, Fuel, Utensils, Bed, Tent, Hospital, Ticket, Building2, Home, FileText } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { POIFeed } from '@/components/ui/POIFeed';
@@ -271,42 +271,39 @@ export default function MapPage() {
     }
   };
 
-  // Download PDF function
-  const downloadPDF = async (routeData: any) => {
+  // Download PDF function - uses direct endpoint with mapId
+  const downloadPDF = async () => {
+    if (!mapId) {
+      toast.error('Mapa não está salvo. Salve o mapa primeiro.');
+      return;
+    }
+
     setIsExporting(true);
     try {
-      const response = await fetch(`${API_URL}/export/pdf`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          origin: routeData.origin,
-          destination: routeData.destination,
-          total_distance_km: routeData.total_distance_km,
-          segments: routeData.segments || [],
-          pois: filteredPOIs
-        }),
-      });
+      // Build types filter from active filters
+      const typesParam = Array.from(activeFilters).join(',');
+      const url = `${API_URL}/maps/${mapId}/pdf${typesParam ? `?types=${typesParam}` : ''}`;
+
+      const response = await fetch(url);
 
       if (!response.ok) {
         throw new Error('Erro ao exportar PDF');
       }
 
       const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
+      const blobUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url;
+      a.href = blobUrl;
 
       const contentDisposition = response.headers.get('Content-Disposition');
       const filename = contentDisposition
         ? contentDisposition.split('filename=')[1]?.replace(/"/g, '')
-        : `pois_${routeData.origin.replace(/[^a-zA-Z0-9]/g, '_')}_${routeData.destination.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+        : `pois_mapa.pdf`;
 
       a.download = filename;
       document.body.appendChild(a);
       a.click();
-      window.URL.revokeObjectURL(url);
+      window.URL.revokeObjectURL(blobUrl);
       document.body.removeChild(a);
 
       toast.success('PDF baixado com sucesso!');
@@ -458,10 +455,24 @@ export default function MapPage() {
                 {data.origin} → {data.destination}
               </p>
             </div>
-            <div className="flex items-center gap-3 ml-4">
+            <div className="flex items-center gap-2 ml-4">
               <span className="text-sm font-medium text-zinc-900 bg-zinc-100 px-3 py-1 rounded-full whitespace-nowrap">
                 {data.total_distance_km ? data.total_distance_km.toFixed(1) : '0.0'} km
               </span>
+              {/* PDF Export Button */}
+              <button
+                onClick={() => downloadPDF()}
+                disabled={isExporting || !mapId}
+                className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900 px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors border border-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                title={mapId ? "Exportar PDF" : "Salve o mapa para exportar PDF"}
+              >
+                {isExporting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <FileText className="h-4 w-4" />
+                )}
+                <span className="hidden sm:inline">PDF</span>
+              </button>
               {/* Desktop: Show options button in header */}
               <button
                 onClick={() => setIsAdminMenuOpen(true)}
@@ -570,20 +581,6 @@ export default function MapPage() {
                     </svg>
                     GPX (GPS, apps)
                   </Button>
-                  <Button
-                    onClick={() => {
-                      downloadPDF(data);
-                      setIsAdminMenuOpen(false);
-                    }}
-                    disabled={isExporting}
-                    className="w-full justify-start"
-                    variant="outline"
-                  >
-                    <svg className="h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                    </svg>
-                    PDF (lista filtrada)
-                  </Button>
                 </div>
               </div>
 
@@ -644,7 +641,6 @@ export default function MapPage() {
                 <ul className="text-xs text-blue-700 space-y-1">
                   <li>• <strong>GeoJSON:</strong> Importar no uMap para visualização interativa</li>
                   <li>• <strong>GPX:</strong> Usar em apps de navegação GPS</li>
-                  <li>• <strong>PDF:</strong> Imprimir lista de pontos de interesse</li>
                 </ul>
               </div>
             </div>

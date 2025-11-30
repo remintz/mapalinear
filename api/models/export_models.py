@@ -34,6 +34,12 @@ class ExportPOI(BaseModel):
     brand: Optional[str] = None
     operator: Optional[str] = None
     opening_hours: Optional[str] = None
+    # Campos adicionais para consistência com a tela
+    city: Optional[str] = None
+    requires_detour: Optional[bool] = False
+    junction_distance_km: Optional[float] = None
+    distance_from_road_meters: Optional[float] = None
+    side: Optional[str] = None
 
 
 class ExportSegment(BaseModel):
