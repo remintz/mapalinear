@@ -11,9 +11,11 @@ from api.models.road_models import (
     SavedMapResponse,
     MilestoneType,
     Coordinates,
+    POIProvider,
 )
 from api.providers.base import GeoProvider
 from api.providers.models import GeoLocation, Route, POI, POICategory
+from api.providers.google.poi_provider import get_google_poi_provider
 
 # Usar logger centralizado
 logger = logging.getLogger(__name__)
@@ -131,7 +133,8 @@ class RoadService:
             POICategory.HOTEL,
             POICategory.LODGING,
             POICategory.CAMPING,
-            POICategory.HOSPITAL
+            POICategory.HOSPITAL,
+            POICategory.REST_AREA,
         ])
 
         # Cities/services based on parameter
@@ -179,7 +182,8 @@ class RoadService:
         max_distance_from_road: float = 3000,
         min_distance_from_origin_km: float = 0.0,  # Deprecated - kept for backwards compatibility
         progress_callback: Optional[Callable[[float], None]] = None,
-        segment_length_km: float = 1.0
+        segment_length_km: float = 1.0,
+        poi_provider: POIProvider = POIProvider.OSM
     ) -> LinearMapResponse:
         """
         Generate a linear map of a route between origin and destination.
@@ -226,6 +230,7 @@ class RoadService:
         
         logger.info(f"🛣️ Categorias de milestone solicitadas: "
                    f"{[cat.value for cat in milestone_categories]}")
+        logger.info(f"🔍 Provider de POIs: {poi_provider.value}")
 
         all_milestones = self._run_async_safe(self._find_milestones_from_segments(
             linear_segments,
@@ -233,13 +238,21 @@ class RoadService:
             max_distance_from_road,
             exclude_cities=[origin_city],
             progress_callback=progress_callback,
-            main_route=route
+            main_route=route,
+            poi_provider=poi_provider
         ))
-        
+
         # Step 5: Sort and assign milestones to segments
         all_milestones.sort(key=lambda m: m.distance_from_origin_km)
         self._assign_milestones_to_segments(linear_segments, all_milestones)
-        
+
+        # Log ratings info (only Google provider includes ratings)
+        if poi_provider == POIProvider.GOOGLE:
+            with_rating = sum(1 for m in all_milestones if m.google_rating is not None)
+            logger.info(f"⭐ POIs do Google Places: {with_rating}/{len(all_milestones)} com avaliações")
+        else:
+            logger.info(f"📍 POIs do OpenStreetMap: {len(all_milestones)} (sem avaliações)")
+
         # Create response
         linear_map = LinearMapResponse(
             origin=origin,
@@ -479,6 +492,22 @@ class RoadService:
                 logger.debug(f"🛣️ POI {poi.name} requer desvio: entroncamento no km {junction_distance_km:.1f}, "
                             f"distância pela rota={access_route_distance_km:.2f}km, lado={side}")
 
+        # Extract Google Places data if available (from Google provider POIs)
+        google_place_id = None
+        google_rating = None
+        google_review_count = None
+        google_maps_url = None
+
+        if poi.provider_data:
+            google_place_id = poi.provider_data.get('google_place_id')
+            google_maps_url = poi.provider_data.get('google_maps_url')
+
+        # POI.rating and POI.review_count are set by GooglePlacesPOIProvider
+        if hasattr(poi, 'rating') and poi.rating is not None:
+            google_rating = poi.rating
+        if hasattr(poi, 'review_count') and poi.review_count is not None:
+            google_review_count = poi.review_count
+
         return RoadMilestone(
             id=poi.id,
             name=poi.name,
@@ -499,7 +528,12 @@ class RoadService:
             website=poi.website,
             amenities=poi.amenities,
             quality_score=quality_score,
-            # New fields for junction information
+            # Google Places data (from Google provider or enrichment)
+            google_place_id=google_place_id,
+            google_rating=google_rating,
+            google_review_count=google_review_count,
+            google_maps_url=google_maps_url,
+            # Fields for junction information
             junction_distance_km=junction_distance_km,
             junction_coordinates=junction_coordinates,
             requires_detour=requires_detour
@@ -592,25 +626,42 @@ class RoadService:
         max_distance_from_road: float,
         exclude_cities: Optional[List[Optional[str]]] = None,
         progress_callback: Optional[Callable[[float], None]] = None,
-        main_route: Optional[Route] = None
+        main_route: Optional[Route] = None,
+        poi_provider: POIProvider = POIProvider.OSM
     ) -> List[RoadMilestone]:
         """
         Find POI milestones along the route using segment start/end points.
-        
+
         This method:
         1. Extracts search points from segments
-        2. Searches for POIs around each point
+        2. Searches for POIs around each point (using OSM or Google based on poi_provider)
         3. Converts POIs to milestones
         4. For distant POIs (>500m), calculates junction point
         5. Enriches with city information
         6. Filters excluded cities
-        
+
+        Args:
+            poi_provider: Provider to use for POI search (OSM or Google)
+
         Returns:
             List of RoadMilestone objects
         """
         logger.info(f"🔍 Iniciando busca de milestones usando {len(segments)} segmentos")
         logger.info(f"🔍 Categorias: {[cat.value for cat in categories]}")
-        logger.info(f"🔍 Parâmetros: max_distance={max_distance_from_road}m")
+        logger.info(f"🔍 Parâmetros: max_distance={max_distance_from_road}m, provider={poi_provider.value}")
+
+        # Select the appropriate POI provider
+        if poi_provider == POIProvider.GOOGLE:
+            google_provider = get_google_poi_provider()
+            if not google_provider.is_configured:
+                logger.warning("⚠️ Google Places API não configurada, usando OSM como fallback")
+                use_google = False
+            else:
+                use_google = True
+                logger.info("🔍 Usando Google Places API para busca de POIs")
+        else:
+            use_google = False
+            logger.info("🔍 Usando OpenStreetMap para busca de POIs")
         
         # Normalize excluded cities
         exclude_cities_filtered = [city.strip().lower() for city in (exclude_cities or []) if city]
@@ -639,13 +690,21 @@ class RoadService:
             total_requests += 1
             
             try:
-                # Search for POIs around this point
-                pois = await self.geo_provider.search_pois(
-                    location=GeoLocation(latitude=point[0], longitude=point[1]),
-                    radius=max_distance_from_road,
-                    categories=categories,
-                    limit=20
-                )
+                # Search for POIs around this point using the selected provider
+                if use_google:
+                    pois = await google_provider.search_pois(
+                        location=GeoLocation(latitude=point[0], longitude=point[1]),
+                        radius=max_distance_from_road,
+                        categories=categories,
+                        limit=20
+                    )
+                else:
+                    pois = await self.geo_provider.search_pois(
+                        location=GeoLocation(latitude=point[0], longitude=point[1]),
+                        radius=max_distance_from_road,
+                        categories=categories,
+                        limit=20
+                    )
                 
                 logger.info(f"📍 Ponto {i}: {len(pois)} POIs encontrados")
                 consecutive_errors = 0  # Reset on success
@@ -782,18 +841,33 @@ class RoadService:
     def _poi_category_to_milestone_type(self, category: POICategory) -> MilestoneType:
         """
         Convert POI category to milestone type.
+
+        This normalizes POI categories from different providers (OSM, Google)
+        into a consistent set of milestone types for display and filtering.
         """
         mapping = {
+            # Fuel/Gas
             POICategory.GAS_STATION: MilestoneType.GAS_STATION,
             POICategory.FUEL: MilestoneType.GAS_STATION,
+            # Food
             POICategory.RESTAURANT: MilestoneType.RESTAURANT,
             POICategory.FOOD: MilestoneType.RESTAURANT,
+            # Lodging
             POICategory.HOTEL: MilestoneType.HOTEL,
             POICategory.LODGING: MilestoneType.HOTEL,
             POICategory.CAMPING: MilestoneType.CAMPING,
+            # Health
             POICategory.HOSPITAL: MilestoneType.HOSPITAL,
+            POICategory.PHARMACY: MilestoneType.HOSPITAL,  # Group with hospital for simplicity
+            # Rest/Services
+            POICategory.REST_AREA: MilestoneType.REST_AREA,
             POICategory.SERVICES: MilestoneType.OTHER,
             POICategory.PARKING: MilestoneType.OTHER,
+            # Other categories from Google that we don't specifically display
+            POICategory.BANK: MilestoneType.OTHER,
+            POICategory.ATM: MilestoneType.OTHER,
+            POICategory.SHOPPING: MilestoneType.OTHER,
+            POICategory.TOURIST_ATTRACTION: MilestoneType.OTHER,
         }
         return mapping.get(category, MilestoneType.OTHER)
     

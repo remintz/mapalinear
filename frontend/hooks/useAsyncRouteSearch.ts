@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { apiClient } from '@/lib/api';
-import { RouteSearchRequest, RouteSearchResponse, AsyncOperation, POIType } from '@/lib/types';
+import { RouteSearchRequest, RouteSearchResponse, AsyncOperation, POIType, POIProvider } from '@/lib/types';
 import { SearchFormData } from '@/lib/validations';
 
 interface UseAsyncRouteSearchReturn {
@@ -25,6 +25,7 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
   
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const currentOperationIdRef = useRef<string | null>(null);
+  const currentProviderRef = useRef<string>('osm');
 
   const clearPolling = useCallback(() => {
     if (pollingIntervalRef.current) {
@@ -41,15 +42,16 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
       setProgressPercent(operation.progress_percent);
       setEstimatedCompletion(operation.estimated_completion || null);
       
-      // Update progress message based on percentage and type
+      // Update progress message based on percentage and provider
+      const isGoogle = currentProviderRef.current === 'google';
       if (operation.progress_percent <= 10) {
         setProgressMessage('Iniciando busca...');
       } else if (operation.progress_percent <= 30) {
-        setProgressMessage('Consultando OpenStreetMap...');
+        setProgressMessage(isGoogle ? 'Consultando Google Places...' : 'Consultando OpenStreetMap...');
       } else if (operation.progress_percent <= 60) {
         setProgressMessage('Processando rota...');
       } else if (operation.progress_percent <= 90) {
-        setProgressMessage('Buscando pontos de interesse...');
+        setProgressMessage(isGoogle ? 'Buscando POIs com avaliações...' : 'Buscando pontos de interesse...');
       } else {
         setProgressMessage('Finalizando...');
       }
@@ -101,7 +103,12 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
             website: milestone.website,
             cuisine: milestone.cuisine,
             amenities: milestone.amenities || [],
-            quality_score: milestone.quality_score
+            quality_score: milestone.quality_score,
+            // Google Places data
+            google_place_id: milestone.google_place_id,
+            google_rating: milestone.google_rating,
+            google_review_count: milestone.google_review_count,
+            google_maps_url: milestone.google_maps_url,
           }));
           
           const sanitizedResult = {
@@ -158,13 +165,17 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
       setProgressPercent(0);
       setProgressMessage('Iniciando busca...');
       setEstimatedCompletion(null);
-      
+
+      // Store selected provider for progress messages
+      currentProviderRef.current = formData.poiProvider;
+
       // Convert form data to API request format
       // Note: Backend always searches for all POI types, frontend filters display
       const requestData: RouteSearchRequest = {
         origin: formData.origin,
         destination: formData.destination,
-        max_distance: formData.maxDistance,
+        max_distance_from_road: formData.maxDistance * 1000, // Convert km to meters
+        poi_provider: formData.poiProvider === 'google' ? POIProvider.GOOGLE : POIProvider.OSM,
       };
 
       // Start async operation

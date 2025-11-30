@@ -11,6 +11,12 @@ class Coordinates(BaseModel):
     longitude: float = Field(..., ge=-180, le=180, description="Longitude coordinate")
 
 
+class POIProvider(str, Enum):
+    """Provider for POI data."""
+    OSM = "osm"      # OpenStreetMap (free, no ratings)
+    GOOGLE = "google"  # Google Places (paid, with ratings)
+
+
 class MilestoneType(str, Enum):
     CITY = "city"
     TOWN = "town"
@@ -42,6 +48,10 @@ class LinearMapRequest(BaseModel):
     include_cities: bool = Field(True, description="Incluir cidades como marcos")
     max_distance_from_road: float = Field(1000, description="Distância máxima em metros da estrada para considerar pontos de interesse")
     min_distance_from_origin_km: float = Field(0.0, description="Distância mínima em km da origem (não mais usado - filtramos por cidade de origem)")
+    poi_provider: POIProvider = Field(
+        POIProvider.OSM,
+        description="Provider para busca de POIs: 'osm' (gratuito, sem ratings) ou 'google' (pago, com ratings)"
+    )
 
 
 class RoadMilestone(BaseModel):
@@ -64,6 +74,12 @@ class RoadMilestone(BaseModel):
     cuisine: Optional[str] = Field(None, description="Tipo de culinária (para restaurantes)")
     amenities: List[str] = Field(default_factory=list, description="Comodidades disponíveis (ex: 'wi-fi', 'estacionamento')")
     quality_score: Optional[float] = Field(None, description="Score de qualidade (0.0 a 1.0) baseado na completude dos dados")
+
+    # Dados do Google Places (para avaliações)
+    google_place_id: Optional[str] = Field(None, description="Google Place ID (cache permanente)")
+    google_rating: Optional[float] = Field(None, ge=1, le=5, description="Avaliação média do Google (1-5 estrelas)")
+    google_review_count: Optional[int] = Field(None, ge=0, description="Número de avaliações no Google")
+    google_maps_url: Optional[str] = Field(None, description="URL para abrir no Google Maps")
 
     # Informações de entroncamento (para POIs afastados)
     junction_distance_km: Optional[float] = Field(None, description="Distância do entroncamento/saída desde a origem (para POIs afastados da estrada)")
