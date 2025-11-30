@@ -448,49 +448,67 @@ export default function MapPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Mobile-First Header - Sticky */}
+      {/* Header - Responsive */}
       <header className="sticky top-0 z-20 bg-white border-b border-gray-200 shadow-sm">
-        <div className="px-4 py-3">
-          <div>
-            <div className="flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex-1 min-w-0">
               <p className="text-sm text-gray-500">Rota</p>
-              <span className="text-sm font-medium text-zinc-900 bg-zinc-100 px-2 py-0.5 rounded-full">
+              <p className="text-base font-semibold text-gray-900 truncate">
+                {data.origin} → {data.destination}
+              </p>
+            </div>
+            <div className="flex items-center gap-3 ml-4">
+              <span className="text-sm font-medium text-zinc-900 bg-zinc-100 px-3 py-1 rounded-full whitespace-nowrap">
                 {data.total_distance_km ? data.total_distance_km.toFixed(1) : '0.0'} km
               </span>
+              {/* Desktop: Show options button in header */}
+              <button
+                onClick={() => setIsAdminMenuOpen(true)}
+                className="hidden lg:flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 px-3 py-1 rounded-lg hover:bg-gray-100 transition-colors"
+              >
+                <Menu className="h-4 w-4" />
+                <span>Opções</span>
+              </button>
             </div>
-            <p className="text-base font-semibold text-gray-900 truncate">
-              {data.origin} → {data.destination}
-            </p>
           </div>
         </div>
       </header>
 
-      {/* Main Content - POI Feed */}
-      <main className="px-4 py-4">
-        {/* Route Summary Card */}
+      {/* Main Content - Responsive Layout */}
+      <main className="max-w-7xl mx-auto px-4 py-4">
+        {/* Desktop: Two columns layout */}
+        <div className="lg:flex lg:gap-8">
+          {/* Sidebar - Filters (Desktop: fixed left column) */}
+          <aside className="lg:w-64 lg:flex-shrink-0">
+            {/* POI Filters - Horizontal on mobile, vertical on desktop */}
+            <div className="lg:sticky lg:top-20">
+              <POIFilters
+                filters={filterOptions}
+                activeFilters={activeFilters}
+                onFilterToggle={handleFilterToggle}
+              />
+            </div>
+          </aside>
 
+          {/* Content - POI Feed */}
+          <div className="flex-1 lg:max-w-3xl">
+            {/* POI Feed */}
+            <POIFeed
+              pois={filteredPOIs}
+              emptyMessage="Nenhum ponto de interesse encontrado com os filtros selecionados"
+            />
 
-        {/* POI Filters */}
-        <POIFilters
-          filters={filterOptions}
-          activeFilters={activeFilters}
-          onFilterToggle={handleFilterToggle}
-        />
-
-        {/* POI Feed */}
-        <POIFeed
-          pois={filteredPOIs}
-          emptyMessage="Nenhum ponto de interesse encontrado com os filtros selecionados"
-        />
-
-        {/* Debug Link */}
-        <div className="mt-8 pb-8 text-center">
-          <button
-            onClick={() => setIsAdminMenuOpen(true)}
-            className="text-xs text-gray-400 hover:text-gray-600 underline"
-          >
-            debug
-          </button>
+            {/* Debug Link - Mobile only */}
+            <div className="mt-8 pb-8 text-center lg:hidden">
+              <button
+                onClick={() => setIsAdminMenuOpen(true)}
+                className="text-xs text-gray-400 hover:text-gray-600 underline"
+              >
+                Opções avançadas
+              </button>
+            </div>
+          </div>
         </div>
       </main>
 

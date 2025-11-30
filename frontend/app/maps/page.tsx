@@ -218,9 +218,9 @@ export default function SavedMapsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Mobile-First Header - Sticky */}
+      {/* Header - Responsive */}
       <header className="sticky top-0 z-20 bg-white border-b border-gray-200 shadow-sm">
-        <div className="px-4 py-4">
+        <div className="max-w-6xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <Map className="h-6 w-6 text-blue-600" />
@@ -240,8 +240,8 @@ export default function SavedMapsPage() {
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="px-4 py-4">
+      {/* Main Content - Centered */}
+      <main className="max-w-6xl mx-auto px-4 py-4 lg:py-8">
         {maps.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
             <Map className="h-20 w-20 text-gray-300 mb-4" />
@@ -254,16 +254,17 @@ export default function SavedMapsPage() {
             </Button>
           </div>
         ) : (
-          <div className="space-y-3 pb-20">
+          /* Grid layout - 1 column on mobile, 2 on tablet, 3 on desktop */
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-20">
             {maps.map((map) => (
               <Card key={map.id} className="hover:shadow-md transition-shadow">
                 <CardContent className="p-4">
                   {/* Route Info */}
                   <div className="mb-3">
-                    <h3 className="text-base font-semibold text-gray-900 mb-1">
+                    <h3 className="text-base font-semibold text-gray-900 mb-1 truncate">
                       {map.origin} → {map.destination}
                     </h3>
-                    <div className="flex items-center gap-3 text-xs text-gray-600">
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
                       <span className="flex items-center gap-1">
                         <Calendar className="h-3 w-3" />
                         {formatDate(map.creation_date)}
