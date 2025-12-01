@@ -15,6 +15,7 @@ from api.database.connection import (
 from api.database.repositories import (
     BaseRepository,
     CacheRepository,
+    GooglePlacesCacheRepository,
     MapPOIRepository,
     MapRepository,
     POIRepository,
@@ -35,4 +36,5 @@ __all__ = [
     "POIRepository",
     "MapPOIRepository",
     "CacheRepository",
+    "GooglePlacesCacheRepository",
 ]

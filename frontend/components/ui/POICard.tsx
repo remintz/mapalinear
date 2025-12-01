@@ -3,7 +3,7 @@ import { POI, Milestone } from '@/lib/types';
 import {
   Fuel, Utensils, Coffee, Bed, Tent, Hospital, Ticket,
   Building2, Home, MapPin, Shield, Signpost, LogOut,
-  UtensilsCrossed, ParkingCircle, Landmark
+  UtensilsCrossed, ParkingCircle, Landmark, Star, ExternalLink
 } from 'lucide-react';
 
 interface POICardProps {
@@ -55,6 +55,35 @@ function getPoiTypeName(type: string): string {
     other: 'Outro'
   };
   return typeNameMap[type] || type;
+}
+
+// Helper function to render star rating
+function StarRating({ rating, count }: { rating: number; count?: number }) {
+  const fullStars = Math.floor(rating);
+  const hasHalfStar = rating - fullStars >= 0.5;
+
+  return (
+    <div className="flex items-center gap-1">
+      <div className="flex items-center">
+        {[...Array(5)].map((_, i) => (
+          <Star
+            key={i}
+            className={`w-3.5 h-3.5 ${
+              i < fullStars
+                ? 'text-yellow-400 fill-yellow-400'
+                : i === fullStars && hasHalfStar
+                ? 'text-yellow-400 fill-yellow-400/50'
+                : 'text-gray-300'
+            }`}
+          />
+        ))}
+      </div>
+      <span className="text-sm font-medium text-zinc-700">{rating.toFixed(1)}</span>
+      {count !== undefined && (
+        <span className="text-xs text-zinc-500">({count.toLocaleString('pt-BR')})</span>
+      )}
+    </div>
+  );
 }
 
 // Helper function to get friendly name when POI has generic/type name
@@ -126,10 +155,24 @@ export function POICard({ poi, onClick }: POICardProps) {
   // Get direction arrow based on POI side
   const directionArrow = poi.side === 'left' ? '←' : poi.side === 'right' ? '→' : '🔀';
 
+  // Check if POI has Google Maps link
+  const hasGoogleMapsLink = !!poi.google_maps_uri;
+
+  // Handle card click - open Google Maps if available
+  const handleClick = () => {
+    if (poi.google_maps_uri) {
+      window.open(poi.google_maps_uri, '_blank', 'noopener,noreferrer');
+    } else if (onClick) {
+      onClick();
+    }
+  };
+
   return (
     <div
-      className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer active:scale-[0.98] transition-transform"
-      onClick={onClick}
+      className={`bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer active:scale-[0.98] transition-transform ${
+        hasGoogleMapsLink ? 'hover:border-blue-300' : ''
+      }`}
+      onClick={handleClick}
     >
       <div className="flex items-start gap-3">
         {/* Icon Section */}
@@ -152,15 +195,27 @@ export function POICard({ poi, onClick }: POICardProps) {
                 </span>
               )}
             </div>
-            <span className="text-xs font-medium text-zinc-500 uppercase tracking-wide">
-              {typeName}
-            </span>
+            <div className="flex items-center gap-1">
+              {hasGoogleMapsLink && (
+                <ExternalLink className="w-3.5 h-3.5 text-blue-500" />
+              )}
+              <span className="text-xs font-medium text-zinc-500 uppercase tracking-wide">
+                {typeName}
+              </span>
+            </div>
           </div>
 
           {/* POI Name */}
           <h3 className="text-base font-semibold text-zinc-800 mb-1 truncate">
             {getFriendlyPoiName(poi.name, type)}
           </h3>
+
+          {/* Rating (if available) */}
+          {poi.rating && (
+            <div className="mb-1">
+              <StarRating rating={poi.rating} count={poi.rating_count} />
+            </div>
+          )}
 
           {/* City */}
           <div className="text-sm text-zinc-500 truncate flex items-center gap-1">

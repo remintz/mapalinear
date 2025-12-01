@@ -58,6 +58,23 @@ class ProviderSettings(BaseSettings):
         alias="HERE_APP_CODE",
         description="HERE Maps App Code (optional)"
     )
+
+    # Google Places settings (for restaurant/hotel ratings)
+    google_places_api_key: Optional[str] = Field(
+        default=None,
+        alias="GOOGLE_PLACES_API_KEY",
+        description="Google Places API key for fetching ratings"
+    )
+    google_places_cache_ttl: int = Field(
+        default=2592000,  # 30 days (Google ToS requirement)
+        alias="GOOGLE_PLACES_CACHE_TTL",
+        description="Cache TTL for Google Places data in seconds (max 30 days per Google ToS)"
+    )
+    google_places_enabled: bool = Field(
+        default=True,
+        alias="GOOGLE_PLACES_ENABLED",
+        description="Enable Google Places enrichment for restaurants and hotels"
+    )
     
     # Cache configuration
     geo_cache_ttl_geocode: int = Field(

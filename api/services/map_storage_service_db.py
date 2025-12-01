@@ -326,6 +326,9 @@ class MapStorageServiceDB:
             "cuisine": milestone.cuisine,
             "amenities": milestone.amenities,
             "tags": milestone.tags,
+            "rating": milestone.rating,
+            "rating_count": milestone.rating_count,
+            "google_maps_uri": milestone.google_maps_uri,
         }
 
     def _map_poi_to_milestone(self, map_poi: MapPOI) -> RoadMilestone:
@@ -357,6 +360,9 @@ class MapStorageServiceDB:
             cuisine=poi.cuisine,
             amenities=poi.amenities or [],
             quality_score=map_poi.quality_score,
+            rating=poi.rating,
+            rating_count=poi.rating_count,
+            google_maps_uri=poi.google_maps_uri,
             junction_distance_km=map_poi.junction_distance_km,
             junction_coordinates=junction_coordinates,
             requires_detour=map_poi.requires_detour,

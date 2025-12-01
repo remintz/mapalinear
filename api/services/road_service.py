@@ -239,7 +239,15 @@ class RoadService:
         # Step 5: Sort and assign milestones to segments
         all_milestones.sort(key=lambda m: m.distance_from_origin_km)
         self._assign_milestones_to_segments(linear_segments, all_milestones)
-        
+
+        # Step 6: Enrich restaurants and hotels with Google Places ratings
+        try:
+            from .google_places_service import enrich_milestones_sync
+            all_milestones = enrich_milestones_sync(all_milestones)
+            logger.info("✅ Milestones enriquecidos com dados do Google Places")
+        except Exception as e:
+            logger.warning(f"⚠️ Erro ao enriquecer milestones com Google Places: {e}")
+
         # Create response
         linear_map = LinearMapResponse(
             origin=origin,

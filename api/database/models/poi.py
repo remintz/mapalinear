@@ -45,6 +45,11 @@ class POI(Base):
     website: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     cuisine: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
 
+    # Google ratings (for restaurants and hotels)
+    rating: Mapped[Optional[float]] = mapped_column(nullable=True)  # 1.0 to 5.0
+    rating_count: Mapped[Optional[int]] = mapped_column(nullable=True)  # Number of reviews
+    google_maps_uri: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
     # JSONB fields for flexible data
     amenities: Mapped[list] = mapped_column(JSONB, default=list)
     tags: Mapped[dict] = mapped_column(JSONB, default=dict)

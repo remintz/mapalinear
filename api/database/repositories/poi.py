@@ -179,6 +179,7 @@ class POIRepository(BaseRepository[POI]):
     ) -> tuple[POI, bool]:
         """
         Get an existing POI by OSM ID or create a new one.
+        If POI exists, updates rating fields if new data is available.
 
         Args:
             osm_id: OpenStreetMap ID
@@ -189,6 +190,25 @@ class POIRepository(BaseRepository[POI]):
         """
         existing = await self.get_by_osm_id(osm_id)
         if existing:
+            # Update rating fields if new data is available
+            updated = False
+            if defaults.get("rating") is not None and existing.rating is None:
+                existing.rating = defaults["rating"]
+                updated = True
+            if defaults.get("rating_count") is not None and existing.rating_count is None:
+                existing.rating_count = defaults["rating_count"]
+                updated = True
+            if defaults.get("google_maps_uri") and not existing.google_maps_uri:
+                existing.google_maps_uri = defaults["google_maps_uri"]
+                updated = True
+            # Also update city if missing
+            if defaults.get("city") and not existing.city:
+                existing.city = defaults["city"]
+                updated = True
+
+            if updated:
+                await self.session.flush()
+
             return existing, False
 
         # Create new POI

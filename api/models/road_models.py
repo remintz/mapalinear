@@ -65,6 +65,11 @@ class RoadMilestone(BaseModel):
     amenities: List[str] = Field(default_factory=list, description="Comodidades disponíveis (ex: 'wi-fi', 'estacionamento')")
     quality_score: Optional[float] = Field(None, description="Score de qualidade (0.0 a 1.0) baseado na completude dos dados")
 
+    # Avaliações do Google (para restaurantes e hotéis)
+    rating: Optional[float] = Field(None, description="Avaliação do Google (1.0 a 5.0 estrelas)")
+    rating_count: Optional[int] = Field(None, description="Número de avaliações no Google")
+    google_maps_uri: Optional[str] = Field(None, description="URL do Google Maps para o estabelecimento")
+
     # Informações de entroncamento (para POIs afastados)
     junction_distance_km: Optional[float] = Field(None, description="Distância do entroncamento/saída desde a origem (para POIs afastados da estrada)")
     junction_coordinates: Optional[Coordinates] = Field(None, description="Coordenadas do entroncamento onde sair da estrada principal")

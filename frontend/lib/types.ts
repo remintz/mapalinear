@@ -26,6 +26,10 @@ export interface POI {
   junction_distance_km?: number;
   junction_coordinates?: { latitude: number; longitude: number };
   requires_detour?: boolean;
+  // Google Places ratings
+  rating?: number;
+  rating_count?: number;
+  google_maps_uri?: string;
 }
 
 // Enums
@@ -102,6 +106,10 @@ export interface Milestone {
   junction_distance_km?: number;
   junction_coordinates?: { latitude: number; longitude: number };
   requires_detour?: boolean;
+  // Google Places ratings
+  rating?: number;
+  rating_count?: number;
+  google_maps_uri?: string;
 }
 
 export enum MilestoneType {

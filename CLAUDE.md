@@ -257,6 +257,11 @@ npm run lighthouse:perf
 - `GEO_CACHE_TTL_POI`: Cache TTL for POIs (default: 86400 seconds / 1 day)
 - `GEO_CACHE_TTL_POI_DETAILS`: Cache TTL for POI details (default: 43200 seconds / 12 hours)
 
+### Google Places (Restaurant/Hotel Ratings)
+- `GOOGLE_PLACES_API_KEY`: Google Places API key for fetching ratings
+- `GOOGLE_PLACES_ENABLED`: Enable Google Places enrichment (default: true)
+- `GOOGLE_PLACES_CACHE_TTL`: Cache TTL for Google Places data (default: 2592000 seconds / 30 days per Google ToS)
+
 ### Frontend (PWA)
 - `NEXT_PUBLIC_API_URL`: API endpoint for frontend (default: http://localhost:8001/api)
 - `NEXT_PUBLIC_MAP_TILES_URL`: Map tiles provider (default: OpenStreetMap)
