@@ -257,13 +257,12 @@ class RoadService:
 
         # Note: Cache is automatically persisted to PostgreSQL, no manual save needed
 
-        # Save linear map to disk
+        # Save linear map to database
         try:
-            from .map_storage_service import get_storage_service
-            storage = get_storage_service()
-            storage.save_map(linear_map)
+            from .map_storage_service_db import save_map_sync
+            save_map_sync(linear_map)
         except Exception as e:
-            logger.error(f"❌ Erro ao salvar mapa linear em disco: {e}")
+            logger.error(f"Erro ao salvar mapa linear no banco: {e}")
 
         return linear_map
 

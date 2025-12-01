@@ -13,14 +13,17 @@ import logging
 import re
 import unicodedata
 from typing import List, Optional
+from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
-from fastapi.responses import JSONResponse, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi.responses import Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models.road_models import LinearMapResponse, SavedMapResponse, LinearMapRequest
-from ..services.map_storage_service import get_storage_service
-from ..services.road_service import RoadService
+from ..database import MapPOIRepository, MapRepository, POIRepository, get_db
+from ..models.road_models import LinearMapResponse, SavedMapResponse
 from ..services.async_service import AsyncService
+from ..services.map_storage_service_db import MapStorageServiceDB
+from ..services.road_service import RoadService
 from ..utils.export_utils import export_to_pdf
 
 logger = logging.getLogger(__name__)
@@ -29,7 +32,7 @@ router = APIRouter(prefix="/maps", tags=["Saved Maps"])
 
 
 @router.get("", response_model=List[SavedMapResponse])
-async def list_saved_maps():
+async def list_saved_maps(db: AsyncSession = Depends(get_db)):
     """
     List all saved linear maps (metadata only).
 
@@ -37,8 +40,8 @@ async def list_saved_maps():
         List of saved map metadata, sorted by creation date (newest first)
     """
     try:
-        storage = get_storage_service()
-        maps = storage.list_maps()
+        storage = MapStorageServiceDB(db)
+        maps = await storage.list_maps()
         return maps
     except Exception as e:
         logger.error(f"Error listing maps: {e}")
@@ -46,7 +49,7 @@ async def list_saved_maps():
 
 
 @router.get("/{map_id}", response_model=LinearMapResponse)
-async def get_saved_map(map_id: str):
+async def get_saved_map(map_id: str, db: AsyncSession = Depends(get_db)):
     """
     Get a specific saved map by ID.
 
@@ -57,8 +60,8 @@ async def get_saved_map(map_id: str):
         The complete linear map data
     """
     try:
-        storage = get_storage_service()
-        linear_map = storage.load_map(map_id)
+        storage = MapStorageServiceDB(db)
+        linear_map = await storage.load_map(map_id)
 
         if linear_map is None:
             raise HTTPException(status_code=404, detail=f"Map {map_id} not found")
@@ -83,7 +86,10 @@ def _sanitize_filename(text: str) -> str:
 @router.get("/{map_id}/pdf")
 async def export_map_to_pdf(
     map_id: str,
-    types: Optional[str] = Query(None, description="Tipos de POI separados por vírgula (ex: gas_station,restaurant)")
+    db: AsyncSession = Depends(get_db),
+    types: Optional[str] = Query(
+        None, description="Tipos de POI separados por vírgula (ex: gas_station,restaurant)"
+    ),
 ):
     """
     Export a saved map to PDF format.
@@ -96,8 +102,8 @@ async def export_map_to_pdf(
         PDF file with the list of POIs
     """
     try:
-        storage = get_storage_service()
-        linear_map = storage.load_map(map_id)
+        storage = MapStorageServiceDB(db)
+        linear_map = await storage.load_map(map_id)
 
         if linear_map is None:
             raise HTTPException(status_code=404, detail=f"Map {map_id} not found")
@@ -132,7 +138,7 @@ async def export_map_to_pdf(
 
 
 @router.delete("/{map_id}")
-async def delete_saved_map(map_id: str):
+async def delete_saved_map(map_id: str, db: AsyncSession = Depends(get_db)):
     """
     Delete a saved map.
 
@@ -143,12 +149,12 @@ async def delete_saved_map(map_id: str):
         Success message
     """
     try:
-        storage = get_storage_service()
+        storage = MapStorageServiceDB(db)
 
-        if not storage.map_exists(map_id):
+        if not await storage.map_exists(map_id):
             raise HTTPException(status_code=404, detail=f"Map {map_id} not found")
 
-        success = storage.delete_map(map_id)
+        success = await storage.delete_map(map_id)
 
         if not success:
             raise HTTPException(status_code=500, detail="Failed to delete map")
@@ -162,7 +168,11 @@ async def delete_saved_map(map_id: str):
 
 
 @router.post("/{map_id}/regenerate")
-async def regenerate_map(map_id: str, background_tasks: BackgroundTasks):
+async def regenerate_map(
+    map_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
     """
     Regenerate a saved map (creates a new async operation).
 
@@ -176,12 +186,16 @@ async def regenerate_map(map_id: str, background_tasks: BackgroundTasks):
         Async operation ID for tracking the regeneration progress
     """
     try:
-        storage = get_storage_service()
+        storage = MapStorageServiceDB(db)
 
         # Load existing map to get origin/destination
-        existing_map = storage.load_map(map_id)
+        existing_map = await storage.load_map(map_id)
         if existing_map is None:
             raise HTTPException(status_code=404, detail=f"Map {map_id} not found")
+
+        # Store map info before the session closes
+        origin = existing_map.origin
+        destination = existing_map.destination
 
         # Create new async operation for regeneration
         road_service = RoadService()
@@ -192,27 +206,33 @@ async def regenerate_map(map_id: str, background_tasks: BackgroundTasks):
         # Define the function to execute in background
         def process_regeneration(progress_callback=None):
             try:
-                logger.info(f"🔄 Starting regeneration for map {map_id}: {existing_map.origin} → {existing_map.destination}")
-
-                # Generate new map
-                linear_map = road_service.generate_linear_map(
-                    origin=existing_map.origin,
-                    destination=existing_map.destination,
-                    max_distance_from_road=3000,  # Default value
-                    progress_callback=progress_callback
+                logger.info(
+                    f"Starting regeneration for map {map_id}: {origin} -> {destination}"
                 )
 
-                # Delete old map
-                storage.delete_map(map_id)
-                logger.info(f"🗑️ Old map {map_id} deleted")
+                # Generate new map (this will save it to DB via save_map_sync)
+                linear_map = road_service.generate_linear_map(
+                    origin=origin,
+                    destination=destination,
+                    max_distance_from_road=3000,  # Default value
+                    progress_callback=progress_callback,
+                )
 
-                # Result will be the new map (it's already saved by road_service)
+                # Delete old map using sync wrapper
+                from ..services.map_storage_service_db import delete_map_sync
+
+                delete_map_sync(map_id)
+                logger.info(f"Old map {map_id} deleted")
+
+                # Result will be the new map
                 result = {
                     "origin": linear_map.origin,
                     "destination": linear_map.destination,
                     "total_length_km": linear_map.total_length_km,
-                    "segments": [s.model_dump(mode='json') for s in linear_map.segments],
-                    "milestones": [m.model_dump(mode='json') for m in linear_map.milestones]
+                    "segments": [s.model_dump(mode="json") for s in linear_map.segments],
+                    "milestones": [
+                        m.model_dump(mode="json") for m in linear_map.milestones
+                    ],
                 }
 
                 return result
@@ -224,9 +244,7 @@ async def regenerate_map(map_id: str, background_tasks: BackgroundTasks):
 
         # Execute in background
         background_tasks.add_task(
-            AsyncService.run_async,
-            operation.operation_id,
-            process_regeneration
+            AsyncService.run_async, operation.operation_id, process_regeneration
         )
 
         return {"operation_id": operation.operation_id}

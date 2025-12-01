@@ -27,3 +27,11 @@ procs:
     color: blue
     stop_signal: SIGTERM
     stop_timeout: 3
+
+  adminer:
+    cmd: ["bash", "-c", "docker start -a mapalinear-adminer 2>/dev/null || docker run --name mapalinear-adminer -p 8080:8080 -e ADMINER_DEFAULT_SERVER=host.docker.internal adminer"]
+    cwd: .
+    autostart: true
+    color: yellow
+    stop_signal: SIGTERM
+    stop_timeout: 3

@@ -1,4 +1,4 @@
-.PHONY: help db-setup db-reset db-clear db-stats db-shell db-start db-stop db-recreate install run test format
+.PHONY: help db-setup db-reset db-clear db-stats db-shell db-start db-stop db-recreate install run test format db-migrate db-migration db-migrate-downgrade db-migrate-history db-migrate-current
 
 # PostgreSQL configuration
 DB_HOST ?= localhost
@@ -57,8 +57,10 @@ db-setup: ## Initialize database (create DB, user, and schema)
 	@docker exec -i $(CONTAINER_NAME) psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE $(DB_NAME) TO $(DB_USER);" 2>/dev/null || true
 	@docker exec -i $(CONTAINER_NAME) psql -U postgres -c "ALTER DATABASE $(DB_NAME) OWNER TO $(DB_USER);" 2>/dev/null || true
 	@echo "✅ Database and user created/verified"
-	@echo "📋 Initializing schema..."
+	@echo "📋 Initializing cache schema..."
 	@cat api/providers/cache_schema.sql | docker exec -i $(CONTAINER_NAME) psql -U $(DB_USER) -d $(DB_NAME)
+	@echo "📋 Running Alembic migrations..."
+	@poetry run alembic upgrade head
 	@echo "✅ Schema initialized"
 	@echo "🎉 Database setup complete!"
 
@@ -109,6 +111,30 @@ db-cleanup: ## Remove expired cache entries
 		WITH deleted AS (DELETE FROM cache_entries WHERE expires_at <= NOW() RETURNING *) \
 		SELECT COUNT(*) as expired_entries_removed FROM deleted;"
 	@echo "✅ Cleanup complete"
+
+# Alembic migration commands
+db-migrate: ## Run pending database migrations
+	@echo "🔄 Running database migrations..."
+	poetry run alembic upgrade head
+	@echo "✅ Migrations complete"
+
+db-migration: ## Create a new migration (usage: make db-migration msg="description")
+	@echo "📝 Creating new migration..."
+	poetry run alembic revision --autogenerate -m "$(msg)"
+	@echo "✅ Migration created"
+
+db-migrate-downgrade: ## Rollback the last migration
+	@echo "⬇️  Rolling back last migration..."
+	poetry run alembic downgrade -1
+	@echo "✅ Rollback complete"
+
+db-migrate-history: ## Show migration history
+	@echo "📜 Migration history:"
+	poetry run alembic history --verbose
+
+db-migrate-current: ## Show current migration revision
+	@echo "📍 Current migration revision:"
+	poetry run alembic current
 
 test: ## Run tests
 	poetry run pytest
