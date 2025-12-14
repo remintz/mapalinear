@@ -1593,7 +1593,7 @@ Segundo acesso (cache completo):
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────┐
-│   CLIENTE   │ (Frontend PWA / CLI / API)
+│   CLIENTE   │ (Frontend PWA / API)
 └──────┬──────┘
        │ POST /api/linear-map
        │ { origin: "SP", destination: "RJ" }

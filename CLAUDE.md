@@ -16,13 +16,11 @@ The project uses a modern full-stack architecture with multi-provider geographic
 - **API Server (FastAPI)**: Handles all business logic, geographic data extraction, asynchronous operations, and POI analysis
 - **Geographic Providers**: Pluggable system supporting OSM, HERE Maps, TomTom, and others
 - **PWA Frontend (NextJS)**: Progressive Web App that works offline, installs on mobile devices, and provides travel-focused UX
-- **CLI Client (Typer)**: Developer and power-user interface for testing and administration
 
 Main components:
 - `api/`: FastAPI backend with models, routers, services, and middleware
 - `api/providers/`: Multi-provider geographic data abstraction layer (see PRD)
 - `frontend/`: NextJS PWA with offline capabilities, mobile-first design, and travel-focused features
-- `mapalinear/cli/`: CLI implementation using Typer and Rich
 - `cache/`: Unified cache system for all geographic providers
 - `docs/`: Technical documentation including PRDs
 - Asynchronous operations: Long-running tasks (data searches, map generation) are handled asynchronously with progress tracking
@@ -100,10 +98,6 @@ MAPALINEAR_PORT=8001 poetry run python -m api.run
 
 # Frontend only (on port 8000)
 cd frontend && npm run dev -- --port 8000
-
-# Run CLI commands (in another terminal with poetry shell activated)
-mapalinear search "Origin, UF" "Destination, UF"
-mapalinear generate-map "Origin, UF" "Destination, UF"
 ```
 
 ### Frontend Development (POC)
@@ -202,9 +196,6 @@ npm run lighthouse
 
 #### Backend Testing
 ```bash
-# Test a specific CLI command
-mapalinear search "Belo Horizonte, MG" "Ouro Preto, MG" --output-file test-result.json
-
 # Check API directly
 curl http://localhost:8001/api/health
 
@@ -322,10 +313,9 @@ The system supports enriching POIs with data from multiple sources. Each enrichm
 3. **Unified Caching**: Intelligent cache system that works across all providers with semantic matching
 4. **Asynchronous Operations**: Long-running tasks return operation IDs immediately, allowing clients to check progress later
 5. **Error Handling**: Comprehensive middleware for API error handling with proper status codes
-6. **CLI UX**: Rich terminal UI with progress bars, formatted tables, and clear feedback
-7. **PWA Offline-First**: Frontend caches essential data locally for use without internet connection
-8. **Mobile-First Design**: UI optimized for mobile usage during travel, with touch-friendly interfaces
-9. **Progressive Enhancement**: Core functionality works on all devices, enhanced features on modern browsers
+6. **PWA Offline-First**: Frontend caches essential data locally for use without internet connection
+7. **Mobile-First Design**: UI optimized for mobile usage during travel, with touch-friendly interfaces
+8. **Progressive Enhancement**: Core functionality works on all devices, enhanced features on modern browsers
 
 ## Critical Technical Details
 
@@ -470,7 +460,7 @@ Long-running operations use async tasks stored in `cache/async_operations/`:
 ### Backend
 - The project requires internet connection for geographic data from selected provider (OSM, HERE, etc.)
 - All geographical searches are focused on Brazilian locations (cities must include state abbreviation)
-- The API must be running for frontend and CLI to work
+- The API must be running for frontend to work
 - Geographic provider is selected via `GEO_PRIMARY_PROVIDER` environment variable
 - **PostgreSQL database must be running and initialized** for the cache system to work
 - Database schema must be initialized with `make db-setup` before first run
