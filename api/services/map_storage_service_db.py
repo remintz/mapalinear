@@ -88,6 +88,9 @@ class MapStorageServiceDB:
             await self.map_repo.create(db_map)
 
             # Process milestones as POIs
+            # Track POI IDs already added to this map to avoid duplicates
+            added_poi_ids: set = set()
+
             for milestone in linear_map.milestones:
                 # Get or create POI
                 poi_data = self._milestone_to_poi_dict(milestone)
@@ -101,6 +104,12 @@ class MapStorageServiceDB:
                     # No OSM ID, create new POI
                     poi = POI(**poi_data)
                     await self.poi_repo.create(poi)
+
+                # Skip if this POI was already added to this map
+                if poi.id in added_poi_ids:
+                    logger.debug(f"Skipping duplicate POI in map: {milestone.name} (poi_id={poi.id})")
+                    continue
+                added_poi_ids.add(poi.id)
 
                 # Create MapPOI relationship
                 map_poi = MapPOI(
