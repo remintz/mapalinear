@@ -140,10 +140,39 @@ def mock_provider():
 @pytest.fixture
 def api_client(mock_provider):
     """Create a test client for the API."""
-    with patch("api.providers.manager.create_provider", return_value=mock_provider):
+    from api.models.road_models import AsyncOperationResponse, OperationStatus
+    from datetime import datetime
+    import uuid
+
+    # Store created operations for get_operation to retrieve
+    created_operations = {}
+
+    async def mock_create_operation(operation_type: str):
+        op_id = str(uuid.uuid4())
+        response = AsyncOperationResponse(
+            operation_id=op_id,
+            type=operation_type,
+            status=OperationStatus.IN_PROGRESS,
+            started_at=datetime.now(),
+            progress_percent=0.0,
+        )
+        created_operations[op_id] = response
+        return response
+
+    async def mock_get_operation(operation_id: str):
+        return created_operations.get(operation_id)
+
+    def mock_run_async(operation_id: str, function, *args, **kwargs):
+        pass  # Do nothing - prevents background DB access
+
+    with patch("api.providers.manager.create_provider", return_value=mock_provider), \
+         patch("api.services.async_service.AsyncService.create_operation", side_effect=mock_create_operation), \
+         patch("api.services.async_service.AsyncService.get_operation", side_effect=mock_get_operation), \
+         patch("api.services.async_service.AsyncService.run_async", side_effect=mock_run_async):
         from api.main import app
 
-        return TestClient(app)
+        with TestClient(app) as client:
+            yield client
 
 
 # Removed - replaced with inline async client in tests
@@ -350,7 +379,27 @@ class TestAsyncOperations:
     @pytest.mark.asyncio
     async def test_concurrent_operations(self, mock_provider):
         """It should handle multiple concurrent operations."""
-        with patch("api.providers.manager.create_provider", return_value=mock_provider):
+        from api.models.road_models import AsyncOperationResponse, OperationStatus
+        from datetime import datetime
+        import uuid
+
+        # Create a mock for AsyncService.create_operation that returns unique operation IDs
+        async def mock_create_operation(operation_type: str):
+            return AsyncOperationResponse(
+                operation_id=str(uuid.uuid4()),
+                type=operation_type,
+                status=OperationStatus.IN_PROGRESS,
+                started_at=datetime.now(),
+                progress_percent=0.0,
+            )
+
+        # Mock run_async to prevent background tasks from actually running
+        def mock_run_async(operation_id: str, function, *args, **kwargs):
+            pass  # Do nothing - prevents background DB access
+
+        with patch("api.providers.manager.create_provider", return_value=mock_provider), \
+             patch("api.routers.operations_router.AsyncService.create_operation", side_effect=mock_create_operation), \
+             patch("api.routers.operations_router.AsyncService.run_async", side_effect=mock_run_async):
             from api.main import app
 
             async with httpx.AsyncClient(

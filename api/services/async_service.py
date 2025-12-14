@@ -91,7 +91,7 @@ class AsyncService:
             return response
 
     @staticmethod
-    def get_operation(operation_id: str) -> Optional[AsyncOperationResponse]:
+    async def get_operation(operation_id: str) -> Optional[AsyncOperationResponse]:
         """
         Get an operation by its ID.
 
@@ -101,19 +101,7 @@ class AsyncService:
         Returns:
             AsyncOperationResponse or None if not found
         """
-        # Check in-memory cache first (sync access)
-        if operation_id in _active_operations:
-            return _active_operations[operation_id]
-
-        try:
-            loop = asyncio.get_running_loop()
-            future = asyncio.run_coroutine_threadsafe(
-                AsyncService._get_operation_async(operation_id),
-                loop
-            )
-            return future.result(timeout=10)
-        except RuntimeError:
-            return asyncio.run(AsyncService._get_operation_async(operation_id))
+        return await AsyncService._get_operation_async(operation_id)
 
     @staticmethod
     async def _update_progress_async(
@@ -235,7 +223,7 @@ class AsyncService:
             return [AsyncService._db_to_response(op) for op in db_ops]
 
     @staticmethod
-    def list_operations(active_only: bool = True) -> List[AsyncOperationResponse]:
+    async def list_operations(active_only: bool = True) -> List[AsyncOperationResponse]:
         """
         List async operations.
 
@@ -245,15 +233,7 @@ class AsyncService:
         Returns:
             List of operations
         """
-        try:
-            loop = asyncio.get_running_loop()
-            future = asyncio.run_coroutine_threadsafe(
-                AsyncService._list_operations_async(active_only),
-                loop
-            )
-            return future.result(timeout=10)
-        except RuntimeError:
-            return asyncio.run(AsyncService._list_operations_async(active_only))
+        return await AsyncService._list_operations_async(active_only)
 
     @staticmethod
     def run_async(

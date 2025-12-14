@@ -16,7 +16,7 @@ async def get_operation(operation_id: str):
     """
     Obtém o status de uma operação assíncrona pelo seu ID.
     """
-    operation = AsyncService.get_operation(operation_id)
+    operation = await AsyncService.get_operation(operation_id)
     if not operation:
         raise HTTPException(status_code=404, detail=f"Operação {operation_id} não encontrada")
     return operation
@@ -77,7 +77,7 @@ async def get_debug_segments(operation_id: Optional[str] = None):
     try:
         # Se operation_id não foi fornecido, buscar a última operação concluída
         if not operation_id:
-            operations = AsyncService.list_operations(active_only=False)
+            operations = await AsyncService.list_operations(active_only=False)
             
             # Filtrar apenas operações de tipo "linear_map" que foram concluídas
             completed_maps = [
@@ -98,7 +98,7 @@ async def get_debug_segments(operation_id: Optional[str] = None):
             logger.info(f"Using latest operation: {operation_id}")
         
         # Buscar a operação específica
-        operation = AsyncService.get_operation(operation_id)
+        operation = await AsyncService.get_operation(operation_id)
         if not operation:
             raise HTTPException(status_code=404, detail=f"Operação {operation_id} não encontrada")
         

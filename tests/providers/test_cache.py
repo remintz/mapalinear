@@ -436,17 +436,15 @@ class TestCacheSpatialMatching:
     @pytest.mark.asyncio
     async def test_spatial_poi_matching_basic(self, clean_cache):
         """It should find cached POI results for nearby locations."""
-        import random
+        import uuid
         cache = clean_cache
 
-        # Use unique random coords to avoid collisions with other tests
-        lat_offset = random.uniform(-0.01, 0.01)
-        lon_offset = random.uniform(-0.01, 0.01)
-        base_lat = -23.5505 + lat_offset
-        base_lon = -46.6333 + lon_offset
+        # Use fixed coords with unique operation name to avoid collisions
+        base_lat = -23.5505
+        base_lon = -46.6333
+        unique_op = f"test_spatial_{uuid.uuid4().hex[:8]}"
 
         # Cache POI results for a location
-        # Use "test_spatial" operation to avoid POI reconstruction
         original_params = {
             "latitude": base_lat,
             "longitude": base_lon,
@@ -456,27 +454,28 @@ class TestCacheSpatialMatching:
         poi_data = [{"id": "poi1", "name": "Test POI"}]
 
         await cache.set(
-            ProviderType.OSM, "test_spatial",
+            ProviderType.OSM, unique_op,
             original_params, poi_data
         )
 
         # Exact match should work
         result = await cache.get(
-            ProviderType.OSM, "test_spatial", original_params
+            ProviderType.OSM, unique_op, original_params
         )
         assert result == poi_data
 
         # Search for nearby location (different params - should NOT match with exact matching)
+        # Use offset > 0.001 to ensure different cache key after 3-decimal rounding
         nearby_params = {
-            "latitude": base_lat + 0.0005,  # Very close
-            "longitude": base_lon + 0.0003,
+            "latitude": base_lat + 0.002,  # Offset > 0.001 (cache rounding precision)
+            "longitude": base_lon + 0.002,
             "radius": 1000,
             "categories": ["gas_station", "restaurant"]  # Same categories
         }
 
         # This tests that different params don't match (exact matching only)
         result2 = await cache.get(
-            ProviderType.OSM, "test_spatial", nearby_params
+            ProviderType.OSM, unique_op, nearby_params
         )
         # With exact matching, different params should not match
         assert result2 is None
