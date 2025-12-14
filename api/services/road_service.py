@@ -900,6 +900,11 @@ class RoadService:
             logger.info(f"🔄 Recálculos de junction: {junction_recalculations}")
 
         for poi_id, (junction_info, dist_from_origin, search_pt, poi) in best_junction_for_poi.items():
+            # Skip if this POI was already added as a nearby milestone
+            if poi_id in milestone_poi_ids:
+                logger.debug(f"⏭️ POI distante já adicionado como próximo: {poi.name}")
+                continue
+
             _, _, access_route_distance_km, _ = junction_info
 
             if access_route_distance_km <= max_detour_distance_km:
