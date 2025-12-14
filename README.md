@@ -24,6 +24,60 @@ O MapaLinear utiliza uma API para processar as operações. Por padrão, a API �
 export MAPALINEAR_API_URL="http://seu-servidor-api.com/api"
 ```
 
+### Configuração de Provedores de Dados
+
+O MapaLinear suporta múltiplos provedores de dados geográficos. Cada etapa da geração de mapas pode ser configurada independentemente:
+
+#### Pipeline de Geração de Mapas
+
+```
+1. Geocoding (origem/destino)     → OSM (Nominatim) - sempre
+2. Cálculo de Rota                → OSM (OSRM) - sempre
+3. Busca de POIs                  → Configurável: OSM ou HERE
+4. Enriquecimento Google Places   → Opcional: ratings de restaurantes/hotéis
+5. Enriquecimento HERE            → Opcional: telefone, website, horários
+```
+
+#### Variáveis de Ambiente
+
+**Busca de POIs:**
+```bash
+# Provedor para busca de POIs (osm ou here)
+POI_PROVIDER=osm  # padrão
+
+# Chave HERE (obrigatória se POI_PROVIDER=here ou HERE_ENRICHMENT_ENABLED=true)
+HERE_API_KEY=sua-chave-here
+```
+
+**Enriquecimento de Dados:**
+```bash
+# Google Places - adiciona ratings para restaurantes e hotéis
+GOOGLE_PLACES_ENABLED=true  # padrão
+GOOGLE_PLACES_API_KEY=sua-chave-google
+
+# HERE - adiciona telefone, website, horários, endereço estruturado
+# (apenas quando POI_PROVIDER=osm)
+HERE_ENRICHMENT_ENABLED=false  # padrão
+```
+
+#### Matriz de Configuração
+
+| POI_PROVIDER | GOOGLE_PLACES_ENABLED | HERE_ENRICHMENT_ENABLED | Resultado |
+|--------------|----------------------|-------------------------|-----------|
+| osm          | true                 | false                   | POIs OSM + ratings Google |
+| osm          | true                 | true                    | POIs OSM + ratings Google + dados HERE |
+| osm          | false                | true                    | POIs OSM + dados HERE |
+| here         | true                 | N/A                     | POIs HERE + ratings Google |
+| here         | false                | N/A                     | POIs HERE apenas |
+
+**Nota:** Quando `POI_PROVIDER=here`, os POIs já vêm com dados de contato do HERE, então `HERE_ENRICHMENT_ENABLED` é ignorado.
+
+#### Custos dos Provedores
+
+- **OSM**: Gratuito (rate limit: 1 req/segundo)
+- **Google Places**: ~$17-35 por 1.000 requests
+- **HERE Maps**: Free tier 250.000/mês, depois ~$0.50-5 por 1.000 requests
+
 ## Comandos do CLI
 
 O CLI do MapaLinear oferece diversos comandos para trabalhar com dados de estradas. Todos os comandos podem ser executados com `mapalinear` seguido do nome do comando.

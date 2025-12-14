@@ -248,3 +248,91 @@ class POIRepository(BaseRepository[POI]):
 
         await self.session.flush()
         return result_pois
+
+    async def get_by_here_id(self, here_id: str) -> Optional[POI]:
+        """
+        Get a POI by its HERE ID.
+
+        Args:
+            here_id: HERE Maps place ID
+
+        Returns:
+            POI instance or None if not found
+        """
+        result = await self.session.execute(
+            select(POI).where(POI.here_id == here_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def find_not_enriched_by_here(
+        self, poi_types: Optional[List[str]] = None, limit: int = 100
+    ) -> List[POI]:
+        """
+        Find POIs that have not been enriched by HERE Maps.
+
+        Args:
+            poi_types: Optional list of POI types to filter
+            limit: Maximum number of results
+
+        Returns:
+            List of POIs not yet enriched by HERE
+        """
+        from sqlalchemy import not_
+        from sqlalchemy.dialects.postgresql import JSONB
+
+        # Filter POIs where enriched_by does not contain 'here_maps'
+        conditions = [
+            not_(POI.enriched_by.contains(["here_maps"]))
+        ]
+
+        if poi_types:
+            conditions.append(POI.type.in_(poi_types))
+
+        result = await self.session.execute(
+            select(POI)
+            .where(and_(*conditions))
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def update_with_here_data(
+        self,
+        poi: POI,
+        here_id: str,
+        here_data: dict,
+        phone: Optional[str] = None,
+        website: Optional[str] = None,
+        opening_hours: Optional[str] = None,
+    ) -> POI:
+        """
+        Update a POI with HERE Maps data.
+
+        Args:
+            poi: POI instance to update
+            here_id: HERE Maps place ID
+            here_data: Structured HERE data (address, references, categories)
+            phone: Phone number (optional)
+            website: Website URL (optional)
+            opening_hours: Opening hours string (optional)
+
+        Returns:
+            Updated POI instance
+        """
+        from datetime import datetime
+
+        poi.here_id = here_id
+        poi.here_data = here_data
+
+        # Only update contact info if not already present
+        if phone and not poi.phone:
+            poi.phone = phone
+        if website and not poi.website:
+            poi.website = website
+        if opening_hours and not poi.opening_hours:
+            poi.opening_hours = opening_hours
+
+        # Mark as enriched by HERE
+        poi.add_enrichment("here_maps")
+
+        await self.session.flush()
+        return poi

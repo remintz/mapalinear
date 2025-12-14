@@ -12,21 +12,42 @@ from api.models.road_models import (
     MilestoneType,
     Coordinates,
 )
-from api.providers.base import GeoProvider
+from api.providers.base import GeoProvider, ProviderType
 from api.providers.models import GeoLocation, Route, POI, POICategory
+from api.providers.settings import get_settings
 
 # Usar logger centralizado
 logger = logging.getLogger(__name__)
 
 class RoadService:
-    def __init__(self, geo_provider: Optional[GeoProvider] = None):
-        """Initialize RoadService with a geographic data provider."""
+    def __init__(
+        self,
+        geo_provider: Optional[GeoProvider] = None,
+        poi_provider: Optional[GeoProvider] = None
+    ):
+        """
+        Initialize RoadService with geographic data providers.
+
+        Args:
+            geo_provider: Provider for routing/geocoding (always OSM if not specified)
+            poi_provider: Provider for POI search (configured via POI_PROVIDER env var)
+        """
+        from ..providers import create_provider
+
+        settings = get_settings()
+
+        # Route provider - always OSM for now
         if geo_provider is None:
-            # Use the default provider from the manager
-            from ..providers import create_provider
-            geo_provider = create_provider()
-        
+            geo_provider = create_provider(ProviderType.OSM)
         self.geo_provider = geo_provider
+
+        # POI provider - configurable via POI_PROVIDER
+        if poi_provider is None:
+            poi_provider_type = ProviderType(settings.poi_provider.lower())
+            poi_provider = create_provider(poi_provider_type)
+        self.poi_provider = poi_provider
+
+        logger.info(f"RoadService initialized - Route: OSM, POI: {settings.poi_provider.upper()}")
 
     # ========================================================================
     # UTILITY METHODS
@@ -268,9 +289,46 @@ class RoadService:
         # Save linear map to database
         try:
             from .map_storage_service_db import save_map_sync
-            save_map_sync(linear_map)
+            map_id = save_map_sync(linear_map)
+            linear_map.id = map_id
         except Exception as e:
             logger.error(f"Erro ao salvar mapa linear no banco: {e}")
+            map_id = None
+
+        # Step 7: HERE enrichment (only when POI_PROVIDER=osm and HERE_ENRICHMENT_ENABLED=true)
+        settings = get_settings()
+        if (
+            map_id
+            and settings.poi_provider.lower() == "osm"
+            and settings.here_enrichment_enabled
+            and settings.here_api_key
+        ):
+            try:
+                from .here_enrichment_service import enrich_map_pois_with_here
+                import asyncio
+
+                async def _enrich():
+                    from api.database.connection import get_session
+                    async with get_session() as session:
+                        results = await enrich_map_pois_with_here(
+                            session=session,
+                            map_id=map_id,
+                            poi_types=["gas_station", "restaurant", "hotel", "hospital", "pharmacy"]
+                        )
+                        matched = len([r for r in results if r.matched])
+                        logger.info(f"✅ HERE enrichment: {matched}/{len(results)} POIs enriquecidos")
+
+                # Run async enrichment
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.create_task(_enrich())
+                    else:
+                        loop.run_until_complete(_enrich())
+                except RuntimeError:
+                    asyncio.run(_enrich())
+            except Exception as e:
+                logger.warning(f"⚠️ Erro ao enriquecer POIs com HERE: {e}")
 
         return linear_map
 
@@ -647,7 +705,7 @@ class RoadService:
             
             try:
                 # Search for POIs around this point
-                pois = await self.geo_provider.search_pois(
+                pois = await self.poi_provider.search_pois(
                     location=GeoLocation(latitude=point[0], longitude=point[1]),
                     radius=max_distance_from_road,
                     categories=categories,
@@ -1282,7 +1340,7 @@ class RoadService:
                 return []
             
             # Search using the provider
-            pois = await self.geo_provider.search_pois(
+            pois = await self.poi_provider.search_pois(
                 location=geo_location,
                 radius=radius,
                 categories=poi_categories

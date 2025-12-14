@@ -15,7 +15,7 @@ class POICategory(Enum):
     """Standardized POI categories across all providers."""
     GAS_STATION = "gas_station"
     RESTAURANT = "restaurant"
-    HOTEL = "hotel" 
+    HOTEL = "hotel"
     HOSPITAL = "hospital"
     PHARMACY = "pharmacy"
     BANK = "bank"
@@ -29,6 +29,13 @@ class POICategory(Enum):
     LODGING = "lodging"
     CAMPING = "camping"
     SERVICES = "services"
+    # Additional categories for HERE Maps and other providers
+    CAFE = "cafe"
+    FAST_FOOD = "fast_food"
+    POLICE = "police"
+    MECHANIC = "mechanic"
+    SUPERMARKET = "supermarket"
+    OTHER = "other"
 
 
 class GeoLocation(BaseModel):

@@ -18,11 +18,18 @@ class ProviderSettings(BaseSettings):
     environment variables with proper type checking and defaults.
     """
     
-    # Primary provider configuration
+    # Primary provider configuration (legacy - kept for backwards compatibility)
     geo_primary_provider: str = Field(
         default="osm",
         alias="GEO_PRIMARY_PROVIDER",
-        description="Primary geographic data provider (osm, here, tomtom)"
+        description="Primary geographic data provider (osm, here, tomtom) - DEPRECATED, use POI_PROVIDER"
+    )
+
+    # POI provider configuration
+    poi_provider: str = Field(
+        default="osm",
+        alias="POI_PROVIDER",
+        description="Provider for POI search (osm, here). Route calculation always uses OSM."
     )
     
     # OSM Provider settings
@@ -74,6 +81,13 @@ class ProviderSettings(BaseSettings):
         default=True,
         alias="GOOGLE_PLACES_ENABLED",
         description="Enable Google Places enrichment for restaurants and hotels"
+    )
+
+    # HERE Maps enrichment settings
+    here_enrichment_enabled: bool = Field(
+        default=False,
+        alias="HERE_ENRICHMENT_ENABLED",
+        description="Enable HERE Maps enrichment for OSM POIs (adds phone, website, hours). Only applies when POI_PROVIDER=osm."
     )
     
     # Cache configuration

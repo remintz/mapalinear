@@ -248,19 +248,37 @@ npm run lighthouse:perf
 - `POSTGRES_POOL_MAX_SIZE`: Maximum connection pool size (default: 20)
 
 ### Geographic Providers (Multi-Provider System)
-- `GEO_PRIMARY_PROVIDER`: Provider to use (osm, here, tomtom) - default: osm
-- `HERE_API_KEY`: HERE Maps API key (when using HERE provider)
+
+**Provider Selection (per operation):**
+- `POI_PROVIDER`: Provider for POI search (osm, here) - default: osm
+- `HERE_API_KEY`: HERE Maps API key (required when using HERE for POIs)
+
+**Note:** Route calculation always uses OSM (OSRM). In the future, HERE routing may be added.
+
+**OSM Configuration:**
 - `OSM_OVERPASS_ENDPOINT`: Custom Overpass API endpoint (default: https://overpass-api.de/api/interpreter)
 - `OSM_NOMINATIM_ENDPOINT`: Custom Nominatim endpoint (default: https://nominatim.openstreetmap.org)
+
+**Cache TTLs:**
 - `GEO_CACHE_TTL_GEOCODE`: Cache TTL for geocoding (default: 604800 seconds / 7 days)
 - `GEO_CACHE_TTL_ROUTE`: Cache TTL for routes (default: 21600 seconds / 6 hours)
 - `GEO_CACHE_TTL_POI`: Cache TTL for POIs (default: 86400 seconds / 1 day)
 - `GEO_CACHE_TTL_POI_DETAILS`: Cache TTL for POI details (default: 43200 seconds / 12 hours)
 
-### Google Places (Restaurant/Hotel Ratings)
+### POI Enrichment Configuration
+
+The system supports enriching POIs with data from multiple sources. Each enrichment is independently configurable:
+
+**Google Places Enrichment (ratings for restaurants/hotels):**
 - `GOOGLE_PLACES_API_KEY`: Google Places API key for fetching ratings
 - `GOOGLE_PLACES_ENABLED`: Enable Google Places enrichment (default: true)
 - `GOOGLE_PLACES_CACHE_TTL`: Cache TTL for Google Places data (default: 2592000 seconds / 30 days per Google ToS)
+
+**HERE Maps Enrichment (phone, website, opening hours, structured address):**
+- `HERE_ENRICHMENT_ENABLED`: Enable HERE enrichment for OSM POIs (default: false)
+- `HERE_API_KEY`: HERE Maps API key (required when enabled)
+
+**Note:** HERE enrichment only applies when `POI_PROVIDER=osm`. When `POI_PROVIDER=here`, POIs already contain HERE data natively.
 
 ### Frontend (PWA)
 - `NEXT_PUBLIC_API_URL`: API endpoint for frontend (default: http://localhost:8001/api)
@@ -348,6 +366,63 @@ Located in `api/providers/`, follows factory pattern:
 - `calculate_route(origin, destination, waypoints?, avoid?)`: Route calculation
 - `search_pois(location, radius, categories, limit)`: Find POIs
 - `get_poi_details(poi_id)`: Get detailed POI info
+
+### Map Generation Pipeline
+
+The map generation process consists of multiple steps, each with configurable data sources:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         MAP GENERATION PIPELINE                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  1. GEOCODING (origin/destination)                                          │
+│     └── Provider: OSM (Nominatim) - always                                  │
+│                                                                             │
+│  2. ROUTE CALCULATION                                                       │
+│     └── Provider: OSM (OSRM) - always                                       │
+│                                                                             │
+│  3. POI SEARCH (along route)                                                │
+│     └── Provider: Configurable via POI_PROVIDER (osm or here)               │
+│     └── OSM: Free, community data, may lack contact info                    │
+│     └── HERE: Paid API, better names/phones/addresses                       │
+│                                                                             │
+│  4. GOOGLE PLACES ENRICHMENT (optional)                                     │
+│     └── Enabled via: GOOGLE_PLACES_ENABLED=true                             │
+│     └── Adds: ratings, review counts for restaurants/hotels                 │
+│     └── Cost: ~$17-35 per 1000 requests                                     │
+│                                                                             │
+│  5. HERE ENRICHMENT (optional, only when POI_PROVIDER=osm)                  │
+│     └── Enabled via: HERE_ENRICHMENT_ENABLED=true                           │
+│     └── Adds: phone, website, opening hours, structured address             │
+│     └── Cost: Free tier 250k/month, then ~$0.50-5 per 1000 requests         │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Configuration Matrix:**
+
+| POI_PROVIDER | GOOGLE_PLACES_ENABLED | HERE_ENRICHMENT_ENABLED | Result |
+|--------------|----------------------|-------------------------|--------|
+| osm          | true                 | false                   | OSM POIs + Google ratings |
+| osm          | true                 | true                    | OSM POIs + Google ratings + HERE contact info |
+| osm          | false                | true                    | OSM POIs + HERE contact info |
+| here         | true                 | N/A (ignored)           | HERE POIs + Google ratings |
+| here         | false                | N/A (ignored)           | HERE POIs only |
+
+**Important:** These are SYSTEM-LEVEL configurations (environment variables). In the future, user-level preferences will be added that affect only map VISUALIZATION, not data fetching.
+
+**Services involved:**
+- `api/services/road_service.py`: Main map generation orchestrator
+- `api/services/google_places_service.py`: Google Places enrichment
+- `api/services/here_enrichment_service.py`: HERE Maps enrichment
+
+**Database model:**
+- `api/database/models/poi.py`: POI model supports multi-provider data
+  - `primary_provider`: Which provider created the POI (osm, here)
+  - `osm_id`, `here_id`: Provider-specific IDs
+  - `here_data`: JSONB field for HERE-specific structured data
+  - `enriched_by`: List of enrichment sources applied
 
 ### Async Operations Pattern
 
