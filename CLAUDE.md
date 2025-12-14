@@ -21,7 +21,6 @@ Main components:
 - `api/`: FastAPI backend with models, routers, services, and middleware
 - `api/providers/`: Multi-provider geographic data abstraction layer (see PRD)
 - `frontend/`: NextJS PWA with offline capabilities, mobile-first design, and travel-focused features
-- `cache/`: Unified cache system for all geographic providers
 - `docs/`: Technical documentation including PRDs
 - Asynchronous operations: Long-running tasks (data searches, map generation) are handled asynchronously with progress tracking
 
@@ -442,18 +441,24 @@ The map generation process consists of multiple steps, each with configurable da
 
 ### Async Operations Pattern
 
-Long-running operations use async tasks stored in `cache/async_operations/`:
+Long-running operations use async tasks stored in PostgreSQL:
 
 **Flow:**
 1. API endpoint starts async task → returns operation_id immediately
 2. Client polls `/api/operations/{operation_id}` for status
-3. Operation updates progress in JSON file
-4. On completion, result stored in same JSON file
+3. Operation updates progress in database
+4. On completion, result stored in database
 5. Frontend shows progress bar during polling
+6. Old completed/failed operations are automatically cleaned up
 
 **Key files:**
 - `api/services/async_service.py`: Manages async operations lifecycle
-- Each operation saved as `cache/async_operations/{uuid}.json`
+- `api/database/models/async_operation.py`: Database model
+- `api/database/repositories/async_operation.py`: Repository with CRUD operations
+
+**Cleanup:**
+- Stale in_progress operations (>2 hours) are marked as failed
+- Completed/failed operations older than 24 hours are automatically removed
 
 ## Important Notes
 

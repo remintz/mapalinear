@@ -2,6 +2,7 @@
 Database repositories for MapaLinear.
 """
 from api.database.repositories.api_call_log import ApiCallLogRepository
+from api.database.repositories.async_operation import AsyncOperationRepository
 from api.database.repositories.base import BaseRepository
 from api.database.repositories.cache import CacheRepository
 from api.database.repositories.google_places_cache import GooglePlacesCacheRepository
@@ -11,6 +12,7 @@ from api.database.repositories.poi import POIRepository
 
 __all__ = [
     "ApiCallLogRepository",
+    "AsyncOperationRepository",
     "BaseRepository",
     "MapRepository",
     "POIRepository",

@@ -125,10 +125,8 @@ dmypy.json
 
 # OS specific
 .DS_Store
-Thumbs.db 
-cache/
+Thumbs.db
 debug_outputs/
 
 # Serena (AI coding assistant) configuration
 .serena/
-saved_maps/
