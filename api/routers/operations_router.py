@@ -32,7 +32,7 @@ async def start_async_linear_map(request: LinearMapRequest, background_tasks: Ba
     logger.info(f"🔍 Requisição recebida: origin={request.origin}, destination={request.destination}")
 
     # Criar uma nova operação
-    operation = AsyncService.create_operation("linear_map")
+    operation = await AsyncService.create_operation("linear_map")
     
     # Definir a função que executará o processamento em segundo plano
     def process_linear_map(progress_callback=None):

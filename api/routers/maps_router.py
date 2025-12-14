@@ -201,7 +201,7 @@ async def regenerate_map(
         road_service = RoadService()
 
         # Start async operation
-        operation = AsyncService.create_operation("map_regeneration")
+        operation = await AsyncService.create_operation("map_regeneration")
 
         # Define the function to execute in background
         def process_regeneration(progress_callback=None):

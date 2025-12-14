@@ -56,7 +56,7 @@ class AsyncService:
             return response
 
     @staticmethod
-    def create_operation(operation_type: str) -> AsyncOperationResponse:
+    async def create_operation(operation_type: str) -> AsyncOperationResponse:
         """
         Create a new async operation.
 
@@ -66,18 +66,7 @@ class AsyncService:
         Returns:
             AsyncOperationResponse object
         """
-        # Run the async operation in a new event loop if necessary
-        try:
-            loop = asyncio.get_running_loop()
-            # If we're in an async context, use run_coroutine_threadsafe
-            future = asyncio.run_coroutine_threadsafe(
-                AsyncService._create_operation_async(operation_type),
-                loop
-            )
-            return future.result(timeout=10)
-        except RuntimeError:
-            # No running event loop, create one
-            return asyncio.run(AsyncService._create_operation_async(operation_type))
+        return await AsyncService._create_operation_async(operation_type)
 
     @staticmethod
     async def _get_operation_async(operation_id: str) -> Optional[AsyncOperationResponse]:
