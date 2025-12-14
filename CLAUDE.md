@@ -246,6 +246,33 @@ npm run lighthouse:perf
 - `POSTGRES_POOL_MIN_SIZE`: Minimum connection pool size (default: 10)
 - `POSTGRES_POOL_MAX_SIZE`: Maximum connection pool size (default: 20)
 
+### API Call Logging (Cost Monitoring)
+
+All external API calls (OSM, HERE, Google Places) are logged to the database for cost monitoring and analysis.
+
+**Logged Information:**
+- Provider (osm, here, google_places)
+- Operation type (geocode, poi_search, route, etc.)
+- Endpoint URL and HTTP method
+- Response status and duration
+- Response size in bytes
+- Result count
+- Cache hit/miss status
+- Error messages (if any)
+
+**API Endpoints:**
+- `GET /api/api-logs/stats` - Aggregated statistics by provider and operation
+- `GET /api/api-logs/stats/daily` - Daily call statistics for trend analysis
+- `GET /api/api-logs/recent` - Recent API call logs for debugging
+- `GET /api/api-logs/errors` - API calls with errors for troubleshooting
+- `DELETE /api/api-logs/cleanup` - Remove old logs (default: keep 90 days)
+
+**Key Files:**
+- `api/database/models/api_call_log.py` - Database model
+- `api/database/repositories/api_call_log.py` - Repository for queries
+- `api/services/api_call_logger.py` - Logging service with batched writes
+- `api/routers/api_logs_router.py` - API endpoints for statistics
+
 ### Geographic Providers (Multi-Provider System)
 
 **Provider Selection (per operation):**

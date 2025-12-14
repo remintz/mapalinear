@@ -7,12 +7,19 @@ providing access to HERE's geocoding, routing, and Places APIs.
 
 import httpx
 import logging
+import time
 from typing import List, Optional, Dict, Any
 from ..base import GeoProvider, ProviderType
 from ..models import GeoLocation, Route, POI, POICategory
 from ..cache import UnifiedCache
 
 logger = logging.getLogger(__name__)
+
+
+def _get_api_call_logger():
+    """Lazy import to avoid circular dependency."""
+    from api.services.api_call_logger import api_call_logger
+    return api_call_logger
 
 # Mapping from MapaLinear POICategory to HERE category IDs
 # Reference: https://developer.here.com/documentation/geocoding-search-api/dev_guide/topics-places/places-category-system-full.html
@@ -114,6 +121,13 @@ class HEREProvider(GeoProvider):
                 params={"address": address}
             )
             if cached_result is not None:
+                # Log cache hit
+                await _get_api_call_logger().log_cache_hit(
+                    provider="here",
+                    operation="geocode",
+                    request_params={"address": address},
+                    result_count=1,
+                )
                 return cached_result
         
         params = {
@@ -123,11 +137,34 @@ class HEREProvider(GeoProvider):
             "lang": "pt-BR"
         }
         
+        start_time = time.time()
+        response_status = 0
+        response_size = None
+        error_msg = None
+        
         try:
             response = await self._client.get(self._geocode_url, params=params)
+            response_status = response.status_code
+            response_size = len(response.content)
             response.raise_for_status()
             
             data = response.json()
+            
+            result_count = len(data.get("items", []))
+            
+            # Log API call
+            duration_ms = int((time.time() - start_time) * 1000)
+            await _get_api_call_logger().log_call(
+                provider="here",
+                operation="geocode",
+                endpoint=self._geocode_url,
+                http_method="GET",
+                response_status=response_status,
+                duration_ms=duration_ms,
+                request_params={"address": address, "limit": 1},
+                response_size_bytes=response_size,
+                result_count=result_count,
+            )
             
             if not data.get("items"):
                 logger.warning(f"No geocoding results for address: {address}")
@@ -160,10 +197,40 @@ class HEREProvider(GeoProvider):
             return result
             
         except httpx.HTTPError as e:
+            error_msg = str(e)[:500]
             logger.error(f"HERE geocoding API error: {e}")
+            
+            # Log failed API call
+            duration_ms = int((time.time() - start_time) * 1000)
+            await _get_api_call_logger().log_call(
+                provider="here",
+                operation="geocode",
+                endpoint=self._geocode_url,
+                http_method="GET",
+                response_status=response_status or 500,
+                duration_ms=duration_ms,
+                request_params={"address": address},
+                response_size_bytes=response_size,
+                error_message=error_msg,
+            )
             return None
         except Exception as e:
+            error_msg = str(e)[:500]
             logger.error(f"Error geocoding address '{address}': {e}")
+            
+            # Log failed API call
+            duration_ms = int((time.time() - start_time) * 1000)
+            await _get_api_call_logger().log_call(
+                provider="here",
+                operation="geocode",
+                endpoint=self._geocode_url,
+                http_method="GET",
+                response_status=response_status or 500,
+                duration_ms=duration_ms,
+                request_params={"address": address},
+                response_size_bytes=response_size,
+                error_message=error_msg,
+            )
             return None
     
     async def reverse_geocode(
@@ -199,6 +266,13 @@ class HEREProvider(GeoProvider):
                 params=cache_params
             )
             if cached_result is not None:
+                # Log cache hit
+                await _get_api_call_logger().log_cache_hit(
+                    provider="here",
+                    operation="reverse_geocode",
+                    request_params=cache_params,
+                    result_count=1,
+                )
                 return cached_result
         
         params = {
@@ -207,11 +281,34 @@ class HEREProvider(GeoProvider):
             "lang": "pt-BR"
         }
         
+        start_time = time.time()
+        response_status = 0
+        response_size = None
+        error_msg = None
+        
         try:
             response = await self._client.get(self._reverse_geocode_url, params=params)
+            response_status = response.status_code
+            response_size = len(response.content)
             response.raise_for_status()
             
             data = response.json()
+            
+            result_count = len(data.get("items", []))
+            
+            # Log API call
+            duration_ms = int((time.time() - start_time) * 1000)
+            await _get_api_call_logger().log_call(
+                provider="here",
+                operation="reverse_geocode",
+                endpoint=self._reverse_geocode_url,
+                http_method="GET",
+                response_status=response_status,
+                duration_ms=duration_ms,
+                request_params={"latitude": latitude, "longitude": longitude},
+                response_size_bytes=response_size,
+                result_count=result_count,
+            )
             
             if not data.get("items"):
                 logger.warning(f"No reverse geocoding results for {latitude}, {longitude}")
@@ -243,10 +340,40 @@ class HEREProvider(GeoProvider):
             return result
             
         except httpx.HTTPError as e:
+            error_msg = str(e)[:500]
             logger.error(f"HERE reverse geocoding API error: {e}")
+            
+            # Log failed API call
+            duration_ms = int((time.time() - start_time) * 1000)
+            await _get_api_call_logger().log_call(
+                provider="here",
+                operation="reverse_geocode",
+                endpoint=self._reverse_geocode_url,
+                http_method="GET",
+                response_status=response_status or 500,
+                duration_ms=duration_ms,
+                request_params={"latitude": latitude, "longitude": longitude},
+                response_size_bytes=response_size,
+                error_message=error_msg,
+            )
             return None
         except Exception as e:
+            error_msg = str(e)[:500]
             logger.error(f"Error reverse geocoding {latitude}, {longitude}: {e}")
+            
+            # Log failed API call
+            duration_ms = int((time.time() - start_time) * 1000)
+            await _get_api_call_logger().log_call(
+                provider="here",
+                operation="reverse_geocode",
+                endpoint=self._reverse_geocode_url,
+                http_method="GET",
+                response_status=response_status or 500,
+                duration_ms=duration_ms,
+                request_params={"latitude": latitude, "longitude": longitude},
+                response_size_bytes=response_size,
+                error_message=error_msg,
+            )
             return None
     
     async def calculate_route(
@@ -313,6 +440,13 @@ class HEREProvider(GeoProvider):
             )
             if cached_result is not None:
                 logger.debug(f"Cache hit for HERE POI search at {location.latitude},{location.longitude}")
+                # Log cache hit
+                await _get_api_call_logger().log_cache_hit(
+                    provider="here",
+                    operation="poi_search",
+                    request_params=cache_params,
+                    result_count=len(cached_result) if isinstance(cached_result, list) else 0,
+                )
                 return cached_result
 
         # HERE Browse API endpoint
@@ -327,8 +461,15 @@ class HEREProvider(GeoProvider):
             "in": f"circle:{location.latitude},{location.longitude};r={int(radius)}"
         }
 
+        start_time = time.time()
+        response_status = 0
+        response_size = None
+        error_msg = None
+
         try:
             response = await self._client.get(browse_url, params=params)
+            response_status = response.status_code
+            response_size = len(response.content)
             response.raise_for_status()
             data = response.json()
 
@@ -337,6 +478,25 @@ class HEREProvider(GeoProvider):
                 poi = self._parse_here_place_to_poi(item, location)
                 if poi:
                     pois.append(poi)
+
+            # Log API call
+            duration_ms = int((time.time() - start_time) * 1000)
+            await _get_api_call_logger().log_call(
+                provider="here",
+                operation="poi_search",
+                endpoint=browse_url,
+                http_method="GET",
+                response_status=response_status,
+                duration_ms=duration_ms,
+                request_params={
+                    "location": f"{location.latitude},{location.longitude}",
+                    "radius": radius,
+                    "categories": here_categories,
+                    "limit": limit,
+                },
+                response_size_bytes=response_size,
+                result_count=len(pois),
+            )
 
             # Cache the results
             if self._cache:
@@ -351,10 +511,47 @@ class HEREProvider(GeoProvider):
             return pois
 
         except httpx.HTTPError as e:
+            error_msg = str(e)[:500]
             logger.error(f"HERE Browse API error: {e}")
+            
+            # Log failed API call
+            duration_ms = int((time.time() - start_time) * 1000)
+            await _get_api_call_logger().log_call(
+                provider="here",
+                operation="poi_search",
+                endpoint=browse_url,
+                http_method="GET",
+                response_status=response_status or 500,
+                duration_ms=duration_ms,
+                request_params={
+                    "location": f"{location.latitude},{location.longitude}",
+                    "radius": radius,
+                    "categories": here_categories,
+                },
+                response_size_bytes=response_size,
+                error_message=error_msg,
+            )
             return []
         except Exception as e:
+            error_msg = str(e)[:500]
             logger.error(f"Error searching POIs via HERE: {e}")
+            
+            # Log failed API call
+            duration_ms = int((time.time() - start_time) * 1000)
+            await _get_api_call_logger().log_call(
+                provider="here",
+                operation="poi_search",
+                endpoint=browse_url,
+                http_method="GET",
+                response_status=response_status or 500,
+                duration_ms=duration_ms,
+                request_params={
+                    "location": f"{location.latitude},{location.longitude}",
+                    "radius": radius,
+                },
+                response_size_bytes=response_size,
+                error_message=error_msg,
+            )
             return []
 
     async def get_poi_details(self, poi_id: str) -> Optional[POI]:
@@ -378,6 +575,13 @@ class HEREProvider(GeoProvider):
                 params={"poi_id": poi_id}
             )
             if cached_result is not None:
+                # Log cache hit
+                await _get_api_call_logger().log_cache_hit(
+                    provider="here",
+                    operation="poi_details",
+                    request_params={"poi_id": poi_id},
+                    result_count=1,
+                )
                 return cached_result
 
         lookup_url = "https://lookup.search.hereapi.com/v1/lookup"
@@ -388,14 +592,35 @@ class HEREProvider(GeoProvider):
             "lang": "pt-BR"
         }
 
+        start_time = time.time()
+        response_status = 0
+        response_size = None
+        error_msg = None
+
         try:
             response = await self._client.get(lookup_url, params=params)
+            response_status = response.status_code
+            response_size = len(response.content)
             response.raise_for_status()
             data = response.json()
 
             # Parse using existing parser (reference location not important for details)
             reference_location = GeoLocation(latitude=0, longitude=0)
             poi = self._parse_here_place_to_poi(data, reference_location)
+
+            # Log API call
+            duration_ms = int((time.time() - start_time) * 1000)
+            await _get_api_call_logger().log_call(
+                provider="here",
+                operation="poi_details",
+                endpoint=lookup_url,
+                http_method="GET",
+                response_status=response_status,
+                duration_ms=duration_ms,
+                request_params={"poi_id": poi_id},
+                response_size_bytes=response_size,
+                result_count=1 if poi else 0,
+            )
 
             # Cache result
             if self._cache and poi:
@@ -409,10 +634,40 @@ class HEREProvider(GeoProvider):
             return poi
 
         except httpx.HTTPError as e:
+            error_msg = str(e)[:500]
             logger.error(f"HERE Lookup API error: {e}")
+            
+            # Log failed API call
+            duration_ms = int((time.time() - start_time) * 1000)
+            await _get_api_call_logger().log_call(
+                provider="here",
+                operation="poi_details",
+                endpoint=lookup_url,
+                http_method="GET",
+                response_status=response_status or 500,
+                duration_ms=duration_ms,
+                request_params={"poi_id": poi_id},
+                response_size_bytes=response_size,
+                error_message=error_msg,
+            )
             return None
         except Exception as e:
+            error_msg = str(e)[:500]
             logger.error(f"Error getting POI details from HERE: {e}")
+            
+            # Log failed API call
+            duration_ms = int((time.time() - start_time) * 1000)
+            await _get_api_call_logger().log_call(
+                provider="here",
+                operation="poi_details",
+                endpoint=lookup_url,
+                http_method="GET",
+                response_status=response_status or 500,
+                duration_ms=duration_ms,
+                request_params={"poi_id": poi_id},
+                response_size_bytes=response_size,
+                error_message=error_msg,
+            )
             return None
 
     def _map_categories_to_here(self, categories: List[POICategory]) -> str:

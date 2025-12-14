@@ -62,6 +62,7 @@ class TestHEREProviderPOISearch:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.raise_for_status = Mock()
+        mock_response.content = b'{}'  # For API call logging
         mock_response.json = Mock(return_value={
             'items': [
                 {
@@ -123,6 +124,7 @@ class TestHEREProviderPOISearch:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.raise_for_status = Mock()
+        mock_response.content = b'{}'  # For API call logging
         mock_response.json = Mock(return_value={'items': mock_items})
 
         with patch.object(here_provider._client, 'get', AsyncMock(return_value=mock_response)):
@@ -156,6 +158,7 @@ class TestHEREProviderPOISearch:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.raise_for_status = Mock()
+        mock_response.content = b'{}'  # For API call logging
         mock_response.json = Mock(return_value={
             'items': [{
                 'id': unique_id,

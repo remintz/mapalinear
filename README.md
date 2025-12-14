@@ -78,6 +78,80 @@ HERE_ENRICHMENT_ENABLED=false  # padrão
 - **Google Places**: ~$17-35 por 1.000 requests
 - **HERE Maps**: Free tier 250.000/mês, depois ~$0.50-5 por 1.000 requests
 
+### Monitoramento de Custos de API
+
+O MapaLinear registra automaticamente todas as chamadas a APIs externas (OSM, HERE, Google Places) em um banco de dados para monitoramento e análise de custos.
+
+#### Endpoints de Estatísticas
+
+```bash
+# Estatísticas agregadas por provedor (últimos 30 dias)
+curl http://localhost:8001/api/api-logs/stats
+
+# Estatísticas diárias para análise de tendências
+curl http://localhost:8001/api/api-logs/stats/daily
+
+# Logs recentes para debug
+curl http://localhost:8001/api/api-logs/recent?limit=50
+
+# Logs de erros para troubleshooting
+curl http://localhost:8001/api/api-logs/errors
+
+# Limpeza de logs antigos (mantém 90 dias por padrão)
+curl -X DELETE "http://localhost:8001/api/api-logs/cleanup?days_to_keep=90"
+```
+
+#### Informações Registradas
+
+Para cada chamada de API:
+- Provedor (osm, here, google_places)
+- Tipo de operação (geocode, poi_search, route, etc.)
+- Endpoint e método HTTP
+- Status de resposta e duração
+- Tamanho da resposta em bytes
+- Quantidade de resultados
+- Cache hit/miss
+- Mensagens de erro (se houver)
+
+#### Exemplo de Resposta de Estatísticas
+
+```json
+{
+  "period_start": "2024-11-14T00:00:00",
+  "period_end": "2024-12-14T00:00:00",
+  "by_provider": [
+    {
+      "provider": "osm",
+      "total_calls": 1250,
+      "api_calls": 450,
+      "cache_hits": 800,
+      "cache_hit_rate": 64.0,
+      "avg_duration_ms": 342.5,
+      "total_bytes": 2450000
+    },
+    {
+      "provider": "google_places",
+      "total_calls": 320,
+      "api_calls": 280,
+      "cache_hits": 40,
+      "cache_hit_rate": 12.5,
+      "avg_duration_ms": 185.3,
+      "total_bytes": 156000
+    }
+  ],
+  "by_operation": [
+    {
+      "provider": "osm",
+      "operation": "poi_search",
+      "total_calls": 800,
+      "api_calls": 300,
+      "avg_duration_ms": 420.1,
+      "total_results": 4500
+    }
+  ]
+}
+```
+
 ## Comandos do CLI
 
 O CLI do MapaLinear oferece diversos comandos para trabalhar com dados de estradas. Todos os comandos podem ser executados com `mapalinear` seguido do nome do comando.

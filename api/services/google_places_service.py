@@ -6,6 +6,7 @@ for restaurants and hotels, caching results to minimize API calls.
 """
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -15,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.database.repositories.google_places_cache import GooglePlacesCacheRepository
 from api.models.road_models import MilestoneType, RoadMilestone
 from api.providers.settings import get_settings
+from api.services.api_call_logger import api_call_logger
 
 logger = logging.getLogger(__name__)
 
@@ -192,46 +194,119 @@ class GooglePlacesService:
             ),
         }
 
+        start_time = time.time()
+        response_status = 0
+        response_size = None
+        error_msg = None
+
         async with httpx.AsyncClient() as client:
-            response = await client.post(
-                self.NEARBY_SEARCH_URL,
-                json=request_body,
-                headers=headers,
-                timeout=10.0,
-            )
-
-            if response.status_code != 200:
-                logger.warning(
-                    f"Google Places API error: {response.status_code} - {response.text}"
-                )
-                return None
-
-            data = response.json()
-            places = data.get("places", [])
-
-            if not places:
-                logger.debug(f"No Google Places results for {name}")
-                return None
-
-            # Find the best match based on name similarity
-            best_match = self._find_best_match(name, places, latitude, longitude)
-
-            if best_match:
-                return GooglePlaceData(
-                    google_place_id=best_match.get("id", ""),
-                    rating=best_match.get("rating"),
-                    rating_count=best_match.get("userRatingCount"),
-                    google_maps_uri=best_match.get("googleMapsUri"),
-                    matched_name=best_match.get("displayName", {}).get("text"),
-                    match_distance_meters=self._calculate_distance(
-                        latitude,
-                        longitude,
-                        best_match.get("location", {}).get("latitude", latitude),
-                        best_match.get("location", {}).get("longitude", longitude),
-                    ),
+            try:
+                response = await client.post(
+                    self.NEARBY_SEARCH_URL,
+                    json=request_body,
+                    headers=headers,
+                    timeout=10.0,
                 )
 
-            return None
+                response_status = response.status_code
+                response_size = len(response.content)
+
+                if response.status_code != 200:
+                    error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
+                    logger.warning(
+                        f"Google Places API error: {response.status_code} - {response.text}"
+                    )
+                    
+                    # Log failed API call
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    await api_call_logger.log_call(
+                        provider="google_places",
+                        operation="nearby_search",
+                        endpoint=self.NEARBY_SEARCH_URL,
+                        http_method="POST",
+                        response_status=response_status,
+                        duration_ms=duration_ms,
+                        request_params={
+                            "name": name,
+                            "latitude": latitude,
+                            "longitude": longitude,
+                            "poi_type": poi_type.value if hasattr(poi_type, 'value') else str(poi_type),
+                            "included_types": included_types,
+                        },
+                        response_size_bytes=response_size,
+                        error_message=error_msg,
+                    )
+                    return None
+
+                data = response.json()
+                places = data.get("places", [])
+
+                # Log successful API call
+                duration_ms = int((time.time() - start_time) * 1000)
+                await api_call_logger.log_call(
+                    provider="google_places",
+                    operation="nearby_search",
+                    endpoint=self.NEARBY_SEARCH_URL,
+                    http_method="POST",
+                    response_status=response_status,
+                    duration_ms=duration_ms,
+                    request_params={
+                        "name": name,
+                        "latitude": latitude,
+                        "longitude": longitude,
+                        "poi_type": poi_type.value if hasattr(poi_type, 'value') else str(poi_type),
+                        "included_types": included_types,
+                    },
+                    response_size_bytes=response_size,
+                    result_count=len(places),
+                )
+
+                if not places:
+                    logger.debug(f"No Google Places results for {name}")
+                    return None
+
+                # Find the best match based on name similarity
+                best_match = self._find_best_match(name, places, latitude, longitude)
+
+                if best_match:
+                    return GooglePlaceData(
+                        google_place_id=best_match.get("id", ""),
+                        rating=best_match.get("rating"),
+                        rating_count=best_match.get("userRatingCount"),
+                        google_maps_uri=best_match.get("googleMapsUri"),
+                        matched_name=best_match.get("displayName", {}).get("text"),
+                        match_distance_meters=self._calculate_distance(
+                            latitude,
+                            longitude,
+                            best_match.get("location", {}).get("latitude", latitude),
+                            best_match.get("location", {}).get("longitude", longitude),
+                        ),
+                    )
+
+                return None
+
+            except Exception as e:
+                error_msg = str(e)[:500]
+                logger.warning(f"Google Places API exception: {e}")
+                
+                # Log failed API call
+                duration_ms = int((time.time() - start_time) * 1000)
+                await api_call_logger.log_call(
+                    provider="google_places",
+                    operation="nearby_search",
+                    endpoint=self.NEARBY_SEARCH_URL,
+                    http_method="POST",
+                    response_status=response_status or 500,
+                    duration_ms=duration_ms,
+                    request_params={
+                        "name": name,
+                        "latitude": latitude,
+                        "longitude": longitude,
+                    },
+                    response_size_bytes=response_size,
+                    error_message=error_msg,
+                )
+                return None
 
     def _get_google_types(self, poi_type: MilestoneType) -> List[str]:
         """Map MilestoneType to Google Places types."""

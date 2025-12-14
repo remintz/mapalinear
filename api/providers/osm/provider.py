@@ -6,10 +6,12 @@ This provider implements the GeoProvider interface using OpenStreetMap data sour
 
 import asyncio
 import logging
+import time
 from typing import List, Optional, Dict, Any
 from ..base import GeoProvider, ProviderType
 from ..models import GeoLocation, Route, POI, POICategory
 from ..cache import UnifiedCache
+from api.services.api_call_logger import api_call_logger
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +91,17 @@ class OSMProvider(GeoProvider):
                 params={"address": address}
             )
             if cached_result:
+                # Log cache hit
+                await api_call_logger.log_cache_hit(
+                    provider="osm",
+                    operation="geocode",
+                    request_params={"address": address},
+                    result_count=1,
+                )
                 return cached_result
+        
+        start_time = time.time()
+        error_msg = None
         
         try:
             # Use Nominatim for geocoding
@@ -103,6 +115,19 @@ class OSMProvider(GeoProvider):
                 )
                 if location:
                     break
+            
+            # Log API call
+            duration_ms = int((time.time() - start_time) * 1000)
+            await api_call_logger.log_call(
+                provider="osm",
+                operation="geocode",
+                endpoint="https://nominatim.openstreetmap.org/search",
+                http_method="GET",
+                response_status=200 if location else 404,
+                duration_ms=duration_ms,
+                request_params={"address": address},
+                result_count=1 if location else 0,
+            )
             
             if not location:
                 return None
@@ -146,7 +171,21 @@ class OSMProvider(GeoProvider):
             return result
             
         except Exception as e:
+            error_msg = str(e)[:500]
             logger.error(f"Geocoding error for '{address}': {e}")
+            
+            # Log failed API call
+            duration_ms = int((time.time() - start_time) * 1000)
+            await api_call_logger.log_call(
+                provider="osm",
+                operation="geocode",
+                endpoint="https://nominatim.openstreetmap.org/search",
+                http_method="GET",
+                response_status=500,
+                duration_ms=duration_ms,
+                request_params={"address": address},
+                error_message=error_msg,
+            )
             return None
     
     async def reverse_geocode(
@@ -175,15 +214,38 @@ class OSMProvider(GeoProvider):
             )
             if cached_result:
                 logger.info(f"✅ Cache HIT for reverse_geocode: {poi_name or 'no name'} at ({latitude:.4f}, {longitude:.4f})")
+                # Log cache hit
+                await api_call_logger.log_cache_hit(
+                    provider="osm",
+                    operation="reverse_geocode",
+                    request_params=cache_params,
+                    result_count=1,
+                )
                 return cached_result
         
         logger.info(f"❌ Cache MISS for reverse_geocode: {poi_name or 'no name'} at ({latitude:.4f}, {longitude:.4f}) - fetching from API")
+        
+        start_time = time.time()
+        error_msg = None
         
         try:
             await self._wait_before_request()
             
             location = await asyncio.to_thread(
                 self.geolocator.reverse, f"{latitude}, {longitude}"
+            )
+            
+            # Log API call
+            duration_ms = int((time.time() - start_time) * 1000)
+            await api_call_logger.log_call(
+                provider="osm",
+                operation="reverse_geocode",
+                endpoint="https://nominatim.openstreetmap.org/reverse",
+                http_method="GET",
+                response_status=200 if location else 404,
+                duration_ms=duration_ms,
+                request_params=cache_params,
+                result_count=1 if location else 0,
             )
             
             if not location:
@@ -226,7 +288,21 @@ class OSMProvider(GeoProvider):
             return result
             
         except Exception as e:
+            error_msg = str(e)[:500]
             logger.error(f"Reverse geocoding error for ({latitude}, {longitude}): {e}")
+            
+            # Log failed API call
+            duration_ms = int((time.time() - start_time) * 1000)
+            await api_call_logger.log_call(
+                provider="osm",
+                operation="reverse_geocode",
+                endpoint="https://nominatim.openstreetmap.org/reverse",
+                http_method="GET",
+                response_status=500,
+                duration_ms=duration_ms,
+                request_params=cache_params,
+                error_message=error_msg,
+            )
             return None
     
     async def calculate_route(
@@ -451,23 +527,86 @@ class OSMProvider(GeoProvider):
         
         logger.debug(f"🗺️ Consultando OSRM: {osrm_url}")
         
+        start_time = time.time()
+        response_status = 0
+        response_size = None
+        error_msg = None
+        result_count = 0
+        
         try:
             # Use context manager to ensure proper client lifecycle
             async with self._get_http_client() as client:
                 response = await client.get(osrm_url, params=params, timeout=30)
                 
+                response_status = response.status_code
+                response_size = len(response.content)
+                
                 if response.status_code != 200:
                     logger.warning(f"🗺️ OSRM retornou status {response.status_code}")
+                    error_msg = f"HTTP {response.status_code}"
+                    
+                    # Log failed API call
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    await api_call_logger.log_call(
+                        provider="osm",
+                        operation="osrm_route",
+                        endpoint="http://router.project-osrm.org/route/v1/driving",
+                        http_method="GET",
+                        response_status=response_status,
+                        duration_ms=duration_ms,
+                        request_params={
+                            "origin": f"{origin.latitude},{origin.longitude}",
+                            "destination": f"{destination.latitude},{destination.longitude}",
+                        },
+                        response_size_bytes=response_size,
+                        error_message=error_msg,
+                    )
                     return None
                 
                 data = response.json()
                 
                 if data.get('code') != 'Ok':
-                    logger.warning(f"🗺️ OSRM erro: {data.get('message', 'Unknown error')}")
+                    error_msg = data.get('message', 'Unknown error')
+                    logger.warning(f"🗺️ OSRM erro: {error_msg}")
+                    
+                    # Log failed API call
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    await api_call_logger.log_call(
+                        provider="osm",
+                        operation="osrm_route",
+                        endpoint="http://router.project-osrm.org/route/v1/driving",
+                        http_method="GET",
+                        response_status=response_status,
+                        duration_ms=duration_ms,
+                        request_params={
+                            "origin": f"{origin.latitude},{origin.longitude}",
+                            "destination": f"{destination.latitude},{destination.longitude}",
+                        },
+                        response_size_bytes=response_size,
+                        error_message=error_msg,
+                    )
                     return None
                 
                 if not data.get('routes'):
                     logger.warning(f"🗺️ OSRM não retornou rotas")
+                    error_msg = "No routes returned"
+                    
+                    # Log failed API call
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    await api_call_logger.log_call(
+                        provider="osm",
+                        operation="osrm_route",
+                        endpoint="http://router.project-osrm.org/route/v1/driving",
+                        http_method="GET",
+                        response_status=response_status,
+                        duration_ms=duration_ms,
+                        request_params={
+                            "origin": f"{origin.latitude},{origin.longitude}",
+                            "destination": f"{destination.latitude},{destination.longitude}",
+                        },
+                        response_size_bytes=response_size,
+                        error_message=error_msg,
+                    )
                     return None
                 
                 route = data['routes'][0]
@@ -479,7 +618,25 @@ class OSMProvider(GeoProvider):
                 distance = route['distance']  # meters
                 duration = route['duration']  # seconds
                 
-                logger.debug(f"🗺️ OSRM: {distance/1000:.1f}km, {len(geometry_converted)} pontos na geometria")
+                result_count = len(geometry_converted)
+                logger.debug(f"🗺️ OSRM: {distance/1000:.1f}km, {result_count} pontos na geometria")
+                
+                # Log successful API call
+                duration_ms = int((time.time() - start_time) * 1000)
+                await api_call_logger.log_call(
+                    provider="osm",
+                    operation="osrm_route",
+                    endpoint="http://router.project-osrm.org/route/v1/driving",
+                    http_method="GET",
+                    response_status=response_status,
+                    duration_ms=duration_ms,
+                    request_params={
+                        "origin": f"{origin.latitude},{origin.longitude}",
+                        "destination": f"{destination.latitude},{destination.longitude}",
+                    },
+                    response_size_bytes=response_size,
+                    result_count=result_count,
+                )
                 
                 return {
                     'distance': distance,
@@ -488,7 +645,25 @@ class OSMProvider(GeoProvider):
                 }
             
         except Exception as e:
+            error_msg = str(e)[:500]
             logger.warning(f"🗺️ Erro na requisição OSRM: {e}")
+            
+            # Log failed API call
+            duration_ms = int((time.time() - start_time) * 1000)
+            await api_call_logger.log_call(
+                provider="osm",
+                operation="osrm_route",
+                endpoint="http://router.project-osrm.org/route/v1/driving",
+                http_method="GET",
+                response_status=response_status or 500,
+                duration_ms=duration_ms,
+                request_params={
+                    "origin": f"{origin.latitude},{origin.longitude}",
+                    "destination": f"{destination.latitude},{destination.longitude}",
+                },
+                response_size_bytes=response_size,
+                error_message=error_msg,
+            )
             return None
 
     
@@ -575,6 +750,10 @@ class OSMProvider(GeoProvider):
         # Try all available endpoints
         for attempt in range(len(self.overpass_endpoints)):
             endpoint = self.overpass_endpoints[self.current_endpoint_index]
+            start_time = time.time()
+            response_status = 0
+            response_size = None
+            error_msg = None
             
             try:
                 logger.debug(f"Trying Overpass endpoint: {endpoint}")
@@ -587,17 +766,49 @@ class OSMProvider(GeoProvider):
                         headers={'Content-Type': 'application/x-www-form-urlencoded'}
                     )
                     
+                    response_status = response.status_code
+                    response_size = len(response.content)
                     response.raise_for_status()
                     
                     result = response.json()
-                    logger.info(f"🌐 Overpass response: {len(result.get('elements', []))} elementos retornados")
+                    result_count = len(result.get('elements', []))
+                    logger.info(f"🌐 Overpass response: {result_count} elementos retornados")
+                    
+                    # Log successful API call
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    await api_call_logger.log_call(
+                        provider="osm",
+                        operation="overpass_query",
+                        endpoint=endpoint,
+                        http_method="POST",
+                        response_status=response_status,
+                        duration_ms=duration_ms,
+                        request_params={"query_length": len(query)},
+                        response_size_bytes=response_size,
+                        result_count=result_count,
+                    )
                     
                     logger.debug(f"Overpass request successful using {endpoint}")
                     return result
                 
             except Exception as e:
                 last_exception = e
+                error_msg = str(e)[:500]
                 logger.warning(f"🌐 Overpass endpoint {endpoint} failed: {e}")
+                
+                # Log failed API call
+                duration_ms = int((time.time() - start_time) * 1000)
+                await api_call_logger.log_call(
+                    provider="osm",
+                    operation="overpass_query",
+                    endpoint=endpoint,
+                    http_method="POST",
+                    response_status=response_status or 500,
+                    duration_ms=duration_ms,
+                    request_params={"query_length": len(query)},
+                    response_size_bytes=response_size,
+                    error_message=error_msg,
+                )
                 
                 # Move to next endpoint for next attempt
                 self.current_endpoint_index = (self.current_endpoint_index + 1) % len(self.overpass_endpoints)
