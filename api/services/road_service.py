@@ -198,6 +198,7 @@ class RoadService:
         road_id: Optional[str] = None,
         include_cities: bool = True,
         max_distance_from_road: float = 3000,
+        max_detour_distance_km: float = 5.0,  # Maximum detour distance from junction to POI
         min_distance_from_origin_km: float = 0.0,  # Deprecated - kept for backwards compatibility
         progress_callback: Optional[Callable[[float], None]] = None,
         segment_length_km: float = 1.0
@@ -252,6 +253,7 @@ class RoadService:
             linear_segments,
             milestone_categories,
             max_distance_from_road,
+            max_detour_distance_km=max_detour_distance_km,
             exclude_cities=[origin_city],
             progress_callback=progress_callback,
             main_route=route
@@ -678,27 +680,33 @@ class RoadService:
         segments: List[LinearRoadSegment],
         categories: List[POICategory],
         max_distance_from_road: float,
+        max_detour_distance_km: float = 5.0,
         exclude_cities: Optional[List[Optional[str]]] = None,
         progress_callback: Optional[Callable[[float], None]] = None,
         main_route: Optional[Route] = None
     ) -> List[RoadMilestone]:
         """
         Find POI milestones along the route using segment start/end points.
-        
+
         This method:
         1. Extracts search points from segments
         2. Searches for POIs around each point
         3. Converts POIs to milestones
         4. For distant POIs (>500m), calculates junction point
-        5. Enriches with city information
-        6. Filters excluded cities
-        
+        5. Filters POIs with detour distance > max_detour_distance_km
+        6. Enriches with city information
+        7. Filters excluded cities
+
+        Args:
+            max_detour_distance_km: Maximum allowed detour distance from junction to POI in km.
+                POIs requiring detour greater than this will be excluded. Default: 5.0 km
+
         Returns:
             List of RoadMilestone objects
         """
         logger.info(f"🔍 Iniciando busca de milestones usando {len(segments)} segmentos")
         logger.info(f"🔍 Categorias: {[cat.value for cat in categories]}")
-        logger.info(f"🔍 Parâmetros: max_distance={max_distance_from_road}m")
+        logger.info(f"🔍 Parâmetros: max_distance={max_distance_from_road}m, max_detour={max_detour_distance_km}km")
         
         # Normalize excluded cities
         exclude_cities_filtered = [city.strip().lower() for city in (exclude_cities or []) if city]
@@ -715,6 +723,22 @@ class RoadService:
         total_requests = 0
         consecutive_errors = 0
         pois_abandoned_no_junction = 0
+        pois_abandoned_detour_too_long = 0
+        junction_recalculations = 0
+
+        # Track POIs that have been ADDED as milestones - these are final, ignore always
+        milestone_poi_ids: set = set()
+
+        # Track best junction info for distant POIs (>500m from road)
+        # Key: POI ID, Value: (junction_info, distance_from_origin, search_point, poi_object)
+        # We keep recalculating and store only the best (shortest detour)
+        best_junction_for_poi: Dict[str, Tuple[Any, float, Tuple[float, float], POI]] = {}
+
+        # Track distant POIs that were processed (to count those without any junction)
+        distant_pois_processed: set = set()
+
+        # Collect all unique POIs for database persistence
+        all_unique_pois_dict: Dict[str, POI] = {}  # Key: POI ID, Value: POI object
 
         for i, (point, distance_from_origin) in enumerate(search_points):
             # Update progress based on points processed
@@ -745,11 +769,15 @@ class RoadService:
                 
                 for j, poi in enumerate(pois):
                     try:
-                        # Check if POI already exists (already processed with junction if needed)
-                        if any(m.id == poi.id for m in milestones):
+                        # Skip POIs already added as milestones - these are final
+                        if poi.id in milestone_poi_ids:
                             duplicates_count += 1
-                            logger.debug(f"⏭️  Ignorando POI duplicado: {poi.name}")
+                            logger.debug(f"⏭️  Ignorando POI já adicionado: {poi.name}")
                             continue
+
+                        # Collect POI for later persistence (only once)
+                        if poi.id not in all_unique_pois_dict:
+                            all_unique_pois_dict[poi.id] = poi
 
                         # Validate POI category
                         if not isinstance(poi.category, POICategory):
@@ -763,38 +791,57 @@ class RoadService:
                             point[0], point[1]
                         )
 
-                        junction_info = None
-                        
-                        # For distant POIs (>500m), calculate junction point
-                        if poi_distance_from_road > 500 and main_route:
-                            logger.debug(f"🛣️ POI afastado detectado: {poi.name} "
-                                       f"({poi_distance_from_road:.0f}m da estrada)")
-                            
-                            junction_info = await self._calculate_junction_for_distant_poi(
-                                poi=poi,
-                                search_point=point,
-                                search_point_distance_km=distance_from_origin,
-                                main_route=main_route
+                        # For nearby POIs (<500m), add directly as milestone
+                        if poi_distance_from_road <= 500 or not main_route:
+                            milestone = self._create_milestone_from_poi(
+                                poi,
+                                distance_from_origin,
+                                point,
+                                None  # No junction needed for nearby POIs
                             )
-                            
-                            if not junction_info:
-                                # Abandon POI if no junction found
-                                logger.info(f"🚫 POI abandonado (sem entroncamento): {poi.name} "
-                                          f"({poi_distance_from_road:.0f}m da estrada)")
-                                pois_abandoned_no_junction += 1
-                                abandoned_count += 1
-                                continue
+                            milestones.append(milestone)
+                            converted_count += 1
+                            milestone_poi_ids.add(poi.id)
+                            logger.debug(f"✅ {milestone.name} ({milestone.type.value}) - próximo da estrada")
+                            continue
 
-                        # Create milestone
-                        milestone = self._create_milestone_from_poi(
-                            poi, 
-                            distance_from_origin, 
-                            point,
-                            junction_info
+                        # For distant POIs (>500m), calculate junction and keep the best
+                        distant_pois_processed.add(poi.id)
+                        logger.debug(f"🛣️ POI afastado detectado: {poi.name} "
+                                   f"({poi_distance_from_road:.0f}m da estrada)")
+
+                        # Check if we already have a junction for this POI
+                        is_recalculation = poi.id in best_junction_for_poi
+                        if is_recalculation:
+                            junction_recalculations += 1
+
+                        junction_info = await self._calculate_junction_for_distant_poi(
+                            poi=poi,
+                            search_point=point,
+                            search_point_distance_km=distance_from_origin,
+                            main_route=main_route
                         )
-                        milestones.append(milestone)
-                        converted_count += 1
-                        logger.debug(f"✅ {milestone.name} ({milestone.type.value})")
+
+                        if not junction_info:
+                            # No junction found from this search point
+                            if not is_recalculation:
+                                logger.debug(f"⚠️ Sem entroncamento para {poi.name} neste ponto, tentará em próximos")
+                            continue
+
+                        # Get detour distance from junction info
+                        _, _, access_route_distance_km, _ = junction_info
+
+                        # Check if this is better than previous best
+                        if poi.id in best_junction_for_poi:
+                            prev_junction_info, _, _, _ = best_junction_for_poi[poi.id]
+                            _, _, prev_detour, _ = prev_junction_info
+                            if access_route_distance_km < prev_detour:
+                                logger.debug(f"🔄 Melhor junction encontrada para {poi.name}: "
+                                           f"{access_route_distance_km:.1f}km < {prev_detour:.1f}km")
+                                best_junction_for_poi[poi.id] = (junction_info, distance_from_origin, point, poi)
+                        else:
+                            # First junction found for this POI
+                            best_junction_for_poi[poi.id] = (junction_info, distance_from_origin, point, poi)
                         
                     except Exception as e:
                         logger.error(f"🔍 Erro convertendo POI {j}: {e}")
@@ -842,11 +889,53 @@ class RoadService:
                              f"({total_errors}/{total_requests} failed)")
             if error_rate > 0.5:
                 logger.warning(f"High error rate detected. Consider checking Overpass API status.")
-        
+
+        # Count POIs that never found any junction
+        pois_abandoned_no_junction = len(distant_pois_processed) - len(best_junction_for_poi)
+
+        # Process distant POIs - create milestones for those with valid junctions
+        logger.info(f"🔄 Processando {len(best_junction_for_poi)} POIs distantes com junctions calculadas "
+                   f"(de {len(distant_pois_processed)} processados)")
+        if junction_recalculations > 0:
+            logger.info(f"🔄 Recálculos de junction: {junction_recalculations}")
+
+        for poi_id, (junction_info, dist_from_origin, search_pt, poi) in best_junction_for_poi.items():
+            _, _, access_route_distance_km, _ = junction_info
+
+            if access_route_distance_km <= max_detour_distance_km:
+                # Junction is within acceptable detour distance - create milestone
+                milestone = self._create_milestone_from_poi(
+                    poi,
+                    dist_from_origin,
+                    search_pt,
+                    junction_info
+                )
+                milestones.append(milestone)
+                milestone_poi_ids.add(poi_id)
+                logger.debug(f"✅ {milestone.name} - desvio={access_route_distance_km:.1f}km")
+            else:
+                # Best junction still exceeds max detour
+                pois_abandoned_detour_too_long += 1
+                logger.debug(f"🚫 POI abandonado (melhor desvio ainda muito longo): {poi.name} "
+                           f"(desvio={access_route_distance_km:.1f}km > max={max_detour_distance_km}km)")
+
         logger.info(f"🎯 RESULTADO FINAL: {len(milestones)} milestones encontrados ao longo da rota")
-        
+        logger.info(f"📊 POIs únicos encontrados: {len(all_unique_pois_dict)}")
+        logger.info(f"📊 POIs distantes analisados: {len(best_junction_for_poi)}")
+
         if pois_abandoned_no_junction > 0:
-            logger.info(f"🚫 POIs abandonados por falta de entroncamento: {pois_abandoned_no_junction}")
+            logger.info(f"🚫 POIs sem entroncamento encontrado: {pois_abandoned_no_junction}")
+        if pois_abandoned_detour_too_long > 0:
+            logger.info(f"🚫 POIs abandonados por desvio muito longo: {pois_abandoned_detour_too_long}")
+
+        # Persist all unique POIs to database
+        all_unique_pois = list(all_unique_pois_dict.values())
+        if all_unique_pois:
+            try:
+                await self._persist_pois_to_database(all_unique_pois, milestone_poi_ids)
+            except Exception as e:
+                logger.warning(f"⚠️ Erro ao persistir POIs no banco: {e}")
+                # Don't fail the whole operation if persistence fails
 
         # Update progress - POI search completed (90%)
         if progress_callback:
@@ -1766,3 +1855,54 @@ class RoadService:
         except Exception as e:
             logger.error(f"❌ Erro calculando entroncamento para {poi.name}: {e}")
             return None
+
+    async def _persist_pois_to_database(
+        self,
+        pois: List[POI],
+        referenced_poi_ids: set
+    ) -> None:
+        """
+        Persist POIs to the database.
+
+        Creates database records for all POIs found during map generation.
+        POIs that are used in milestones are marked as is_referenced=True.
+
+        Args:
+            pois: List of POIs from geographic provider
+            referenced_poi_ids: Set of POI IDs that are used in milestones
+        """
+        from sqlalchemy.ext.asyncio import (
+            AsyncSession,
+            async_sessionmaker,
+            create_async_engine,
+        )
+        from .poi_persistence_service import persist_pois_batch
+
+        settings = get_settings()
+
+        # Create standalone engine to avoid event loop conflicts
+        database_url = (
+            f"postgresql+asyncpg://{settings.postgres_user}:{settings.postgres_password}"
+            f"@{settings.postgres_host}:{settings.postgres_port}/{settings.postgres_database}"
+        )
+        engine = create_async_engine(
+            database_url,
+            pool_size=1,
+            max_overflow=0,
+            pool_pre_ping=True,
+        )
+        session_maker = async_sessionmaker(
+            engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+
+        try:
+            async with session_maker() as session:
+                await persist_pois_batch(
+                    session=session,
+                    pois=pois,
+                    referenced_poi_ids=referenced_poi_ids
+                )
+        finally:
+            await engine.dispose()

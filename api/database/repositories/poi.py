@@ -295,6 +295,128 @@ class POIRepository(BaseRepository[POI]):
         )
         return list(result.scalars().all())
 
+    async def get_or_create_by_provider_id(
+        self,
+        provider: str,
+        provider_id: str,
+        defaults: dict
+    ) -> tuple[POI, bool]:
+        """
+        Get an existing POI by provider ID (osm_id or here_id) or create a new one.
+
+        Args:
+            provider: Provider name ('osm' or 'here')
+            provider_id: Provider-specific ID
+            defaults: Default values for creating a new POI
+
+        Returns:
+            Tuple of (POI instance, created flag)
+        """
+        # Look up by appropriate provider ID
+        if provider == "osm":
+            existing = await self.get_by_osm_id(provider_id)
+        elif provider == "here":
+            existing = await self.get_by_here_id(provider_id)
+        else:
+            existing = None
+
+        if existing:
+            return existing, False
+
+        # Create new POI with provider-specific ID
+        poi_data = {**defaults, "primary_provider": provider}
+        if provider == "osm":
+            poi_data["osm_id"] = provider_id
+        elif provider == "here":
+            poi_data["here_id"] = provider_id
+
+        poi = POI(**poi_data)
+        await self.create(poi)
+        return poi, True
+
+    async def mark_as_referenced(self, poi_id: UUID) -> None:
+        """
+        Mark a POI as referenced by a map.
+
+        Args:
+            poi_id: POI UUID
+        """
+        poi = await self.get(poi_id)
+        if poi and not poi.is_referenced:
+            poi.is_referenced = True
+            await self.session.flush()
+
+    async def bulk_mark_as_referenced(self, poi_ids: List[UUID]) -> int:
+        """
+        Mark multiple POIs as referenced.
+
+        Args:
+            poi_ids: List of POI UUIDs
+
+        Returns:
+            Number of POIs updated
+        """
+        from sqlalchemy import update
+
+        result = await self.session.execute(
+            update(POI)
+            .where(and_(POI.id.in_(poi_ids), POI.is_referenced == False))
+            .values(is_referenced=True)
+        )
+        await self.session.flush()
+        return result.rowcount
+
+    async def find_unreferenced(self, limit: int = 100) -> List[POI]:
+        """
+        Find POIs that are not referenced by any map.
+
+        Args:
+            limit: Maximum number of results
+
+        Returns:
+            List of unreferenced POIs
+        """
+        result = await self.session.execute(
+            select(POI)
+            .where(POI.is_referenced == False)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def find_referenced_not_enriched(
+        self,
+        enrichment_provider: str,
+        poi_types: Optional[List[str]] = None,
+        limit: int = 100
+    ) -> List[POI]:
+        """
+        Find referenced POIs that haven't been enriched by a specific provider.
+
+        Args:
+            enrichment_provider: Provider name (e.g., 'google_places', 'here_maps')
+            poi_types: Optional list of POI types to filter
+            limit: Maximum number of results
+
+        Returns:
+            List of POIs needing enrichment
+        """
+        from sqlalchemy import not_
+
+        conditions = [
+            POI.is_referenced == True,
+            not_(POI.enriched_by.contains([enrichment_provider]))
+        ]
+
+        if poi_types:
+            conditions.append(POI.type.in_(poi_types))
+
+        result = await self.session.execute(
+            select(POI)
+            .where(and_(*conditions))
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
     async def update_with_here_data(
         self,
         poi: POI,

@@ -95,6 +95,10 @@ class POI(Base):
     # Example: ["google_places", "here_maps"]
     last_enriched_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
 
+    # Reference tracking - indicates if this POI is used in any map
+    # POIs with is_referenced=False don't need enrichment
+    is_referenced: Mapped[bool] = mapped_column(default=False, index=True)
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

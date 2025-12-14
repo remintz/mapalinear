@@ -41,6 +41,7 @@ class LinearMapRequest(BaseModel):
     road_id: Optional[str] = Field(None, description="ID da estrada (se já conhecido)")
     include_cities: bool = Field(True, description="Incluir cidades como marcos")
     max_distance_from_road: float = Field(1000, description="Distância máxima em metros da estrada para considerar pontos de interesse")
+    max_detour_distance_km: float = Field(5.0, description="Distância máxima em km do entroncamento até o POI (POIs com desvio maior serão excluídos)")
     min_distance_from_origin_km: float = Field(0.0, description="Distância mínima em km da origem (não mais usado - filtramos por cidade de origem)")
 
 
