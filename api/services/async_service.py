@@ -7,7 +7,7 @@ import logging
 import threading
 import uuid
 from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from api.database.connection import get_session
 from api.database.models.async_operation import AsyncOperation
@@ -18,6 +18,20 @@ logger = logging.getLogger(__name__)
 
 # In-memory cache of active operations for quick access
 _active_operations: Dict[str, AsyncOperationResponse] = {}
+
+
+def _serialize_for_json(obj: Any) -> Any:
+    """Recursively serialize objects for JSON storage in PostgreSQL JSONB columns.
+
+    Handles datetime objects by converting them to ISO format strings.
+    """
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, dict):
+        return {k: _serialize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [_serialize_for_json(item) for item in obj]
+    return obj
 
 
 class AsyncService:
@@ -157,9 +171,11 @@ class AsyncService:
     @staticmethod
     async def _complete_operation_async(operation_id: str, result: Dict[str, Any]) -> None:
         """Mark operation as completed in database (async version)."""
+        # Serialize datetime objects to ISO strings for JSONB storage
+        serialized_result = _serialize_for_json(result)
         async with get_session() as session:
             repo = AsyncOperationRepository(session)
-            await repo.complete_operation(operation_id=operation_id, result=result)
+            await repo.complete_operation(operation_id=operation_id, result=serialized_result)
 
         # Remove from in-memory cache
         _active_operations.pop(operation_id, None)
@@ -250,34 +266,96 @@ class AsyncService:
             function: Function to execute
             *args, **kwargs: Arguments for the function
         """
-        def _update_progress(progress: float):
-            AsyncService.update_progress(
-                operation_id,
-                progress,
-                estimated_completion=datetime.now() + timedelta(minutes=5 * (100 - progress) / 100)
-            )
+        from api.database.connection import create_standalone_engine, get_standalone_session
+        from api.database.repositories.async_operation import AsyncOperationRepository
 
         def _worker():
             # Create a new event loop for this thread
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
 
+            # Create a standalone engine for this thread
+            engine = create_standalone_engine()
+
+            async def _update_progress_bg(progress: float):
+                """Update progress using the thread's own database connection."""
+                async with get_standalone_session(engine) as session:
+                    repo = AsyncOperationRepository(session)
+                    await repo.update_progress(
+                        operation_id=operation_id,
+                        progress_percent=progress,
+                        estimated_completion=datetime.now() + timedelta(minutes=5 * (100 - progress) / 100),
+                    )
+                # Update in-memory cache
+                if operation_id in _active_operations:
+                    _active_operations[operation_id].progress_percent = progress
+
+            async def _complete_operation_bg(result: Dict[str, Any]):
+                """Complete operation using the thread's own database connection."""
+                # Serialize datetime objects to ISO strings for JSONB storage
+                serialized_result = _serialize_for_json(result)
+                async with get_standalone_session(engine) as session:
+                    repo = AsyncOperationRepository(session)
+                    await repo.complete_operation(operation_id=operation_id, result=serialized_result)
+                _active_operations.pop(operation_id, None)
+                logger.info(f"Operation {operation_id} completed successfully")
+
+            async def _fail_operation_bg(error: str):
+                """Fail operation using the thread's own database connection."""
+                async with get_standalone_session(engine) as session:
+                    repo = AsyncOperationRepository(session)
+                    await repo.fail_operation(operation_id=operation_id, error=error)
+                _active_operations.pop(operation_id, None)
+                logger.error(f"Operation {operation_id} failed: {error}")
+
+            def _update_progress_sync(progress: float):
+                """Sync wrapper for progress updates.
+                
+                When called from within a running coroutine (nested), only updates
+                the in-memory cache. When called from sync context, also persists
+                to database.
+                """
+                # Always update in-memory cache (fast, sync)
+                if operation_id in _active_operations:
+                    _active_operations[operation_id].progress_percent = progress
+                    _active_operations[operation_id].estimated_completion = (
+                        datetime.now() + timedelta(minutes=5 * (100 - progress) / 100)
+                    )
+                
+                # Only persist to DB if loop is not already running
+                # (avoids nested run_until_complete which is not allowed)
+                if not loop.is_running():
+                    try:
+                        loop.run_until_complete(_update_progress_bg(progress))
+                    except Exception as e:
+                        logger.warning(f"Failed to persist progress to DB: {e}")
+
             try:
-                # Update to 5% to show it started
-                _update_progress(5)
+                # Update to 5% to show it started (loop not running yet)
+                loop.run_until_complete(_update_progress_bg(5))
 
                 # Execute the function with progress callback
                 result = function(
-                    progress_callback=_update_progress,
+                    progress_callback=_update_progress_sync,
                     *args,
                     **kwargs
                 )
 
                 # Mark as completed
-                AsyncService.complete_operation(operation_id, result)
+                loop.run_until_complete(_complete_operation_bg(result))
             except Exception as e:
                 logger.error(f"Error in async operation {operation_id}: {str(e)}")
-                AsyncService.fail_operation(operation_id, str(e))
+                try:
+                    loop.run_until_complete(_fail_operation_bg(str(e)))
+                except Exception as fail_error:
+                    logger.error(f"Failed to mark operation as failed: {fail_error}")
+            finally:
+                # Clean up the engine and loop
+                try:
+                    loop.run_until_complete(engine.dispose())
+                except Exception:
+                    pass
+                loop.close()
 
         # Start background thread
         thread = threading.Thread(target=_worker)

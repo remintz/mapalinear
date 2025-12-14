@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from api.database.connection import Base, get_database_url
 
 # Import all models so they are registered with Base.metadata
-from api.database.models import CacheEntry, Map, MapPOI, POI  # noqa: F401
+from api.database.models import CacheEntry, Map, MapPOI, POI, AsyncOperation  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

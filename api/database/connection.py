@@ -34,6 +34,44 @@ def get_database_url() -> str:
     )
 
 
+def create_standalone_engine() -> AsyncEngine:
+    """
+    Create a standalone async engine for use in background threads.
+
+    Each background thread should create its own engine to avoid
+    event loop conflicts with the main FastAPI engine.
+    """
+    settings = get_settings()
+    return create_async_engine(
+        get_database_url(),
+        pool_size=2,  # Small pool for background operations
+        max_overflow=2,
+        pool_pre_ping=True,
+        echo=False,
+    )
+
+
+@asynccontextmanager
+async def get_standalone_session(engine: AsyncEngine) -> AsyncGenerator[AsyncSession, None]:
+    """
+    Async context manager for standalone database sessions.
+
+    Use this in background threads with their own engine.
+    """
+    session_maker = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    async with session_maker() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
+
 def get_engine() -> AsyncEngine:
     """Get or create the async engine instance."""
     global _engine
