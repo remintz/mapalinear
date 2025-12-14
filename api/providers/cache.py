@@ -40,6 +40,12 @@ class CacheKey:
     def _normalize_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize parameters for consistent hashing."""
         normalized = {}
+        
+        # Keys that contain coordinates and should be rounded
+        coordinate_keys = {
+            'latitude', 'longitude', 'lat', 'lon',
+            'origin_lat', 'origin_lon', 'dest_lat', 'dest_lon'
+        }
 
         for key, value in params.items():
             if isinstance(value, str):
@@ -48,7 +54,7 @@ class CacheKey:
             elif isinstance(value, (int, float)):
                 # Round coordinates to 3 decimal places (~111m precision)
                 # This allows POIs within ~100m to share the same cache
-                if key in ('latitude', 'longitude', 'lat', 'lon'):
+                if key in coordinate_keys:
                     normalized[key] = round(float(value), 3)
                 else:
                     normalized[key] = value
@@ -414,7 +420,7 @@ class UnifiedCache:
             created_at=datetime.utcnow(),
             expires_at=datetime.utcnow() + timedelta(seconds=ttl),
             hit_count=0,
-            params=params
+            params=normalized_params  # Use normalized params for consistency
         )
         
         data_serialized = entry._serialize_data(data)
@@ -442,7 +448,7 @@ class UnifiedCache:
                         entry.created_at,
                         entry.expires_at,
                         0,
-                        json.dumps(params)
+                        json.dumps(normalized_params)  # Store normalized params
                     )
             
             self._stats['sets'] += 1

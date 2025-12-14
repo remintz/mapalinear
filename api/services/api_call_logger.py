@@ -12,7 +12,6 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from api.database.connection import get_session
 from api.database.repositories.api_call_log import ApiCallLogRepository
 
 logger = logging.getLogger(__name__)
@@ -178,23 +177,57 @@ class ApiCallLogger:
         self._log_queue.clear()
 
         try:
-            async with get_session() as session:
-                repo = ApiCallLogRepository(session)
+            # Use standalone session to avoid event loop conflicts
+            # when called from background threads
+            from sqlalchemy.ext.asyncio import (
+                AsyncSession,
+                async_sessionmaker,
+                create_async_engine,
+            )
+            from api.providers.settings import get_settings
 
-                for ctx, duration_ms in to_flush:
-                    await repo.create_log(
-                        provider=ctx.provider,
-                        operation=ctx.operation,
-                        endpoint=ctx.endpoint,
-                        http_method=ctx.http_method,
-                        response_status=ctx.response_status,
-                        duration_ms=duration_ms,
-                        request_params=ctx.request_params,
-                        response_size_bytes=ctx.response_size_bytes,
-                        cache_hit=ctx.cache_hit,
-                        result_count=ctx.result_count,
-                        error_message=ctx.error_message,
-                    )
+            settings = get_settings()
+            database_url = (
+                f"postgresql+asyncpg://{settings.postgres_user}:{settings.postgres_password}"
+                f"@{settings.postgres_host}:{settings.postgres_port}/{settings.postgres_database}"
+            )
+            engine = create_async_engine(
+                database_url,
+                pool_size=1,
+                max_overflow=0,
+                pool_pre_ping=True,
+            )
+            session_maker = async_sessionmaker(
+                engine,
+                class_=AsyncSession,
+                expire_on_commit=False,
+            )
+
+            try:
+                async with session_maker() as session:
+                    try:
+                        repo = ApiCallLogRepository(session)
+
+                        for ctx, duration_ms in to_flush:
+                            await repo.create_log(
+                                provider=ctx.provider,
+                                operation=ctx.operation,
+                                endpoint=ctx.endpoint,
+                                http_method=ctx.http_method,
+                                response_status=ctx.response_status,
+                                duration_ms=duration_ms,
+                                request_params=ctx.request_params,
+                                response_size_bytes=ctx.response_size_bytes,
+                                cache_hit=ctx.cache_hit,
+                                result_count=ctx.result_count,
+                                error_message=ctx.error_message,
+                            )
+                        await session.commit()
+                    except Exception:
+                        await session.rollback()
+                        raise
+            finally:
+                await engine.dispose()
 
             logger.debug(f"Flushed {len(to_flush)} API call logs to database")
 

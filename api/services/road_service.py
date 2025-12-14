@@ -306,27 +306,50 @@ class RoadService:
             try:
                 from .here_enrichment_service import enrich_map_pois_with_here
                 import asyncio
+                from sqlalchemy.ext.asyncio import (
+                    AsyncSession,
+                    async_sessionmaker,
+                    create_async_engine,
+                )
 
                 async def _enrich():
-                    from api.database.connection import get_session
-                    async with get_session() as session:
-                        results = await enrich_map_pois_with_here(
-                            session=session,
-                            map_id=map_id,
-                            poi_types=["gas_station", "restaurant", "hotel", "hospital", "pharmacy"]
-                        )
-                        matched = len([r for r in results if r.matched])
-                        logger.info(f"✅ HERE enrichment: {matched}/{len(results)} POIs enriquecidos")
+                    # Create standalone engine to avoid event loop conflicts
+                    # when running in background threads
+                    database_url = (
+                        f"postgresql+asyncpg://{settings.postgres_user}:{settings.postgres_password}"
+                        f"@{settings.postgres_host}:{settings.postgres_port}/{settings.postgres_database}"
+                    )
+                    engine = create_async_engine(
+                        database_url,
+                        pool_size=1,
+                        max_overflow=0,
+                        pool_pre_ping=True,
+                    )
+                    session_maker = async_sessionmaker(
+                        engine,
+                        class_=AsyncSession,
+                        expire_on_commit=False,
+                    )
 
-                # Run async enrichment
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        asyncio.create_task(_enrich())
-                    else:
-                        loop.run_until_complete(_enrich())
-                except RuntimeError:
-                    asyncio.run(_enrich())
+                    try:
+                        async with session_maker() as session:
+                            try:
+                                results = await enrich_map_pois_with_here(
+                                    session=session,
+                                    map_id=map_id,
+                                    poi_types=["gas_station", "restaurant", "hotel", "hospital", "pharmacy"]
+                                )
+                                await session.commit()
+                                matched = len([r for r in results if r.matched])
+                                logger.info(f"✅ HERE enrichment: {matched}/{len(results)} POIs enriquecidos")
+                            except Exception:
+                                await session.rollback()
+                                raise
+                    finally:
+                        await engine.dispose()
+
+                # Run async enrichment in a new event loop
+                asyncio.run(_enrich())
             except Exception as e:
                 logger.warning(f"⚠️ Erro ao enriquecer POIs com HERE: {e}")
 
