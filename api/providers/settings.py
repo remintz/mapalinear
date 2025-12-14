@@ -146,12 +146,7 @@ class ProviderSettings(BaseSettings):
         description="API server port"
     )
     
-    # PostgreSQL Cache configuration
-    cache_backend: str = Field(
-        default="postgres",
-        alias="CACHE_BACKEND",
-        description="Cache backend type (memory, postgres)"
-    )
+    # PostgreSQL Cache configuration (always uses PostgreSQL)
     postgres_host: str = Field(
         default="localhost",
         alias="POSTGRES_HOST",

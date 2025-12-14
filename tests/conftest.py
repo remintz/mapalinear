@@ -123,8 +123,12 @@ def sample_route(sample_locations):
 
 @pytest.fixture
 def clean_cache():
-    """Provide a fresh cache instance for each test."""
-    return UnifiedCache(backend="memory")
+    """Provide a cache instance for testing.
+
+    Note: The cache always uses PostgreSQL. Tests should use unique
+    parameters (e.g., random coordinates) to avoid cache collisions.
+    """
+    return UnifiedCache()
 
 
 @pytest.fixture
@@ -189,34 +193,97 @@ def provider_manager(clean_cache):
 def mock_env_vars():
     """Mock environment variables for testing."""
     from api.providers.settings import reset_settings
-    
+
     original_values = {}
     test_values = {
         'GEO_PRIMARY_PROVIDER': 'osm',
+        'POI_PROVIDER': 'osm',
+        'HERE_ENRICHMENT_ENABLED': 'false',
         'GEO_CACHE_TTL_GEOCODE': '3600',
-        'GEO_CACHE_TTL_ROUTE': '1800',  
+        'GEO_CACHE_TTL_ROUTE': '1800',
         'GEO_CACHE_TTL_POI': '900',
-        'HERE_API_KEY': 'test_api_key_12345'
+        'HERE_API_KEY': 'test_api_key_12345',
+        'GOOGLE_PLACES_ENABLED': 'true',
     }
-    
+
     # Store original values and set test values
     for key, value in test_values.items():
         original_values[key] = os.getenv(key)
         os.environ[key] = value
-    
+
     # Reset settings to pick up new env vars
     reset_settings()
-    
+
     yield test_values
-    
+
     # Restore original values
     for key, original_value in original_values.items():
         if original_value is None:
             os.environ.pop(key, None)
         else:
             os.environ[key] = original_value
-    
+
     # Reset settings again after restore
+    reset_settings()
+
+
+@pytest.fixture
+def mock_env_vars_here_provider():
+    """Mock environment variables with HERE as POI provider."""
+    from api.providers.settings import reset_settings
+
+    original_values = {}
+    test_values = {
+        'GEO_PRIMARY_PROVIDER': 'osm',
+        'POI_PROVIDER': 'here',
+        'HERE_ENRICHMENT_ENABLED': 'false',
+        'HERE_API_KEY': 'test_api_key_12345',
+        'GOOGLE_PLACES_ENABLED': 'true',
+    }
+
+    for key, value in test_values.items():
+        original_values[key] = os.getenv(key)
+        os.environ[key] = value
+
+    reset_settings()
+    yield test_values
+
+    for key, original_value in original_values.items():
+        if original_value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = original_value
+
+    reset_settings()
+
+
+@pytest.fixture
+def mock_env_vars_here_enrichment():
+    """Mock environment variables with HERE enrichment enabled."""
+    from api.providers.settings import reset_settings
+
+    original_values = {}
+    test_values = {
+        'GEO_PRIMARY_PROVIDER': 'osm',
+        'POI_PROVIDER': 'osm',
+        'HERE_ENRICHMENT_ENABLED': 'true',
+        'HERE_API_KEY': 'test_api_key_12345',
+        'GOOGLE_PLACES_ENABLED': 'true',
+    }
+
+    for key, value in test_values.items():
+        original_values[key] = os.getenv(key)
+        os.environ[key] = value
+
+    reset_settings()
+    yield test_values
+
+    for key, original_value in original_values.items():
+        if original_value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = original_value
+
     reset_settings()
 
 

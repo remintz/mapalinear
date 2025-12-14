@@ -30,10 +30,7 @@ class GeoProviderManager:
             cache: Optional unified cache instance. If not provided, creates a new one.
         """
         if cache is None:
-            # Import settings to determine cache backend
-            from .settings import get_settings
-            settings = get_settings()
-            cache = UnifiedCache(backend=settings.cache_backend)
+            cache = UnifiedCache()
 
         self._cache = cache
         self._providers: Dict[ProviderType, GeoProvider] = {}

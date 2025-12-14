@@ -270,59 +270,64 @@ class TestDefaultProviderConfiguration:
 
 class TestProviderStatistics:
     """Test suite for provider statistics and monitoring."""
-    
-    def test_get_stats_initial_state(self):
+
+    @pytest.mark.asyncio
+    async def test_get_stats_initial_state(self):
         """It should return correct initial statistics."""
         manager = GeoProviderManager()
-        stats = manager.get_stats()
-        
+        stats = await manager.get_stats()
+
         assert stats["active_providers"] == []
         assert stats["registered_providers"] == []
         assert "cache_stats" in stats
-    
-    def test_get_stats_after_registration(self):
+
+    @pytest.mark.asyncio
+    async def test_get_stats_after_registration(self):
         """It should show registered providers in statistics."""
         manager = GeoProviderManager()
         manager.register_provider(ProviderType.OSM, MockProvider)
         manager.register_provider(ProviderType.HERE, AlternativeMockProvider)
-        
-        stats = manager.get_stats()
-        
+
+        stats = await manager.get_stats()
+
         assert ProviderType.OSM in stats["registered_providers"]
         assert ProviderType.HERE in stats["registered_providers"]
         assert len(stats["registered_providers"]) == 2
         assert stats["active_providers"] == []  # No instances created yet
-    
-    def test_get_stats_after_instantiation(self):
+
+    @pytest.mark.asyncio
+    async def test_get_stats_after_instantiation(self):
         """It should show active providers in statistics."""
         manager = GeoProviderManager()
         manager.register_provider(ProviderType.OSM, MockProvider)
-        
+
         # Create instance
         provider = manager.get_provider(ProviderType.OSM)
-        
-        stats = manager.get_stats()
+
+        stats = await manager.get_stats()
         assert ProviderType.OSM in stats["active_providers"]
         assert len(stats["active_providers"]) == 1
-    
-    def test_get_stats_includes_provider_specific_stats(self):
+
+    @pytest.mark.asyncio
+    async def test_get_stats_includes_provider_specific_stats(self):
         """It should include provider-specific statistics when available."""
         manager = GeoProviderManager()
         manager.register_provider(ProviderType.OSM, MockProvider)
-        
+
         # Create and use provider
         provider = manager.get_provider(ProviderType.OSM)
-        
-        stats = manager.get_stats()
+
+        stats = await manager.get_stats()
         # MockProvider has get_stats method
         assert "osm_stats" in stats
         assert stats["osm_stats"] == {"calls": 0}
-    
-    def test_get_stats_cache_metrics(self, clean_cache):
+
+    @pytest.mark.asyncio
+    async def test_get_stats_cache_metrics(self, clean_cache):
         """It should include cache statistics."""
         manager = GeoProviderManager(cache=clean_cache)
-        stats = manager.get_stats()
-        
+        stats = await manager.get_stats()
+
         cache_stats = stats["cache_stats"]
         assert "backend" in cache_stats
         assert "total_entries" in cache_stats
@@ -489,15 +494,16 @@ class TestBuiltInProviderRegistration:
             assert ProviderType.OSM in manager._provider_classes
             mock_logger.info.assert_called_with("Finished registering built-in providers")
     
+    @pytest.mark.asyncio
     @patch('api.providers.manager.logger')
-    def test_register_built_in_providers_import_error(self, mock_logger):
+    async def test_register_built_in_providers_import_error(self, mock_logger):
         """It should handle import errors gracefully."""
         manager = GeoProviderManager()
-        
+
         # Test that function handles import errors gracefully
         # The function should not crash even if provider modules don't exist
         from api.providers.manager import _register_built_in_providers
-        
+
         # This should not raise an exception, even if providers can't be imported
         try:
             _register_built_in_providers(manager)
@@ -505,8 +511,8 @@ class TestBuiltInProviderRegistration:
             assert True
         except Exception as e:
             pytest.fail(f"_register_built_in_providers should handle import errors gracefully but raised: {e}")
-            
+
         # Verify manager is still in a valid state
-        stats = manager.get_stats()
+        stats = await manager.get_stats()
         assert isinstance(stats, dict)
         assert "registered_providers" in stats

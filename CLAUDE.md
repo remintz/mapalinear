@@ -237,8 +237,7 @@ npm run lighthouse:perf
 - `MAPALINEAR_HOST`: API host (default: 0.0.0.0)
 - `MAPALINEAR_PORT`: API port (default: 8001)
 
-### Cache System
-- `CACHE_BACKEND`: Cache backend type (memory, postgres) - default: postgres
+### Cache System (PostgreSQL)
 - `POSTGRES_HOST`: PostgreSQL host (default: localhost)
 - `POSTGRES_PORT`: PostgreSQL port (default: 5432)
 - `POSTGRES_DATABASE`: PostgreSQL database name (default: mapalinear)
@@ -333,10 +332,10 @@ The Unified Cache (`api/providers/cache.py`) is critical for performance and cos
 - **POI Search**: Either exact match OR spatial match (distance < avg radius && same categories)
 - **Routes**: Exact match on origin/destination coordinates and waypoints
 
-**Backend Configuration:**
-- Set `CACHE_BACKEND=postgres` (default) in `.env` for PostgreSQL backend
-- Set `CACHE_BACKEND=memory` for in-memory cache (testing only)
+**Backend:**
+- The cache always uses PostgreSQL for persistence and reliability
 - PostgreSQL connection pooling configured via environment variables
+- Tests should use unique parameters to avoid cache collisions
 
 **Important:**
 - When modifying cache logic, ensure `_serialize_data()` handles all Pydantic model types to avoid "not JSON serializable" errors
@@ -446,11 +445,10 @@ Long-running operations use async tasks stored in `cache/async_operations/`:
 - All geographical searches are focused on Brazilian locations (cities must include state abbreviation)
 - The API must be running for frontend and CLI to work
 - Geographic provider is selected via `GEO_PRIMARY_PROVIDER` environment variable
-- **PostgreSQL database must be running and initialized** for the cache system to work (default backend)
+- **PostgreSQL database must be running and initialized** for the cache system to work
 - Database schema must be initialized with `make db-setup` before first run
 - Unified cache works across all providers with intelligent key generation
 - Cache data persists in PostgreSQL with connection pooling for optimal performance
-- For testing without PostgreSQL, set `CACHE_BACKEND=memory` in `.env`
 
 ### Frontend PWA
 - PWA works offline after initial load and route caching

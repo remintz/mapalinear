@@ -173,20 +173,19 @@ class UnifiedCache:
     5. Statistics tracking for monitoring
     """
     
-    def __init__(self, backend: str = "postgres"):
+    def __init__(self):
         """
-        Initialize cache with specified backend.
-        
-        Args:
-            backend: Cache backend type ("memory" or "postgres")
+        Initialize cache with PostgreSQL backend.
+
+        The cache always uses PostgreSQL for persistence and reliability.
+        Connection pooling is managed per event loop for async compatibility.
         """
         from .settings import get_settings
-        
-        self.backend = backend
+
         self._pools = {}  # Event loop ID -> pool mapping
         self._pool_locks = {}  # Event loop ID -> lock mapping
         self._stats = {'hits': 0, 'misses': 0, 'sets': 0, 'evictions': 0}
-        
+
         self.settings = get_settings()
         
         # TTL configuration (in seconds)
@@ -647,7 +646,7 @@ class UnifiedCache:
         hit_rate = (self._stats['hits'] / total_requests * 100) if total_requests > 0 else 0
         
         return {
-            'backend': self.backend,
+            'backend': 'postgres',
             'total_entries': total_entries,
             'hits': self._stats['hits'],
             'misses': self._stats['misses'],

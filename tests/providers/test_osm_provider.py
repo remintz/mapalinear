@@ -48,18 +48,25 @@ class TestOSMProviderGeocoding:
     @pytest.mark.asyncio
     async def test_geocode_basic_functionality(self, osm_provider):
         """It should geocode addresses using Nominatim API."""
-        # Create a mock location object
+        # Create a mock location object with proper raw attribute
         from unittest.mock import Mock
         mock_location = Mock()
         mock_location.latitude = -23.5505
         mock_location.longitude = -46.6333
         mock_location.address = "São Paulo, SP, Brasil"
-        
+        mock_location.raw = {
+            'address': {
+                'city': 'São Paulo',
+                'state': 'São Paulo',
+                'country': 'Brasil'
+            }
+        }
+
         with patch.object(osm_provider.geolocator, 'geocode') as mock_geocode:
             mock_geocode.return_value = mock_location
-            
+
             result = await osm_provider.geocode("São Paulo, SP")
-            
+
             assert result is not None
             assert result.latitude == -23.5505
             assert result.longitude == -46.6333
@@ -78,16 +85,23 @@ class TestOSMProviderGeocoding:
     @pytest.mark.asyncio
     async def test_reverse_geocode_functionality(self, osm_provider):
         """It should reverse geocode coordinates to addresses."""
-        # Create mock location for reverse geocoding
+        # Create mock location for reverse geocoding with proper raw attribute
         from unittest.mock import Mock
         mock_location = Mock()
         mock_location.address = "Centro, São Paulo, SP, Brasil"
-        
+        mock_location.raw = {
+            'address': {
+                'city': 'São Paulo',
+                'state': 'São Paulo',
+                'country': 'Brasil'
+            }
+        }
+
         with patch.object(osm_provider.geolocator, 'reverse') as mock_reverse:
             mock_reverse.return_value = mock_location
-            
+
             result = await osm_provider.reverse_geocode(-23.5505, -46.6333)
-            
+
             assert result is not None
             assert result.latitude == -23.5505
             assert result.longitude == -46.6333
@@ -97,19 +111,31 @@ class TestOSMProviderGeocoding:
     async def test_geocode_caches_results(self, osm_provider):
         """It should cache geocoding results to improve performance."""
         from unittest.mock import Mock
+        import random
+
+        # Use unique address to avoid collision with other tests
+        unique_address = f"São Paulo, SP Test {random.randint(10000, 99999)}"
+
         mock_location = Mock()
         mock_location.latitude = -23.5505
         mock_location.longitude = -46.6333
-        mock_location.address = "São Paulo, SP, Brasil"
-        
+        mock_location.address = unique_address
+        mock_location.raw = {
+            'address': {
+                'city': 'São Paulo',
+                'state': 'São Paulo',
+                'country': 'Brasil'
+            }
+        }
+
         with patch.object(osm_provider.geolocator, 'geocode') as mock_geocode:
             mock_geocode.return_value = mock_location
-            
+
             # First call
-            result1 = await osm_provider.geocode("São Paulo, SP")
+            result1 = await osm_provider.geocode(unique_address)
             # Second call (should use cache if available)
-            result2 = await osm_provider.geocode("São Paulo, SP")
-            
+            result2 = await osm_provider.geocode(unique_address)
+
             assert result1 is not None
             assert result2 is not None
             assert result1.latitude == result2.latitude
