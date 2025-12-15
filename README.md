@@ -169,6 +169,61 @@ curl "http://localhost:8001/api/pois/search?lat=-23.5505&lon=-46.6333&radius=100
 curl "http://localhost:8001/api/roads/stats?origin=São Paulo, SP&destination=Rio de Janeiro, RJ"
 ```
 
+## Otimizações de Performance
+
+O MapaLinear implementa várias otimizações para reduzir o tempo de geração de mapas e minimizar chamadas a APIs externas.
+
+### Sistema de Cache Unificado
+
+O cache utiliza PostgreSQL como backend e suporta diferentes estratégias de matching:
+
+| Operação | Estratégia | TTL Padrão |
+|----------|------------|------------|
+| Geocoding | Match exato por endereço normalizado | 7 dias |
+| Rotas | Match exato por coordenadas origem/destino | 6 horas |
+| Busca de POIs | **Match espacial** (localização + raio + categorias) | 1 dia |
+| Reverse Geocode | Match exato por coordenadas | 7 dias |
+| Google Places | Match por POI ID | 30 dias |
+
+**Match Espacial para POIs:** Quando uma busca de POIs é feita, o cache verifica se existe uma busca anterior em localização próxima (< raio médio) com as mesmas categorias. Isso permite reutilizar resultados de buscas anteriores em pontos próximos da rota.
+
+### Otimização de Cálculo de Entroncamentos (Junctions)
+
+Para POIs distantes da estrada (>500m), o sistema calcula o ponto de entroncamento onde o motorista deve sair da rota principal. Esta operação requer calcular uma rota secundária e encontrar a interseção.
+
+**Problema original:** O mesmo POI pode aparecer em múltiplos pontos de busca ao longo da rota, causando recálculos redundantes do entroncamento.
+
+**Otimizações implementadas:**
+
+1. **Skip por lookback similar**: Se já temos um entroncamento calculado e o novo ponto de lookback está a menos de 500m do anterior, o recálculo é pulado (resultado seria idêntico).
+
+2. **Skip por posição passada**: Se o ponto de busca atual está mais de 2km além do entroncamento já encontrado, não faz sentido recalcular (estaríamos "voltando" na rota).
+
+3. **Skip por máximo de tentativas**: Após 3 recálculos consecutivos sem melhora no desvio, o sistema para de tentar para aquele POI.
+
+**Impacto medido (rota BH → Ouro Preto):**
+- Antes: 332 cálculos de entroncamento, ~210 recálculos redundantes
+- Depois: ~95-130 cálculos (apenas POIs únicos + recálculos úteis)
+- Economia: ~60-70% das chamadas de rota para entroncamentos
+
+### Detecção de POIs Duplicados
+
+POIs são rastreados por ID único. Quando o mesmo POI aparece em múltiplos pontos de busca:
+- POIs próximos (<500m): adicionados imediatamente como milestone, ignorados em buscas seguintes
+- POIs distantes (>500m): entroncamento calculado uma vez, melhor resultado mantido
+
+### Persistência de POIs
+
+POIs encontrados são persistidos no banco de dados para evitar re-processamento em mapas futuros que passem pela mesma região.
+
+### Logs de Otimização
+
+Os logs incluem estatísticas de otimização:
+```
+⚡ Otimização: X recálculos evitados (lookback similar: Y, passou do junction: Z, max tentativas: W)
+🔄 Recálculos de junction: N
+```
+
 ## Solução de Problemas
 
 ### Erros de conexão

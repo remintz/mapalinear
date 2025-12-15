@@ -223,7 +223,6 @@ class UnifiedCache:
             pool = self._pools[loop_id]
             # Verify the loop is still running and not closed
             if not loop.is_closed():
-                logger.debug(f"🔵 Returning existing pool for loop {loop_id}")
                 return pool
             else:
                 # Loop was closed, remove stale pool
@@ -240,13 +239,10 @@ class UnifiedCache:
         if loop_id not in self._pool_locks:
             self._pool_locks[loop_id] = asyncio.Lock()
         
-        logger.debug(f"🔵 Acquiring pool lock for loop {loop_id}")
-        
         # Use lock to prevent multiple initializations
         async with self._pool_locks[loop_id]:
             # Double-check after acquiring lock
             if loop_id in self._pools and not loop.is_closed():
-                logger.debug(f"🔵 Pool created by another task for loop {loop_id}")
                 return self._pools[loop_id]
             
             import asyncpg
@@ -265,8 +261,7 @@ class UnifiedCache:
             )
             
             logger.info(f"✅ PostgreSQL connection pool created for loop {loop_id}: {self.settings.postgres_host}:{self.settings.postgres_port}/{self.settings.postgres_database}")
-        
-        logger.debug(f"🔵 Releasing pool lock for loop {loop_id}")
+
         return self._pools[loop_id]
 
     async def get(self, provider: ProviderType, operation: str, params: Dict[str, Any]) -> Optional[Any]:
@@ -321,7 +316,6 @@ class UnifiedCache:
         
         # For geocoding, try semantic matching
         if operation == "geocode" and "address" in params:
-            logger.debug(f"🔵 get({operation}): Trying semantic matching")
             similar_entry = await self._find_similar_geocode(params["address"])
             if similar_entry:
                 self._stats['hits'] += 1
@@ -333,7 +327,6 @@ class UnifiedCache:
         
         # For POI searches, try spatial matching
         elif operation == "poi_search" and all(k in params for k in ['latitude', 'longitude', 'radius']):
-            logger.debug(f"🔵 get({operation}): Trying spatial matching")
             spatial_entry = await self._find_spatial_poi_match(params)
             if spatial_entry:
                 self._stats['hits'] += 1
@@ -350,7 +343,6 @@ class UnifiedCache:
     def _reconstruct_data(self, data: Any, operation: str) -> Any:
         """Reconstruct Pydantic models from dictionaries loaded from cache."""
         if data is None:
-            logger.debug(f"🔎 _reconstruct_data({operation}): data is None, returning None")
             return None
         
         # Import models here to avoid circular imports
@@ -370,12 +362,8 @@ class UnifiedCache:
         
         # For poi_search, reconstruct list of POIs
         elif operation == "poi_search":
-            logger.debug(f"🔎 _reconstruct_data(poi_search): data type={type(data)}, len={len(data) if isinstance(data, list) else 'N/A'}")
             if isinstance(data, list):
-                result = [POI(**item) if isinstance(item, dict) else item for item in data]
-                logger.debug(f"🔎 _reconstruct_data(poi_search): reconstructed {len(result)} POIs")
-                return result
-            logger.debug(f"🔎 _reconstruct_data(poi_search): data is not a list, returning as-is")
+                return [POI(**item) if isinstance(item, dict) else item for item in data]
             return data
         
         # For poi_details, reconstruct POI
@@ -402,14 +390,6 @@ class UnifiedCache:
         key = cache_key.generate_key()
         
         ttl = self.ttl_config.get(operation, 3600)  # Default 1 hour
-        
-        # Special logging for reverse_geocode
-        if operation == "reverse_geocode":
-            logger.info(f"💾 Storing reverse_geocode in cache")
-            logger.info(f"💾 Original params: {params}")
-            logger.info(f"💾 Normalized params: {normalized_params}")
-            logger.info(f"💾 Generated key: {key}")
-            logger.info(f"💾 TTL: {ttl}s")
         
         # Serialize data
         entry = CacheEntry(
@@ -497,7 +477,6 @@ class UnifiedCache:
             
             cached_address = self._normalize_address(params_data.get('address', ''))
             if self._addresses_similar(normalized_address, cached_address):
-                logger.debug(f"Found similar address: '{address}' ~ '{params_data['address']}'")
                 return dict(row)
         
         return None
@@ -547,9 +526,8 @@ class UnifiedCache:
                 distance = self._calculate_distance(target_lat, target_lon, cached_lat, cached_lon)
                 
                 # If search areas overlap significantly and categories match
-                if (distance < (target_radius + cached_radius) / 2 and 
+                if (distance < (target_radius + cached_radius) / 2 and
                     target_categories == cached_categories):
-                    logger.debug(f"Found spatial POI match at distance {distance}m")
                     return dict(row)
             except (ValueError, KeyError):
                 continue

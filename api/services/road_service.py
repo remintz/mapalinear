@@ -532,8 +532,7 @@ class RoadService:
                 city = (poi.provider_data.get('addr:city') or
                        poi.provider_data.get('address:city') or
                        poi.provider_data.get('addr:municipality'))
-            if city:
-                logger.debug(f"🏙️ POI {poi.name}: cidade '{city}' extraída das tags OSM")
+            # City extracted from OSM tags (no logging needed)
         
         # Extract quality_score from provider_data
         quality_score = None
@@ -552,9 +551,6 @@ class RoadService:
 
             # If distance from junction to POI is < 0.1km, treat as roadside POI
             if access_route_distance_km < 0.1:
-                logger.debug(f"📍 POI {poi.name} está praticamente na rodovia "
-                           f"(distância do entroncamento={access_route_distance_km:.2f}km < 0.1km), "
-                           f"sem necessidade de sinalização de desvio")
                 requires_detour = False
                 junction_distance_km = None
                 junction_coordinates = None
@@ -566,8 +562,6 @@ class RoadService:
                 # Use access route distance instead of straight-line distance
                 access_route_distance_m = access_route_distance_km * 1000
                 poi_side = side  # Use calculated side (left or right)
-                logger.debug(f"🛣️ POI {poi.name} requer desvio: entroncamento no km {junction_distance_km:.1f}, "
-                            f"distância pela rota={access_route_distance_km:.2f}km, lado={side}")
 
         return RoadMilestone(
             id=poi.id,
@@ -615,9 +609,8 @@ class RoadService:
                 )
                 if reverse_loc and reverse_loc.city:
                     milestone.city = reverse_loc.city
-                    logger.debug(f"🌍 {milestone.name}: {reverse_loc.city}")
-            except Exception as e:
-                logger.debug(f"Could not reverse geocode {milestone.name}: {e}")
+            except Exception:
+                pass  # Reverse geocoding failure is not critical
         
         cities_found = len([m for m in milestones if m.city])
         logger.info(f"🌍 Reverse geocoding concluído: "
@@ -642,22 +635,6 @@ class RoadService:
             return milestones
         
         milestones_before_filter = len(milestones)
-        
-        # Debug: log cities found in milestones
-        milestone_cities = set([m.city for m in milestones if m.city])
-        logger.debug(f"🏙️ Cidades únicas encontradas nos POIs: {milestone_cities}")
-        logger.debug(f"🚫 Cidade(s) a filtrar: {exclude_cities_filtered}")
-        
-        # Show some examples before filtering
-        examples_to_filter = [
-            m for m in milestones
-            if m.city and m.city.strip().lower() in exclude_cities_filtered
-        ][:3]
-        
-        if examples_to_filter:
-            logger.debug(f"📝 Exemplos de POIs que serão filtrados:")
-            for m in examples_to_filter:
-                logger.debug(f"   - {m.name} em {m.city}")
         
         # Filter
         filtered_milestones = [
@@ -737,6 +714,16 @@ class RoadService:
         # Track distant POIs that were processed (to count those without any junction)
         distant_pois_processed: set = set()
 
+        # OPTIMIZATION: Track lookback points and recalculation attempts per POI
+        # Key: POI ID, Value: (lookback_lat, lookback_lon) - the lookback point used for best junction
+        junction_lookback_for_poi: Dict[str, Tuple[float, float]] = {}
+        # Key: POI ID, Value: number of consecutive recalculations without improvement
+        recalc_attempts_without_improvement: Dict[str, int] = {}
+        # Statistics for optimization
+        skipped_similar_lookback = 0
+        skipped_past_junction = 0
+        skipped_max_attempts = 0
+
         # Collect all unique POIs for database persistence
         all_unique_pois_dict: Dict[str, POI] = {}  # Key: POI ID, Value: POI object
 
@@ -746,8 +733,6 @@ class RoadService:
             if progress_callback:
                 progress = round(10.0 + (i / total_points) * 80.0)
                 progress_callback(progress)
-            logger.debug(f"🔍 Ponto {i}: lat={point[0]:.6f}, lon={point[1]:.6f}, "
-                        f"dist={distance_from_origin:.1f}km")
             total_requests += 1
             
             try:
@@ -772,7 +757,6 @@ class RoadService:
                         # Skip POIs already added as milestones - these are final
                         if poi.id in milestone_poi_ids:
                             duplicates_count += 1
-                            logger.debug(f"⏭️  Ignorando POI já adicionado: {poi.name}")
                             continue
 
                         # Collect POI for later persistence (only once)
@@ -802,17 +786,52 @@ class RoadService:
                             milestones.append(milestone)
                             converted_count += 1
                             milestone_poi_ids.add(poi.id)
-                            logger.debug(f"✅ {milestone.name} ({milestone.type.value}) - próximo da estrada")
                             continue
 
                         # For distant POIs (>500m), calculate junction and keep the best
                         distant_pois_processed.add(poi.id)
-                        logger.debug(f"🛣️ POI afastado detectado: {poi.name} "
-                                   f"({poi_distance_from_road:.0f}m da estrada)")
 
                         # Check if we already have a junction for this POI
                         is_recalculation = poi.id in best_junction_for_poi
+
+                        # OPTIMIZATION: Skip recalculation if criteria are met
                         if is_recalculation:
+                            prev_junction_info, prev_dist, _, _ = best_junction_for_poi[poi.id]
+                            prev_junction_km, _, _, _ = prev_junction_info
+
+                            # Calculate what the lookback point would be for this recalculation
+                            poi_distance_km = poi_distance_from_road / 1000.0
+                            lookback_km = min(20.0, max(5.0, poi_distance_km * 2))
+                            lookback_distance_km = max(0, distance_from_origin - lookback_km)
+                            new_lookback = self._interpolate_coordinate_at_distance(
+                                main_route.geometry,
+                                lookback_distance_km,
+                                main_route.total_distance
+                            )
+
+                            # Skip 1: If lookback point is very similar to previous (within 500m)
+                            if poi.id in junction_lookback_for_poi:
+                                prev_lookback = junction_lookback_for_poi[poi.id]
+                                lookback_distance_m = self._calculate_distance_meters(
+                                    new_lookback[0], new_lookback[1],
+                                    prev_lookback[0], prev_lookback[1]
+                                )
+                                if lookback_distance_m < 500:
+                                    skipped_similar_lookback += 1
+                                    continue
+
+                            # Skip 2: If search point is well past current junction (>2km)
+                            # and we're moving away from it
+                            if distance_from_origin > prev_junction_km + 2.0:
+                                skipped_past_junction += 1
+                                continue
+
+                            # Skip 3: If we've tried 3 times without improvement
+                            attempts = recalc_attempts_without_improvement.get(poi.id, 0)
+                            if attempts >= 3:
+                                skipped_max_attempts += 1
+                                continue
+
                             junction_recalculations += 1
 
                         junction_info = await self._calculate_junction_for_distant_poi(
@@ -823,25 +842,38 @@ class RoadService:
                         )
 
                         if not junction_info:
-                            # No junction found from this search point
-                            if not is_recalculation:
-                                logger.debug(f"⚠️ Sem entroncamento para {poi.name} neste ponto, tentará em próximos")
+                            # No junction found from this search point, will try from next points
                             continue
 
                         # Get detour distance from junction info
                         _, _, access_route_distance_km, _ = junction_info
+
+                        # Calculate lookback point for tracking (if not already calculated)
+                        if not is_recalculation:
+                            poi_distance_km = poi_distance_from_road / 1000.0
+                            lookback_km = min(20.0, max(5.0, poi_distance_km * 2))
+                            lookback_distance_km = max(0, distance_from_origin - lookback_km)
+                            new_lookback = self._interpolate_coordinate_at_distance(
+                                main_route.geometry,
+                                lookback_distance_km,
+                                main_route.total_distance
+                            )
 
                         # Check if this is better than previous best
                         if poi.id in best_junction_for_poi:
                             prev_junction_info, _, _, _ = best_junction_for_poi[poi.id]
                             _, _, prev_detour, _ = prev_junction_info
                             if access_route_distance_km < prev_detour:
-                                logger.debug(f"🔄 Melhor junction encontrada para {poi.name}: "
-                                           f"{access_route_distance_km:.1f}km < {prev_detour:.1f}km")
                                 best_junction_for_poi[poi.id] = (junction_info, distance_from_origin, point, poi)
+                                junction_lookback_for_poi[poi.id] = new_lookback
+                                recalc_attempts_without_improvement[poi.id] = 0  # Reset on improvement
+                            else:
+                                # No improvement - increment attempt counter
+                                recalc_attempts_without_improvement[poi.id] = recalc_attempts_without_improvement.get(poi.id, 0) + 1
                         else:
                             # First junction found for this POI
                             best_junction_for_poi[poi.id] = (junction_info, distance_from_origin, point, poi)
+                            junction_lookback_for_poi[poi.id] = new_lookback
                         
                     except Exception as e:
                         logger.error(f"🔍 Erro convertendo POI {j}: {e}")
@@ -851,9 +883,6 @@ class RoadService:
                         logger.error(f"🔍 Traceback: {traceback.format_exc()}")
                         continue
 
-                if converted_count > 0 or duplicates_count > 0 or abandoned_count > 0:
-                    logger.debug(f"📍 Ponto {i}: {converted_count} novos, "
-                                f"{duplicates_count} duplicatas, {abandoned_count} abandonados")
                 
             except Exception as e:
                 total_errors += 1
@@ -899,10 +928,17 @@ class RoadService:
         if junction_recalculations > 0:
             logger.info(f"🔄 Recálculos de junction: {junction_recalculations}")
 
+        # Log optimization statistics
+        total_skipped = skipped_similar_lookback + skipped_past_junction + skipped_max_attempts
+        if total_skipped > 0:
+            logger.info(f"⚡ Otimização: {total_skipped} recálculos evitados "
+                       f"(lookback similar: {skipped_similar_lookback}, "
+                       f"passou do junction: {skipped_past_junction}, "
+                       f"max tentativas: {skipped_max_attempts})")
+
         for poi_id, (junction_info, dist_from_origin, search_pt, poi) in best_junction_for_poi.items():
             # Skip if this POI was already added as a nearby milestone
             if poi_id in milestone_poi_ids:
-                logger.debug(f"⏭️ POI distante já adicionado como próximo: {poi.name}")
                 continue
 
             _, _, access_route_distance_km, _ = junction_info
@@ -917,12 +953,9 @@ class RoadService:
                 )
                 milestones.append(milestone)
                 milestone_poi_ids.add(poi_id)
-                logger.debug(f"✅ {milestone.name} - desvio={access_route_distance_km:.1f}km")
             else:
                 # Best junction still exceeds max detour
                 pois_abandoned_detour_too_long += 1
-                logger.debug(f"🚫 POI abandonado (melhor desvio ainda muito longo): {poi.name} "
-                           f"(desvio={access_route_distance_km:.1f}km > max={max_detour_distance_km}km)")
 
         logger.info(f"🎯 RESULTADO FINAL: {len(milestones)} milestones encontrados ao longo da rota")
         logger.info(f"📊 POIs únicos encontrados: {len(all_unique_pois_dict)}")
@@ -1682,12 +1715,7 @@ class RoadService:
         # If negative: POI is to the right (clockwise)
         cross_product = road_vector[0] * poi_vector[1] - road_vector[1] * poi_vector[0]
         
-        side = 'left' if cross_product > 0 else 'right'
-        
-        logger.debug(f"🧭 Determinando lado do POI: road_vector={road_vector}, "
-                    f"poi_vector={poi_vector}, cross_product={cross_product:.2f} → {side}")
-        
-        return side
+        return 'left' if cross_product > 0 else 'right'
 
     def _find_route_intersection(
         self,
@@ -1744,7 +1772,6 @@ class RoadService:
                 # Access route has deviated from main route
                 # If we found at least one intersection before, use the last one
                 if last_intersection_on_main:
-                    logger.debug(f"🔍 Rota de acesso se desviou da principal no ponto {i}")
                     break
         
         if last_intersection_on_main:
@@ -1752,8 +1779,6 @@ class RoadService:
             junction_distance_km = self._calculate_distance_along_route(
                 main_route_geometry, last_intersection_on_main
             )
-            logger.debug(f"🔍 Entroncamento final: lat={last_intersection_on_main[0]:.6f}, "
-                        f"lon={last_intersection_on_main[1]:.6f}, km={junction_distance_km:.1f}")
             return (last_intersection_on_main, junction_distance_km)
         
         return None
@@ -1792,9 +1817,6 @@ class RoadService:
         poi_distance_km = poi_distance_from_road_m / 1000.0
         lookback_km = min(20.0, max(5.0, poi_distance_km * 2))
         
-        logger.debug(f"🔍 Calculando entroncamento para {poi.name}: "
-                    f"distância da estrada={poi_distance_km:.1f}km, lookback={lookback_km:.1f}km")
-        
         # Find lookback point on main route
         lookback_distance_km = max(0, search_point_distance_km - lookback_km)
         
@@ -1805,9 +1827,6 @@ class RoadService:
             main_route.total_distance
         )
         
-        logger.debug(f"🔍 Ponto lookback: lat={lookback_point[0]:.6f}, lon={lookback_point[1]:.6f}, "
-                    f"distância={lookback_distance_km:.1f}km")
-        
         try:
             # Calculate route from lookback point to POI
             access_route = await self.geo_provider.calculate_route(
@@ -1816,11 +1835,7 @@ class RoadService:
             )
             
             if not access_route or not access_route.geometry:
-                logger.debug(f"⚠️ Não foi possível calcular rota de acesso para {poi.name}")
                 return None
-            
-            logger.debug(f"🔍 Rota de acesso calculada: {len(access_route.geometry)} pontos, "
-                        f"{access_route.total_distance:.1f}km")
             
             # Find intersection between access route and main route
             intersection = self._find_route_intersection(
@@ -1847,14 +1862,8 @@ class RoadService:
                     poi_location
                 )
 
-                logger.info(f"✅ Entroncamento encontrado para {poi.name}: "
-                           f"km {junction_distance:.1f} "
-                           f"(lat={junction_coords[0]:.6f}, lon={junction_coords[1]:.6f}), "
-                           f"distância do entroncamento ao POI={access_route_distance_km:.1f}km, "
-                           f"lado={side}")
                 return (junction_distance, junction_coords, access_route_distance_km, side)
             else:
-                logger.debug(f"⚠️ Nenhuma interseção encontrada entre rota principal e rota de acesso para {poi.name}")
                 return None
                 
         except Exception as e:
