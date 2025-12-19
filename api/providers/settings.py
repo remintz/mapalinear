@@ -89,6 +89,35 @@ class ProviderSettings(BaseSettings):
         alias="HERE_ENRICHMENT_ENABLED",
         description="Enable HERE Maps enrichment for OSM POIs (adds phone, website, hours). Only applies when POI_PROVIDER=osm."
     )
+
+    # Google OAuth settings
+    google_client_id: Optional[str] = Field(
+        default=None,
+        alias="GOOGLE_CLIENT_ID",
+        description="Google OAuth client ID for authentication"
+    )
+    google_client_secret: Optional[str] = Field(
+        default=None,
+        alias="GOOGLE_CLIENT_SECRET",
+        description="Google OAuth client secret for authentication"
+    )
+
+    # JWT settings
+    jwt_secret_key: str = Field(
+        default="change-me-in-production-use-a-long-random-string",
+        alias="JWT_SECRET_KEY",
+        description="Secret key for JWT token signing"
+    )
+    jwt_algorithm: str = Field(
+        default="HS256",
+        alias="JWT_ALGORITHM",
+        description="Algorithm for JWT token signing"
+    )
+    jwt_expire_hours: int = Field(
+        default=24,
+        alias="JWT_EXPIRE_HOURS",
+        description="JWT token expiration time in hours"
+    )
     
     # Cache configuration
     geo_cache_ttl_geocode: int = Field(

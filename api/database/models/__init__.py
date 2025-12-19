@@ -8,6 +8,7 @@ from api.database.models.google_places_cache import GooglePlacesCache
 from api.database.models.map import Map
 from api.database.models.map_poi import MapPOI
 from api.database.models.poi import POI
+from api.database.models.user import User
 
 __all__ = [
     "ApiCallLog",
@@ -17,4 +18,5 @@ __all__ = [
     "MapPOI",
     "CacheEntry",
     "GooglePlacesCache",
+    "User",
 ]

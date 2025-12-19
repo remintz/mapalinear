@@ -1,6 +1,9 @@
+"use client";
+
 import React from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
+import { LoginButton } from '@/components/auth/LoginButton';
 
 interface NavigationProps {
   className?: string;
@@ -19,8 +22,8 @@ export function Navigation({ className }: NavigationProps) {
               OraPOIS
             </Link>
           </div>
-          
-          <div className="flex items-center space-x-6">
+
+          <div className="flex items-center space-x-4">
             <Link
               href="/search"
               className="text-gray-600 hover:text-gray-900 transition-colors"
@@ -33,6 +36,8 @@ export function Navigation({ className }: NavigationProps) {
             >
               Mapas Salvos
             </Link>
+            <div className="border-l border-gray-200 h-6 mx-2"></div>
+            <LoginButton />
           </div>
         </div>
       </div>

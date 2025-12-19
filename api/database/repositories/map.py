@@ -19,22 +19,49 @@ class MapRepository(BaseRepository[Map]):
         """Initialize with session."""
         super().__init__(session, Map)
 
-    async def get_by_id_with_pois(self, id: UUID) -> Optional[Map]:
+    async def get_by_id_with_pois(
+        self, id: UUID, user_id: Optional[UUID] = None
+    ) -> Optional[Map]:
         """
         Get a map by ID with all related POIs loaded.
 
         Args:
             id: Map UUID
+            user_id: Optional user ID to filter by owner
 
         Returns:
             Map instance with POIs or None if not found
         """
+        query = select(Map).where(Map.id == id).options(selectinload(Map.map_pois))
+
+        if user_id is not None:
+            query = query.where(Map.user_id == user_id)
+
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def get_user_maps(
+        self, user_id: UUID, skip: int = 0, limit: int = 100
+    ) -> List[Map]:
+        """
+        Get all maps for a specific user.
+
+        Args:
+            user_id: User UUID
+            skip: Number of records to skip
+            limit: Maximum number of records to return
+
+        Returns:
+            List of user's maps ordered by creation date
+        """
         result = await self.session.execute(
             select(Map)
-            .where(Map.id == id)
-            .options(selectinload(Map.map_pois))
+            .where(Map.user_id == user_id)
+            .order_by(Map.created_at.desc())
+            .offset(skip)
+            .limit(limit)
         )
-        return result.scalar_one_or_none()
+        return list(result.scalars().all())
 
     async def find_by_origin_destination(
         self, origin: str, destination: str
