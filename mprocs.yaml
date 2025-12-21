@@ -21,7 +21,7 @@ procs:
   frontend:
     cmd: ["npm", "run", "dev", "--", "--port", "8000"]
     env:
-      NEXT_PUBLIC_API_URL: "http://localhost:8001/api"
+      NEXT_PUBLIC_API_URL: "http://renatos-macbook-pro.tail5f0798.ts.net:8001/api"
     cwd: ./frontend
     autostart: true
     color: blue
