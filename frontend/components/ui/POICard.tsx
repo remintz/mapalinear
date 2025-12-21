@@ -9,6 +9,10 @@ import {
 interface POICardProps {
   poi: POI | Milestone;
   onClick?: () => void;
+  // Whether this POI has been passed (user is ahead of it)
+  isPassed?: boolean;
+  // Whether this is the next POI ahead
+  isNext?: boolean;
 }
 
 // Helper function to get icon for POI type
@@ -140,7 +144,7 @@ function getFriendlyPoiName(name: string | null | undefined, type: string): stri
   return name;
 }
 
-export function POICard({ poi, onClick }: POICardProps) {
+export function POICard({ poi, onClick, isPassed = false, isNext = false }: POICardProps) {
   const type = 'type' in poi ? poi.type : (poi as Milestone).type;
   const Icon = getPoiIcon(type);
   const typeName = getPoiTypeName(type);
@@ -167,11 +171,24 @@ export function POICard({ poi, onClick }: POICardProps) {
     }
   };
 
+  // Build card classes based on state
+  const cardClasses = [
+    'rounded-lg p-4 transition-all cursor-pointer active:scale-[0.98]',
+    // Base styles - different for passed vs active
+    isPassed
+      ? 'bg-gray-50 border border-gray-100 opacity-50'
+      : 'bg-white border border-gray-200 hover:shadow-md',
+    // Next POI highlight
+    isNext && !isPassed
+      ? 'ring-2 ring-blue-500 ring-offset-2 border-blue-300'
+      : '',
+    // Google Maps link hover
+    hasGoogleMapsLink && !isPassed ? 'hover:border-blue-300' : '',
+  ].filter(Boolean).join(' ');
+
   return (
     <div
-      className={`bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer active:scale-[0.98] transition-transform ${
-        hasGoogleMapsLink ? 'hover:border-blue-300' : ''
-      }`}
+      className={cardClasses}
       onClick={handleClick}
     >
       <div className="flex items-start gap-3">

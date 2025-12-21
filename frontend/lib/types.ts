@@ -76,10 +76,21 @@ export interface ExportRouteData {
 
 // Route related types
 export interface RouteSegment {
+  id: string;
   start_coordinates: Coordinates;
   end_coordinates: Coordinates;
   distance_km: number;
+  // Distance from origin for this segment
+  start_distance_km?: number;
+  end_distance_km?: number;
+  length_km?: number;
+  // Road information
+  name?: string;
+  ref?: string;
   highway?: string;
+  highway_type?: string;
+  // Full geometry of the segment (list of coordinates)
+  geometry?: Coordinates[];
   milestones?: Milestone[];
 }
 

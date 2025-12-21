@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Button, Card, CardContent } from '@/components/ui';
 import { MapPin, ArrowLeft, Bug, Loader2, Menu, Download, X, Fuel, Utensils, Bed, Tent, Hospital, Ticket, Building2, Home, FileText } from 'lucide-react';
@@ -8,13 +8,18 @@ import Link from 'next/link';
 import { toast } from 'sonner';
 import { POIFeed } from '@/components/ui/POIFeed';
 import { POIFilters } from '@/components/ui/POIFilters';
+import { SimulationControls } from '@/components/ui/SimulationControls';
 import { apiClient } from '@/lib/api';
+import { useRouteSimulation } from '@/hooks/useRouteSimulation';
+import { useRouteTracking } from '@/hooks/useRouteTracking';
+import { useGeolocation } from '@/hooks/useGeolocation';
+import { RouteSegment } from '@/lib/types';
 
 interface RouteSearchResponse {
   origin: string;
   destination: string;
   total_distance_km: number;
-  segments: any[];
+  segments: RouteSegment[];
   pois: any[];
   milestones: any[];
 }
@@ -59,11 +64,11 @@ export default function MapPage() {
           const savedMap = await apiClient.getMap(mapId);
 
           // Transform saved map data to match RouteSearchResponse format
-          const routeData = {
+          const routeData: RouteSearchResponse = {
             origin: savedMap.origin,
             destination: savedMap.destination,
-            total_distance_km: savedMap.total_length_km,
-            segments: savedMap.segments || [],
+            total_distance_km: savedMap.total_length_km || 0,
+            segments: (savedMap.segments || []) as RouteSegment[],
             pois: savedMap.milestones || [],
             milestones: savedMap.milestones || []
           };
@@ -114,12 +119,11 @@ export default function MapPage() {
             setProgressPercent(100);
 
             if (operation.result) {
-              const routeData = {
-                id: operation.result.id,
+              const routeData: RouteSearchResponse = {
                 origin: operation.result.origin,
                 destination: operation.result.destination,
-                total_distance_km: operation.result.total_length_km || operation.result.total_distance_km,
-                segments: operation.result.segments || [],
+                total_distance_km: operation.result.total_length_km || operation.result.total_distance_km || 0,
+                segments: (operation.result.segments || []) as RouteSegment[],
                 pois: operation.result.milestones || operation.result.pois || [],
                 milestones: operation.result.milestones || []
               };
@@ -218,6 +222,39 @@ export default function MapPage() {
 
   const filterOptions = getFilterOptions();
   const filteredPOIs = getFilteredPOIs();
+
+  // Route simulation hook
+  const simulation = useRouteSimulation({
+    segments: data?.segments || [],
+    totalDistanceKm: data?.total_distance_km || 0,
+    initialSpeedKmH: 80,
+  });
+
+  // Real GPS hook (used when simulation is not active)
+  const geoLocation = useGeolocation({
+    simulatedPosition: simulation.state.isActive ? simulation.state.position : null,
+  });
+
+  // Determine current position (simulation or real GPS)
+  const currentPosition = useMemo(() => {
+    if (simulation.state.isActive && simulation.state.position) {
+      return simulation.state.position;
+    }
+    if (geoLocation.position) {
+      return { lat: geoLocation.position.lat, lon: geoLocation.position.lon };
+    }
+    return null;
+  }, [simulation.state.isActive, simulation.state.position, geoLocation.position]);
+
+  // Route tracking hook
+  // Using 1500m threshold because segments are linearized (~1km segments)
+  // In curves, the real road can be far from the straight line between points
+  const tracking = useRouteTracking({
+    userPosition: currentPosition,
+    segments: data?.segments || [],
+    pois: filteredPOIs,
+    onRouteThreshold: 1500, // 1.5km threshold for linearized segments
+  });
 
   // Download files function
   const downloadFile = async (format: 'geojson' | 'gpx', routeData: any) => {
@@ -499,10 +536,42 @@ export default function MapPage() {
 
           {/* Content - POI Feed */}
           <div className="flex-1 lg:max-w-3xl">
+            {/* Simulation Controls - Fixed at top of feed */}
+            <div className="mb-4">
+              <SimulationControls
+                state={simulation.state}
+                controls={simulation.controls}
+                isOnRoute={tracking.isOnRoute}
+                distanceToRoute={tracking.distanceToRoute}
+              />
+            </div>
+
+            {/* Tracking Status (when on route) */}
+            {tracking.isOnRoute && tracking.distanceTraveled !== null && (
+              <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-green-700 font-medium">
+                    Distancia percorrida: {tracking.distanceTraveled.toFixed(1)} km
+                  </span>
+                  <span className="text-green-600">
+                    {tracking.nextPOIIndex !== null
+                      ? `Proximo POI em ${(
+                          (filteredPOIs[tracking.nextPOIIndex]?.distance_from_origin_km || 0) -
+                          tracking.distanceTraveled
+                        ).toFixed(1)} km`
+                      : 'Todos os POIs passados'}
+                  </span>
+                </div>
+              </div>
+            )}
+
             {/* POI Feed */}
             <POIFeed
               pois={filteredPOIs}
               emptyMessage="Nenhum ponto de interesse encontrado com os filtros selecionados"
+              isPOIPassed={tracking.isPOIPassed}
+              nextPOIIndex={tracking.nextPOIIndex}
+              autoScroll={simulation.state.isActive || tracking.isOnRoute}
             />
 
             {/* Debug Link - Mobile only */}
