@@ -2,7 +2,7 @@
 Router for managing saved linear maps.
 
 Endpoints:
-- GET /api/maps - List all saved maps
+- GET /api/maps - List all saved maps for current user
 - GET /api/maps/{map_id} - Get a specific map
 - GET /api/maps/{map_id}/pdf - Export map to PDF
 - DELETE /api/maps/{map_id} - Delete a saved map
@@ -20,6 +20,8 @@ from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import MapPOIRepository, MapRepository, POIRepository, get_db
+from ..database.models.user import User
+from ..middleware.auth import get_current_user
 from ..models.road_models import LinearMapResponse, SavedMapResponse
 from ..services.async_service import AsyncService
 from ..services.map_storage_service_db import MapStorageServiceDB
@@ -32,16 +34,19 @@ router = APIRouter(prefix="/maps", tags=["Saved Maps"])
 
 
 @router.get("", response_model=List[SavedMapResponse])
-async def list_saved_maps(db: AsyncSession = Depends(get_db)):
+async def list_saved_maps(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """
-    List all saved linear maps (metadata only).
+    List all saved linear maps for the current user (metadata only).
 
     Returns:
         List of saved map metadata, sorted by creation date (newest first)
     """
     try:
         storage = MapStorageServiceDB(db)
-        maps = await storage.list_maps()
+        maps = await storage.list_maps(user_id=current_user.id)
         return maps
     except Exception as e:
         logger.error(f"Error listing maps: {e}")
@@ -49,7 +54,11 @@ async def list_saved_maps(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{map_id}", response_model=LinearMapResponse)
-async def get_saved_map(map_id: str, db: AsyncSession = Depends(get_db)):
+async def get_saved_map(
+    map_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """
     Get a specific saved map by ID.
 
@@ -61,7 +70,7 @@ async def get_saved_map(map_id: str, db: AsyncSession = Depends(get_db)):
     """
     try:
         storage = MapStorageServiceDB(db)
-        linear_map = await storage.load_map(map_id)
+        linear_map = await storage.load_map(map_id, user_id=current_user.id)
 
         if linear_map is None:
             raise HTTPException(status_code=404, detail=f"Map {map_id} not found")
@@ -86,6 +95,7 @@ def _sanitize_filename(text: str) -> str:
 @router.get("/{map_id}/pdf")
 async def export_map_to_pdf(
     map_id: str,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     types: Optional[str] = Query(
         None, description="Tipos de POI separados por vírgula (ex: gas_station,restaurant)"
@@ -103,7 +113,7 @@ async def export_map_to_pdf(
     """
     try:
         storage = MapStorageServiceDB(db)
-        linear_map = await storage.load_map(map_id)
+        linear_map = await storage.load_map(map_id, user_id=current_user.id)
 
         if linear_map is None:
             raise HTTPException(status_code=404, detail=f"Map {map_id} not found")
@@ -138,7 +148,11 @@ async def export_map_to_pdf(
 
 
 @router.delete("/{map_id}")
-async def delete_saved_map(map_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_saved_map(
+    map_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """
     Delete a saved map.
 
@@ -151,10 +165,10 @@ async def delete_saved_map(map_id: str, db: AsyncSession = Depends(get_db)):
     try:
         storage = MapStorageServiceDB(db)
 
-        if not await storage.map_exists(map_id):
+        if not await storage.map_exists(map_id, user_id=current_user.id):
             raise HTTPException(status_code=404, detail=f"Map {map_id} not found")
 
-        success = await storage.delete_map(map_id)
+        success = await storage.delete_map(map_id, user_id=current_user.id)
 
         if not success:
             raise HTTPException(status_code=500, detail="Failed to delete map")
@@ -171,6 +185,7 @@ async def delete_saved_map(map_id: str, db: AsyncSession = Depends(get_db)):
 async def regenerate_map(
     map_id: str,
     background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -189,7 +204,7 @@ async def regenerate_map(
         storage = MapStorageServiceDB(db)
 
         # Load existing map to get origin/destination
-        existing_map = await storage.load_map(map_id)
+        existing_map = await storage.load_map(map_id, user_id=current_user.id)
         if existing_map is None:
             raise HTTPException(status_code=404, detail=f"Map {map_id} not found")
 

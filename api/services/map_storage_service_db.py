@@ -48,12 +48,15 @@ class MapStorageServiceDB:
         self.poi_repo = POIRepository(session)
         self.map_poi_repo = MapPOIRepository(session)
 
-    async def save_map(self, linear_map: LinearMapResponse) -> str:
+    async def save_map(
+        self, linear_map: LinearMapResponse, user_id: Optional[UUID] = None
+    ) -> str:
         """
         Save a linear map to database.
 
         Args:
             linear_map: The linear map to save
+            user_id: Optional user ID to associate the map with
 
         Returns:
             The ID of the saved map
@@ -76,6 +79,7 @@ class MapStorageServiceDB:
             # Create Map record
             db_map = Map(
                 id=map_id,
+                user_id=user_id,
                 origin=linear_map.origin,
                 destination=linear_map.destination,
                 total_length_km=linear_map.total_length_km,
@@ -146,19 +150,22 @@ class MapStorageServiceDB:
             logger.error(f"Erro ao salvar mapa no banco: {e}")
             raise
 
-    async def load_map(self, map_id: str) -> Optional[LinearMapResponse]:
+    async def load_map(
+        self, map_id: str, user_id: Optional[UUID] = None
+    ) -> Optional[LinearMapResponse]:
         """
         Load a saved map from database.
 
         Args:
             map_id: ID of the map to load
+            user_id: Optional user ID to filter by owner
 
         Returns:
             The loaded linear map, or None if not found
         """
         try:
             map_uuid = UUID(map_id)
-            db_map = await self.map_repo.get_by_id(map_uuid)
+            db_map = await self.map_repo.get_by_id_with_pois(map_uuid, user_id=user_id)
 
             if not db_map:
                 logger.warning(f"Mapa nao encontrado: {map_id}")
@@ -209,16 +216,24 @@ class MapStorageServiceDB:
             logger.error(f"Erro ao carregar mapa {map_id}: {e}")
             return None
 
-    async def list_maps(self) -> List[SavedMapResponse]:
+    async def list_maps(
+        self, user_id: Optional[UUID] = None
+    ) -> List[SavedMapResponse]:
         """
-        List all saved maps (metadata only).
+        List all saved maps for a user (metadata only).
+
+        Args:
+            user_id: Optional user ID to filter maps
 
         Returns:
             List of saved map metadata, sorted by creation date (newest first)
         """
         try:
-            # Get recent maps
-            maps = await self.map_repo.get_recent(limit=100)
+            # Get maps for user
+            if user_id:
+                maps = await self.map_repo.get_user_maps(user_id, limit=100)
+            else:
+                maps = await self.map_repo.get_recent(limit=100)
             saved_maps = []
 
             for db_map in maps:
@@ -259,18 +274,29 @@ class MapStorageServiceDB:
             logger.error(f"Erro ao listar mapas: {e}")
             return []
 
-    async def delete_map(self, map_id: str) -> bool:
+    async def delete_map(
+        self, map_id: str, user_id: Optional[UUID] = None
+    ) -> bool:
         """
         Delete a saved map from database.
 
         Args:
             map_id: ID of the map to delete
+            user_id: Optional user ID to verify ownership
 
         Returns:
             True if deleted successfully, False otherwise
         """
         try:
             map_uuid = UUID(map_id)
+
+            # If user_id provided, verify ownership first
+            if user_id:
+                db_map = await self.map_repo.get_by_id_with_pois(map_uuid, user_id=user_id)
+                if not db_map:
+                    logger.warning(f"Map not found or not owned by user: {map_id}")
+                    return False
+
             deleted = await self.map_repo.delete_by_id(map_uuid)
 
             if deleted:
@@ -287,18 +313,24 @@ class MapStorageServiceDB:
             logger.error(f"Erro ao deletar mapa {map_id}: {e}")
             return False
 
-    async def map_exists(self, map_id: str) -> bool:
+    async def map_exists(
+        self, map_id: str, user_id: Optional[UUID] = None
+    ) -> bool:
         """
-        Check if a map exists.
+        Check if a map exists (and optionally if owned by user).
 
         Args:
             map_id: ID of the map to check
+            user_id: Optional user ID to verify ownership
 
         Returns:
-            True if map exists, False otherwise
+            True if map exists (and is owned by user if specified), False otherwise
         """
         try:
             map_uuid = UUID(map_id)
+            if user_id:
+                db_map = await self.map_repo.get_by_id_with_pois(map_uuid, user_id=user_id)
+                return db_map is not None
             return await self.map_repo.exists(map_uuid)
         except ValueError:
             return False

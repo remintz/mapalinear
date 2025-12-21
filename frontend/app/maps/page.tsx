@@ -15,17 +15,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
-
-interface SavedMap {
-  id: string;
-  name: string | null;
-  origin: string;
-  destination: string;
-  total_length_km: number;
-  creation_date: string;
-  road_refs: string[];
-  milestone_count: number;
-}
+import { apiClient, SavedMap } from '@/lib/api';
 
 export default function SavedMapsPage() {
   const [maps, setMaps] = useState<SavedMap[]>([]);
@@ -33,106 +23,37 @@ export default function SavedMapsPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [debugLogs, setDebugLogs] = useState<string[]>([]);
-  const [API_URL, setAPI_URL] = useState<string | null>(null);
   const router = useRouter();
 
-  const addDebugLog = (message: string) => {
-    setDebugLogs(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`]);
-    console.log(message);
-  };
-
-  // Detect API URL on client side
   useEffect(() => {
-    addDebugLog('[INIT] Detecting API URL...');
-
-    // Always use auto-detection based on window.location
-    // This ensures the frontend works when accessed via IP address
-    const protocol = window.location.protocol;
-    const hostname = window.location.hostname;
-    const detectedUrl = `${protocol}//${hostname}:8001/api`;
-
-    addDebugLog(`[INIT] protocol: ${protocol}`);
-    addDebugLog(`[INIT] hostname: ${hostname}`);
-    addDebugLog(`[INIT] Detected URL: ${detectedUrl}`);
-
-    setAPI_URL(detectedUrl);
+    loadMaps();
   }, []);
-
-  // Load saved maps when API_URL is ready
-  useEffect(() => {
-    // Only load when API_URL has been detected (not null)
-    if (API_URL) {
-      addDebugLog(`useEffect triggered, API_URL: ${API_URL}`);
-      try {
-        loadMaps();
-      } catch (error) {
-        console.error('Error in useEffect:', error);
-        setLoading(false);
-        setMaps([]);
-      }
-    } else {
-      addDebugLog('Waiting for API_URL to be detected...');
-    }
-  }, [API_URL]);
 
   const loadMaps = async () => {
     try {
       setLoading(true);
       setError(null);
-
-      addDebugLog('1. Iniciando carregamento');
-      addDebugLog(`2. API_URL: ${API_URL}`);
-      addDebugLog(`3. Full URL: ${API_URL}/maps`);
-
-      const response = await fetch(`${API_URL}/maps`);
-      addDebugLog(`4. Fetch completo, status: ${response.status}`);
-
-      if (!response.ok) {
-        addDebugLog('5. Response não OK');
-        throw new Error(`Erro ${response.status}: ${response.statusText}`);
-      }
-
-      addDebugLog('6. Response OK, fazendo parse JSON');
-      const data = await response.json();
-      addDebugLog(`7. JSON parseado, ${data.length} mapas encontrados`);
-
+      const data = await apiClient.listMaps();
       setMaps(data);
-      addDebugLog('8. Maps setados com sucesso');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
-      addDebugLog(`❌ Erro: ${errorMessage}`);
-      addDebugLog(`❌ Error type: ${typeof error}`);
-      if (error instanceof Error && error.stack) {
-        addDebugLog(`❌ Stack: ${error.stack.substring(0, 200)}`);
-      }
       setError(errorMessage);
       toast.error(`Erro ao carregar mapas: ${errorMessage}`);
       setMaps([]);
     } finally {
       setLoading(false);
-      addDebugLog('9. Loading finalizado');
     }
   };
 
   const handleOpenMap = (mapId: string) => {
-    // Navigate to map page to view the saved map
     router.push(`/map?mapId=${mapId}`);
   };
 
   const handleDeleteMap = async (mapId: string) => {
     try {
       setDeletingId(mapId);
-      const response = await fetch(`${API_URL}/maps/${mapId}`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) {
-        throw new Error('Erro ao deletar mapa');
-      }
-
+      await apiClient.deleteMap(mapId);
       toast.success('Mapa deletado com sucesso');
-      // Reload maps list
       loadMaps();
     } catch (error) {
       console.error('Error deleting map:', error);
@@ -145,18 +66,8 @@ export default function SavedMapsPage() {
   const handleRegenerateMap = async (mapId: string) => {
     try {
       setRegeneratingId(mapId);
-      const response = await fetch(`${API_URL}/maps/${mapId}/regenerate`, {
-        method: 'POST',
-      });
-
-      if (!response.ok) {
-        throw new Error('Erro ao regenerar mapa');
-      }
-
-      const data = await response.json();
+      const data = await apiClient.regenerateMap(mapId);
       toast.success('Regeneração iniciada! Acompanhe o progresso.');
-
-      // Navigate to map page to show progress
       router.push(`/map?operationId=${data.operation_id}`);
     } catch (error) {
       console.error('Error regenerating map:', error);
@@ -179,8 +90,7 @@ export default function SavedMapsPage() {
         hour: '2-digit',
         minute: '2-digit'
       }).format(date);
-    } catch (error) {
-      console.error('Error formatting date:', error);
+    } catch {
       return 'Data inválida';
     }
   };
@@ -198,19 +108,11 @@ export default function SavedMapsPage() {
   if (error) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <div className="text-center max-w-2xl w-full">
+        <div className="text-center max-w-md w-full">
           <div className="text-6xl mb-4">⚠️</div>
           <h2 className="text-xl font-bold text-gray-900 mb-2">Erro ao carregar mapas</h2>
           <p className="text-sm text-gray-600 mb-4">{error}</p>
-          <Button onClick={() => loadMaps()} className="mb-6">Tentar Novamente</Button>
-
-          {/* Debug Logs */}
-          <div className="bg-black text-green-400 p-4 rounded-lg text-left text-xs font-mono max-h-96 overflow-y-auto">
-            <div className="font-bold mb-2">Debug Logs:</div>
-            {debugLogs.map((log, index) => (
-              <div key={index}>{log}</div>
-            ))}
-          </div>
+          <Button onClick={() => loadMaps()}>Tentar Novamente</Button>
         </div>
       </div>
     );
@@ -218,7 +120,7 @@ export default function SavedMapsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header - Responsive */}
+      {/* Header */}
       <header className="sticky top-0 z-20 bg-white border-b border-gray-200 shadow-sm">
         <div className="max-w-6xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
@@ -240,7 +142,7 @@ export default function SavedMapsPage() {
         </div>
       </header>
 
-      {/* Main Content - Centered */}
+      {/* Main Content */}
       <main className="max-w-6xl mx-auto px-4 py-4 lg:py-8">
         {maps.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
@@ -254,7 +156,6 @@ export default function SavedMapsPage() {
             </Button>
           </div>
         ) : (
-          /* Grid layout - 1 column on mobile, 2 on tablet, 3 on desktop */
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-20">
             {maps.map((map) => (
               <Card key={map.id} className="hover:shadow-md transition-shadow">

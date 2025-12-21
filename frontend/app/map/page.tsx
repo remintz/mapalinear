@@ -8,6 +8,7 @@ import Link from 'next/link';
 import { toast } from 'sonner';
 import { POIFeed } from '@/components/ui/POIFeed';
 import { POIFilters } from '@/components/ui/POIFilters';
+import { apiClient } from '@/lib/api';
 
 interface RouteSearchResponse {
   origin: string;
@@ -49,19 +50,13 @@ export default function MapPage() {
 
   // Load saved map if mapId is provided
   useEffect(() => {
-    if (mapId && API_URL) {
+    if (mapId) {
       const loadSavedMap = async () => {
         try {
           setIsLoading(true);
           setProgressMessage('Carregando mapa salvo...');
 
-          const response = await fetch(`${API_URL}/maps/${mapId}`);
-
-          if (!response.ok) {
-            throw new Error('Erro ao carregar mapa salvo');
-          }
-
-          const savedMap = await response.json();
+          const savedMap = await apiClient.getMap(mapId);
 
           // Transform saved map data to match RouteSearchResponse format
           const routeData = {
@@ -86,7 +81,7 @@ export default function MapPage() {
 
       loadSavedMap();
     }
-  }, [mapId, API_URL]);
+  }, [mapId]);
 
   // Monitor async operation if operationId is provided
   useEffect(() => {

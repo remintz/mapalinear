@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 from uuid import uuid4
 
-from sqlalchemy import String, func
+from sqlalchemy import ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -13,6 +13,7 @@ from api.database.connection import Base
 
 if TYPE_CHECKING:
     from api.database.models.map_poi import MapPOI
+    from api.database.models.user import User
 
 
 class Map(Base):
@@ -27,6 +28,9 @@ class Map(Base):
 
     id: Mapped[UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    user_id: Mapped[Optional[UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
     )
     origin: Mapped[str] = mapped_column(String(500))
     destination: Mapped[str] = mapped_column(String(500))
@@ -46,6 +50,7 @@ class Map(Base):
     )
 
     # Relationships
+    user: Mapped[Optional["User"]] = relationship("User", back_populates="maps")
     map_pois: Mapped[List["MapPOI"]] = relationship(
         "MapPOI", back_populates="map", cascade="all, delete-orphan"
     )

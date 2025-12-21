@@ -2,10 +2,12 @@
 Router para funcionalidades de exportação de dados de rotas e POIs.
 """
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import JSONResponse
 from datetime import datetime
 
+from api.database.models.user import User
+from api.middleware.auth import get_current_user
 from api.models.export_models import ExportRouteData
 from api.utils.export_utils import (
     export_to_geojson,
@@ -85,7 +87,10 @@ def create_linear_map_from_export_data(export_data: ExportRouteData):
 
 
 @router.post("/geojson")
-async def export_route_geojson(route_data: ExportRouteData):
+async def export_route_geojson(
+    route_data: ExportRouteData,
+    current_user: User = Depends(get_current_user),
+):
     """
     Exporta rota e POIs para formato GeoJSON.
     """
@@ -100,7 +105,10 @@ async def export_route_geojson(route_data: ExportRouteData):
 
 
 @router.post("/gpx")
-async def export_route_gpx(route_data: ExportRouteData):
+async def export_route_gpx(
+    route_data: ExportRouteData,
+    current_user: User = Depends(get_current_user),
+):
     """
     Exporta rota e POIs para formato GPX.
     """
@@ -147,7 +155,10 @@ async def export_route_gpx(route_data: ExportRouteData):
 
 
 @router.post("/web-urls")
-async def get_web_visualization_urls(route_data: ExportRouteData):
+async def get_web_visualization_urls(
+    route_data: ExportRouteData,
+    current_user: User = Depends(get_current_user),
+):
     """
     Gera URLs para visualização da rota em ferramentas web de mapas.
     """
@@ -171,7 +182,10 @@ async def get_web_visualization_urls(route_data: ExportRouteData):
 
 
 @router.post("/pdf")
-async def export_route_pdf(route_data: ExportRouteData):
+async def export_route_pdf(
+    route_data: ExportRouteData,
+    current_user: User = Depends(get_current_user),
+):
     """
     Exporta lista de POIs da rota para formato PDF.
 

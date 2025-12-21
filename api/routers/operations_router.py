@@ -1,18 +1,25 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from typing import Dict, Any, Optional
 
+from api.database.connection import get_db
+from api.database.models.user import User
+from api.middleware.auth import get_current_user
 from api.models.road_models import (
     AsyncOperationResponse,
     LinearMapRequest,
 )
 from api.services.async_service import AsyncService
 from api.services.road_service import RoadService
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
 road_service = RoadService()
 
 @router.get("/{operation_id}", response_model=AsyncOperationResponse)
-async def get_operation(operation_id: str):
+async def get_operation(
+    operation_id: str,
+    current_user: User = Depends(get_current_user),
+):
     """
     Obtém o status de uma operação assíncrona pelo seu ID.
     """
@@ -22,7 +29,11 @@ async def get_operation(operation_id: str):
     return operation
 
 @router.post("/linear-map", response_model=AsyncOperationResponse)
-async def start_async_linear_map(request: LinearMapRequest, background_tasks: BackgroundTasks):
+async def start_async_linear_map(
+    request: LinearMapRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+):
     """
     Inicia uma operação assíncrona para gerar um mapa linear de uma estrada.
     Backend sempre busca todos os tipos de POI - filtros são aplicados no frontend.
@@ -30,6 +41,9 @@ async def start_async_linear_map(request: LinearMapRequest, background_tasks: Ba
     import logging
     logger = logging.getLogger(__name__)
     logger.info(f"🔍 Requisição recebida: origin={request.origin}, destination={request.destination}")
+
+    # Store user_id for the background task
+    user_id = str(current_user.id)
 
     # Criar uma nova operação
     operation = await AsyncService.create_operation("linear_map")
@@ -67,7 +81,10 @@ async def start_async_linear_map(request: LinearMapRequest, background_tasks: Ba
 
 
 @router.get("/debug/segments", response_model=Dict[str, Any])
-async def get_debug_segments(operation_id: Optional[str] = None):
+async def get_debug_segments(
+    operation_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+):
     """
     Endpoint de debug para visualizar os segmentos de 10km criados a partir da rota.
     Se operation_id não for fornecido, retorna os segmentos do último mapa linear gerado.
