@@ -86,6 +86,31 @@ async def get_optional_user(
         return None
 
 
+async def get_current_admin(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """
+    FastAPI dependency to get the current authenticated admin user.
+
+    Requires a valid JWT in the Authorization header and admin privileges.
+
+    Args:
+        current_user: Injected by get_current_user dependency
+
+    Returns:
+        Authenticated User instance with admin privileges
+
+    Raises:
+        HTTPException: If not authenticated or not an admin
+    """
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required",
+        )
+    return current_user
+
+
 def require_auth(request: Request) -> bool:
     """
     Check if the current request requires authentication.

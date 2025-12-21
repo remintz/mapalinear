@@ -32,12 +32,14 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(255))
     avatar_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         default=func.now(), onupdate=func.now()
     )
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
 
     # Relationships
     maps: Mapped[List["Map"]] = relationship(
@@ -45,4 +47,4 @@ class User(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<User(id={self.id}, email='{self.email}', name='{self.name}')>"
+        return f"<User(id={self.id}, email='{self.email}', name='{self.name}', is_admin={self.is_admin})>"

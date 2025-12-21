@@ -2,14 +2,18 @@
 
 import React from 'react';
 import Link from 'next/link';
+import { useSession } from 'next-auth/react';
 import { cn } from '@/lib/utils';
 import { LoginButton } from '@/components/auth/LoginButton';
+import { Shield } from 'lucide-react';
 
 interface NavigationProps {
   className?: string;
 }
 
 export function Navigation({ className }: NavigationProps) {
+  const { data: session } = useSession();
+
   return (
     <nav className={cn('bg-white border-b border-gray-200', className)}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -36,6 +40,18 @@ export function Navigation({ className }: NavigationProps) {
             >
               Mapas Salvos
             </Link>
+            {session?.user?.isAdmin && (
+              <>
+                <div className="border-l border-gray-200 h-6 mx-2"></div>
+                <Link
+                  href="/admin"
+                  className="flex items-center gap-1.5 text-blue-600 hover:text-blue-700 transition-colors"
+                >
+                  <Shield className="w-4 h-4" />
+                  Admin
+                </Link>
+              </>
+            )}
             <div className="border-l border-gray-200 h-6 mx-2"></div>
             <LoginButton />
           </div>

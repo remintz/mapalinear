@@ -69,7 +69,7 @@ app.middleware("http")(error_handler_middleware)
 setup_error_handlers(app)
 
 # Import only required routers
-from api.routers import operations_router, export, maps_router, api_logs_router, auth_router
+from api.routers import operations_router, export, maps_router, api_logs_router, auth_router, admin_router
 
 # Include only required routers
 app.include_router(auth_router.router, tags=["Auth"])
@@ -77,6 +77,7 @@ app.include_router(operations_router.router, prefix="/api/operations", tags=["Op
 app.include_router(export.router, prefix="/api", tags=["Export"])
 app.include_router(maps_router.router, prefix="/api", tags=["Saved Maps"])
 app.include_router(api_logs_router.router, tags=["API Logs"])
+app.include_router(admin_router.router, tags=["Admin"])
 
 @app.get("/")
 async def root():

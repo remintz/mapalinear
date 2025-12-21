@@ -181,3 +181,22 @@ export interface AsyncOperation {
 }
 
 // Form data types are defined in validations.ts
+
+// Admin types
+export interface AdminUser {
+  id: string;
+  email: string;
+  name: string;
+  avatar_url?: string;
+  is_active: boolean;
+  is_admin: boolean;
+  created_at: string;
+  updated_at: string;
+  last_login_at?: string;
+  map_count: number;
+}
+
+export interface AdminUserListResponse {
+  users: AdminUser[];
+  total: number;
+}

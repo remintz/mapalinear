@@ -40,6 +40,7 @@ class UserResponse(BaseModel):
     email: str = Field(..., description="User email")
     name: str = Field(..., description="User display name")
     avatar_url: Optional[str] = Field(None, description="URL to user avatar")
+    is_admin: bool = Field(False, description="Whether user is an administrator")
 
     model_config = {"from_attributes": True}
 
@@ -82,6 +83,7 @@ async def authenticate_with_google(
                 email=user.email,
                 name=user.name,
                 avatar_url=user.avatar_url,
+                is_admin=user.is_admin,
             ),
         )
 
@@ -113,6 +115,7 @@ async def get_current_user_info(
         email=current_user.email,
         name=current_user.name,
         avatar_url=current_user.avatar_url,
+        is_admin=current_user.is_admin,
     )
 
 
