@@ -5,6 +5,7 @@ import Google from "next-auth/providers/google";
 declare module "next-auth" {
   interface Session {
     accessToken?: string;
+    authError?: string;
     user: {
       id: string;
       email?: string | null;
@@ -18,6 +19,7 @@ declare module "next-auth" {
     accessToken?: string;
     userId?: string;
     isAdmin?: boolean;
+    authError?: string;
   }
 }
 
@@ -80,6 +82,10 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       }
       if (session.user && typeof token.isAdmin === "boolean") {
         session.user.isAdmin = token.isAdmin;
+      }
+      // Pass auth error to session so it can be displayed to user
+      if (typeof token.authError === "string") {
+        session.authError = token.authError;
       }
       return session;
     },
