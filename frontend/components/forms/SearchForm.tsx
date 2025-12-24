@@ -187,9 +187,14 @@ export function SearchForm({
                 </div>
                 <div className="flex justify-between text-xs text-gray-600">
                   <span>{progressPercent}%</span>
-                  {estimatedCompletion && (
-                    <span>ETA: {new Date(estimatedCompletion).toLocaleTimeString()}</span>
-                  )}
+                  {estimatedCompletion && (() => {
+                    const remainingMs = new Date(estimatedCompletion).getTime() - Date.now();
+                    if (remainingMs <= 0) return null;
+                    const remainingSec = Math.ceil(remainingMs / 1000);
+                    const minutes = Math.floor(remainingSec / 60);
+                    const seconds = remainingSec % 60;
+                    return <span>Restante: {String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}</span>;
+                  })()}
                 </div>
               </div>
             )}
