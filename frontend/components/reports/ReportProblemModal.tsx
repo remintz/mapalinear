@@ -1,13 +1,13 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import { X, AlertTriangle, Loader2, ChevronDown } from 'lucide-react';
+import { X, AlertTriangle, Loader2, ChevronDown, Mic, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { useProblemTypes } from '@/hooks/useProblemTypes';
 import { apiClient } from '@/lib/api';
 import { PhotoUpload } from './PhotoUpload';
 import { POICombobox } from './POICombobox';
-import { AudioRecorder } from './AudioRecorder';
+import { AudioRecorder, isAudioRecordingSupported } from './AudioRecorder';
 
 interface POI {
   id: string;
@@ -40,6 +40,12 @@ export function ReportProblemModal({
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [typeDropdownOpen, setTypeDropdownOpen] = useState(false);
+  const [audioSupported, setAudioSupported] = useState<boolean | null>(null);
+
+  // Check audio support on mount
+  useEffect(() => {
+    setAudioSupported(isAudioRecordingSupported());
+  }, []);
 
   // Reset form when modal opens
   useEffect(() => {
@@ -52,13 +58,22 @@ export function ReportProblemModal({
     }
   }, [isOpen]);
 
+  // Check if form has valid content
+  // If audio is supported: description OR audio is valid
+  // If audio is NOT supported: only description is valid
+  const hasValidDescription = description.trim().length >= 10;
+  const hasAudio = audioBlob !== null;
+  const hasValidContent = audioSupported === false
+    ? hasValidDescription  // Audio not supported - require description
+    : hasValidDescription || hasAudio;  // Audio supported - either works
+
   const handleSubmit = useCallback(async () => {
     if (!selectedTypeId) {
       toast.error('Selecione o tipo de problema');
       return;
     }
-    if (description.length < 10) {
-      toast.error('Descricao deve ter pelo menos 10 caracteres');
+    if (!hasValidContent) {
+      toast.error('Descreva o problema ou grave um áudio');
       return;
     }
 
@@ -105,6 +120,7 @@ export function ReportProblemModal({
     }
   }, [
     selectedTypeId,
+    hasValidContent,
     description,
     userLocation,
     mapId,
@@ -204,38 +220,111 @@ export function ReportProblemModal({
             />
           )}
 
-          {/* Description */}
-          <div className="space-y-1">
-            <label className="text-sm font-medium text-zinc-700">
-              Descricao *
-            </label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Descreva o problema em detalhes..."
-              rows={4}
-              disabled={isSubmitting}
-              className="w-full px-3 py-2 border border-zinc-300 rounded-lg resize-none
-                        focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none
-                        disabled:opacity-50"
-            />
-            <div className={`text-xs text-right ${description.length < 10 ? 'text-red-500' : 'invisible'}`}>
-              digite mais de 10 caracteres
+          {/* Description Section - changes based on audio support */}
+          {audioSupported ? (
+            /* Audio supported: show both options */
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-zinc-700">
+                  Descreva o problema
+                </span>
+                <span className="text-xs text-zinc-500">(grave ou escreva)</span>
+              </div>
+
+              {/* Audio Recorder - Primary option */}
+              <div className={`rounded-lg border-2 transition-colors ${
+                hasAudio
+                  ? 'border-green-300 bg-green-50'
+                  : 'border-dashed border-zinc-300 bg-zinc-50'
+              }`}>
+                <div className="p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Mic className={`w-4 h-4 ${hasAudio ? 'text-green-600' : 'text-zinc-500'}`} />
+                    <span className={`text-sm font-medium ${hasAudio ? 'text-green-700' : 'text-zinc-600'}`}>
+                      {hasAudio ? 'Áudio gravado' : 'Gravar áudio'}
+                    </span>
+                    {hasAudio && (
+                      <span className="ml-auto text-xs text-green-600 font-medium">Pronto</span>
+                    )}
+                  </div>
+                  <AudioRecorder
+                    audioBlob={audioBlob}
+                    onAudioChange={setAudioBlob}
+                    disabled={isSubmitting}
+                  />
+                </div>
+              </div>
+
+              {/* OR divider */}
+              <div className="flex items-center gap-3">
+                <div className="flex-1 h-px bg-zinc-200" />
+                <span className="text-xs text-zinc-400 uppercase font-medium">ou</span>
+                <div className="flex-1 h-px bg-zinc-200" />
+              </div>
+
+              {/* Text description - Alternative option */}
+              <div className={`rounded-lg border-2 transition-colors ${
+                hasValidDescription
+                  ? 'border-green-300 bg-green-50'
+                  : 'border-zinc-200'
+              }`}>
+                <div className="p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <FileText className={`w-4 h-4 ${hasValidDescription ? 'text-green-600' : 'text-zinc-500'}`} />
+                    <span className={`text-sm font-medium ${hasValidDescription ? 'text-green-700' : 'text-zinc-600'}`}>
+                      Escrever descrição
+                    </span>
+                    {hasValidDescription && (
+                      <span className="ml-auto text-xs text-green-600 font-medium">Pronto</span>
+                    )}
+                  </div>
+                  <textarea
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="Descreva o problema em detalhes..."
+                    rows={3}
+                    disabled={isSubmitting}
+                    className="w-full px-3 py-2 border border-zinc-300 rounded-lg resize-none
+                              focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none
+                              disabled:opacity-50 bg-white"
+                  />
+                  {description.length > 0 && description.trim().length < 10 && (
+                    <div className="text-xs text-amber-600 mt-1">
+                      Digite pelo menos 10 caracteres ({10 - description.trim().length} restantes)
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
+          ) : (
+            /* Audio NOT supported: show only description as required */
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-zinc-700">
+                Descrição *
+              </label>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Descreva o problema em detalhes..."
+                rows={4}
+                disabled={isSubmitting}
+                className="w-full px-3 py-2 border border-zinc-300 rounded-lg resize-none
+                          focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none
+                          disabled:opacity-50"
+              />
+              {description.length > 0 && description.trim().length < 10 && (
+                <div className="text-xs text-amber-600">
+                  Digite pelo menos 10 caracteres ({10 - description.trim().length} restantes)
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Photo Upload */}
           <PhotoUpload
             photos={photos}
             onPhotosChange={setPhotos}
             maxPhotos={3}
-            disabled={isSubmitting}
-          />
-
-          {/* Audio Recorder - only renders if supported */}
-          <AudioRecorder
-            audioBlob={audioBlob}
-            onAudioChange={setAudioBlob}
             disabled={isSubmitting}
           />
         </div>
@@ -254,7 +343,7 @@ export function ReportProblemModal({
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={isSubmitting || !selectedTypeId || description.length < 10}
+            disabled={isSubmitting || !selectedTypeId || !hasValidContent}
             className="flex-1 px-4 py-2 bg-amber-500 text-white rounded-lg
                       hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed
                       flex items-center justify-center gap-2"

@@ -161,7 +161,7 @@ async def get_problem_types(
 @router.post("", response_model=CreateReportResponse, status_code=status.HTTP_201_CREATED)
 async def create_report(
     problem_type_id: str = Form(..., description="Problem type UUID"),
-    description: str = Form(..., min_length=10, description="Problem description"),
+    description: str = Form("", description="Problem description (optional if audio provided)"),
     latitude: Optional[float] = Form(None, description="User latitude"),
     longitude: Optional[float] = Form(None, description="User longitude"),
     map_id: Optional[str] = Form(None, description="Current map UUID"),
@@ -176,20 +176,32 @@ async def create_report(
 
     Accepts multipart form data with optional photo and audio attachments.
     Photos and audio are stored in the database as binary data.
+    Either a description (min 10 chars) OR an audio recording is required.
 
     Args:
         problem_type_id: UUID of the problem type
-        description: Detailed description of the problem
+        description: Description of the problem (optional if audio provided)
         latitude: Optional user's current latitude
         longitude: Optional user's current longitude
         map_id: Optional UUID of the current map
         poi_id: Optional UUID of the selected POI
         photos: Up to 3 photo files
-        audio: Optional audio recording
+        audio: Optional audio recording (required if no description)
 
     Returns:
         Created report ID and success message
     """
+    # Check if audio file is provided and valid
+    has_audio = audio is not None and audio.filename and audio.size and audio.size > 0
+    has_description = len(description.strip()) >= 10
+
+    # Validate that either description or audio is provided
+    if not has_description and not has_audio:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Forneca uma descricao (min 10 caracteres) ou grave um audio",
+        )
+
     # Validate problem type ID
     try:
         pt_uuid = UUID(problem_type_id)

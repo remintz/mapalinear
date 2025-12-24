@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Button, Card, CardContent } from '@/components/ui';
-import { MapPin, ArrowLeft, Bug, Loader2, Menu, Download, X, Fuel, Utensils, Bed, Tent, Hospital, Ticket, Building2, Home, FileText } from 'lucide-react';
+import { MapPin, Bug, Loader2, Menu, Download, X, Fuel, Utensils, Bed, Tent, Hospital, Ticket, Building2, Home, FileText } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { useSession } from 'next-auth/react';
@@ -14,7 +14,7 @@ import { apiClient } from '@/lib/api';
 import { useRouteSimulation } from '@/hooks/useRouteSimulation';
 import { useRouteTracking } from '@/hooks/useRouteTracking';
 import { useGeolocation } from '@/hooks/useGeolocation';
-import { RouteSegment } from '@/lib/types';
+import { RouteSegment, POI, Milestone } from '@/lib/types';
 import { ReportProblemButton } from '@/components/reports/ReportProblemButton';
 
 interface RouteSearchResponse {
@@ -22,8 +22,8 @@ interface RouteSearchResponse {
   destination: string;
   total_distance_km: number;
   segments: RouteSegment[];
-  pois: any[];
-  milestones: any[];
+  pois: POI[];
+  milestones: Milestone[];
 }
 
 const SIMULATE_USER_KEY = 'mapalinear_simulate_user';
@@ -276,7 +276,7 @@ function MapPageContent() {
   });
 
   // Download files function
-  const downloadFile = async (format: 'geojson' | 'gpx', routeData: any) => {
+  const downloadFile = async (format: 'geojson' | 'gpx', routeData: RouteSearchResponse) => {
     setIsExporting(true);
     try {
       const response = await fetch(`${API_URL}/export/${format}`, {
@@ -363,7 +363,7 @@ function MapPageContent() {
   };
 
   // Open web tools function
-  const openWebTool = async (tool: 'umap' | 'overpass', routeData: any) => {
+  const openWebTool = async (tool: 'umap' | 'overpass', routeData: RouteSearchResponse) => {
     try {
       const response = await fetch(`${API_URL}/export/web-urls`, {
         method: 'POST',

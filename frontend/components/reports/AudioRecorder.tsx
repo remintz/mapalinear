@@ -15,7 +15,7 @@ function formatDuration(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-function isAudioRecordingSupported(): boolean {
+export function isAudioRecordingSupported(): boolean {
   if (typeof window === 'undefined') return false;
   if (typeof navigator === 'undefined') return false;
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return false;
@@ -23,7 +23,7 @@ function isAudioRecordingSupported(): boolean {
   return true;
 }
 
-export function AudioRecorder({ audioBlob, onAudioChange, disabled = false }: AudioRecorderProps) {
+export function AudioRecorder({ onAudioChange, disabled = false }: AudioRecorderProps) {
   const [isSupported, setIsSupported] = useState<boolean | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -31,7 +31,8 @@ export function AudioRecorder({ audioBlob, onAudioChange, disabled = false }: Au
   const [duration, setDuration] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
-  const [chunks, setChunks] = useState<Blob[]>([]);
+  // Note: chunks is used inside ondataavailable callback
+  const [, setChunks] = useState<Blob[]>([]);
 
   useEffect(() => {
     setIsSupported(isAudioRecordingSupported());
@@ -152,7 +153,7 @@ export function AudioRecorder({ audioBlob, onAudioChange, disabled = false }: Au
   return (
     <div className="space-y-2">
       <label className="text-sm font-medium text-zinc-700">
-        Audio (opcional)
+        Áudio (opcional)
       </label>
 
       {error && (
@@ -172,7 +173,7 @@ export function AudioRecorder({ audioBlob, onAudioChange, disabled = false }: Au
                      transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Mic className="w-5 h-5" />
-          <span className="text-sm">Clique para gravar audio</span>
+          <span className="text-sm">Clique para gravar áudio</span>
         </button>
       )}
 

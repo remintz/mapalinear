@@ -2,7 +2,7 @@
 
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
-import { Map, LogIn } from "lucide-react";
+import { Map } from "lucide-react";
 import { Suspense } from "react";
 
 function LoginContent() {

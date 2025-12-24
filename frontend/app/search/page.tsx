@@ -20,6 +20,15 @@ import Link from 'next/link';
 import { apiClient, SavedMap } from '@/lib/api';
 import { toast } from 'sonner';
 
+interface SearchFormData {
+  origin: string;
+  destination: string;
+}
+
+interface RouteSearchResult {
+  id?: string;
+}
+
 function SearchPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -75,9 +84,9 @@ function SearchPageContent() {
 
   // Redirect to map page when data is available
   useEffect(() => {
-    if (data && (data as any).id) {
-      const mapId = (data as any).id;
-      router.push(`/map?mapId=${mapId}`);
+    const result = data as RouteSearchResult | undefined;
+    if (result?.id) {
+      router.push(`/map?mapId=${result.id}`);
     }
   }, [data, router]);
 
@@ -88,7 +97,7 @@ function SearchPageContent() {
     }
   }, [operationId, router]);
 
-  const handleSearch = (formData: any) => {
+  const handleSearch = (formData: SearchFormData) => {
     searchRoute(formData);
   };
 

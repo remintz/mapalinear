@@ -3,7 +3,7 @@ import { POI, Milestone } from '@/lib/types';
 import {
   Fuel, Utensils, Coffee, Bed, Tent, Hospital, Ticket,
   Building2, Home, MapPin, Shield, Signpost, LogOut,
-  UtensilsCrossed, ParkingCircle, Landmark, Star, ExternalLink
+  UtensilsCrossed, ParkingCircle, Star, ExternalLink
 } from 'lucide-react';
 
 interface POICardProps {
