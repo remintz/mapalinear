@@ -1,9 +1,33 @@
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import { getSession } from 'next-auth/react';
 import { RouteSearchRequest, RouteSearchResponse, AsyncOperation, ExportRouteData } from './types';
 
+// Helper to wait for session with retry
+async function getSessionWithRetry(maxRetries = 3, delayMs = 500): Promise<string | null> {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const session = await getSession();
+      if (session?.accessToken) {
+        return session.accessToken;
+      }
+      // If no token yet, wait and retry
+      if (i < maxRetries - 1) {
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+    } catch (error) {
+      console.warn(`Session fetch attempt ${i + 1} failed:`, error);
+      if (i < maxRetries - 1) {
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+  return null;
+}
+
 class APIClient {
   private client: AxiosInstance;
+  private cachedToken: string | null = null;
+  private tokenExpiry: number = 0;
 
   constructor() {
     this.client = axios.create({
@@ -17,19 +41,36 @@ class APIClient {
     this.setupInterceptors();
   }
 
+  // Allow external setting of token (useful when session is already available)
+  setAccessToken(token: string | null) {
+    this.cachedToken = token;
+    this.tokenExpiry = token ? Date.now() + 3600000 : 0; // 1 hour cache
+  }
+
+  private async getValidToken(): Promise<string | null> {
+    // Check if we have a valid cached token
+    if (this.cachedToken && Date.now() < this.tokenExpiry) {
+      return this.cachedToken;
+    }
+
+    // Get fresh token with retry
+    const token = await getSessionWithRetry();
+    if (token) {
+      this.cachedToken = token;
+      this.tokenExpiry = Date.now() + 3600000; // 1 hour cache
+    }
+    return token;
+  }
+
   private setupInterceptors() {
-    this.client.interceptors.request.use(async (config) => {
+    this.client.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
       // Add request ID for debugging
       config.headers['X-Request-ID'] = Math.random().toString(36).substr(2, 9);
 
       // Add auth token if available
-      try {
-        const session = await getSession();
-        if (session?.accessToken) {
-          config.headers['Authorization'] = `Bearer ${session.accessToken}`;
-        }
-      } catch {
-        // Ignore session errors - user might not be logged in
+      const token = await this.getValidToken();
+      if (token) {
+        config.headers['Authorization'] = `Bearer ${token}`;
       }
 
       return config;
@@ -51,6 +92,10 @@ class APIClient {
         }
 
         if (error.response?.status === 401) {
+          // Clear cached token on auth error
+          this.cachedToken = null;
+          this.tokenExpiry = 0;
+
           // Redirect to login on auth error
           if (typeof window !== 'undefined') {
             window.location.href = '/login';
