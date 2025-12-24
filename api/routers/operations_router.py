@@ -49,27 +49,24 @@ async def start_async_linear_map(
     operation = await AsyncService.create_operation("linear_map")
     
     # Definir a função que executará o processamento em segundo plano
+    # NOTA: Não use try/except aqui - o run_async._worker já trata erros
+    # corretamente usando engine standalone para a thread
     def process_linear_map(progress_callback=None):
-        try:
-            # Gerar o mapa linear (sempre busca todos os tipos de POI)
-            result = road_service.generate_linear_map(
-                origin=request.origin,
-                destination=request.destination,
-                road_id=request.road_id,
-                include_cities=request.include_cities,
-                max_distance_from_road=request.max_distance_from_road,
-                max_detour_distance_km=request.max_detour_distance_km,
-                min_distance_from_origin_km=request.min_distance_from_origin_km,
-                progress_callback=progress_callback,
-                user_id=user_id
-            )
-            
-            # Converter para dicionário para armazenamento
-            return result.model_dump()
-        except Exception as e:
-            # Em caso de erro, falhar a operação
-            AsyncService.fail_operation(operation.operation_id, str(e))
-            raise
+        # Gerar o mapa linear (sempre busca todos os tipos de POI)
+        result = road_service.generate_linear_map(
+            origin=request.origin,
+            destination=request.destination,
+            road_id=request.road_id,
+            include_cities=request.include_cities,
+            max_distance_from_road=request.max_distance_from_road,
+            max_detour_distance_km=request.max_detour_distance_km,
+            min_distance_from_origin_km=request.min_distance_from_origin_km,
+            progress_callback=progress_callback,
+            user_id=user_id
+        )
+        
+        # Converter para dicionário para armazenamento
+        return result.model_dump()
     
     # Adicionar a tarefa em segundo plano
     background_tasks.add_task(
