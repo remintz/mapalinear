@@ -14,6 +14,10 @@ DEFAULT_SETTINGS = {
     "poi_search_radius_km": {
         "value": "5",
         "description": "Raio de busca de pontos de interesse em km (1-20)"
+    },
+    "duplicate_map_tolerance_km": {
+        "value": "10",
+        "description": "Tolerância em km para detectar mapas duplicados (1-50)"
     }
 }
 

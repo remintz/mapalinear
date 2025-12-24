@@ -140,6 +140,20 @@ async def update_setting(
                 detail="O raio de busca deve ser um número inteiro"
             )
 
+    if key == "duplicate_map_tolerance_km":
+        try:
+            tolerance = int(request.value)
+            if tolerance < 1 or tolerance > 50:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="A tolerância deve estar entre 1 e 50 km"
+                )
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A tolerância deve ser um número inteiro"
+            )
+
     setting = await repo.set(
         key=key,
         value=request.value,
@@ -191,6 +205,20 @@ async def update_settings(
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="O raio de busca deve ser um número inteiro"
+                )
+
+        if key == "duplicate_map_tolerance_km":
+            try:
+                tolerance = int(value)
+                if tolerance < 1 or tolerance > 50:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="A tolerância deve estar entre 1 e 50 km"
+                    )
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="A tolerância deve ser um número inteiro"
                 )
 
         await repo.set(key=key, value=value, updated_by=admin_user.email)

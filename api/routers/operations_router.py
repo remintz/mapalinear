@@ -1,16 +1,24 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from typing import Dict, Any, Optional
+import logging
 
+from api.providers.settings import get_settings
 from api.database.connection import get_db
 from api.database.models.user import User
+from api.database.repositories.map import MapRepository
+from api.database.repositories.system_settings import SystemSettingsRepository
 from api.middleware.auth import get_current_user
 from api.models.road_models import (
     AsyncOperationResponse,
     LinearMapRequest,
 )
+from api.providers.manager import get_manager
 from api.services.async_service import AsyncService
 from api.services.road_service import RoadService
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
+settings = get_settings()
 
 router = APIRouter()
 road_service = RoadService()
@@ -32,15 +40,58 @@ async def get_operation(
 async def start_async_linear_map(
     request: LinearMapRequest,
     background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
     Inicia uma operação assíncrona para gerar um mapa linear de uma estrada.
     Backend sempre busca todos os tipos de POI - filtros são aplicados no frontend.
     """
-    import logging
-    logger = logging.getLogger(__name__)
     logger.info(f"🔍 Requisição recebida: origin={request.origin}, destination={request.destination}")
+
+    # Geocodificar origem e destino para validação de duplicatas
+    try:
+        geo_provider = get_manager().get_provider()
+        origin_location = await geo_provider.geocode(request.origin)
+        dest_location = await geo_provider.geocode(request.destination)
+
+        if not origin_location or not dest_location:
+            raise HTTPException(
+                status_code=400,
+                detail="Não foi possível geocodificar origem ou destino"
+            )
+
+        # Buscar tolerância de duplicatas do banco de dados
+        settings_repo = SystemSettingsRepository(db)
+        tolerance_str = await settings_repo.get_value("duplicate_map_tolerance_km", "10")
+        tolerance_km = float(tolerance_str)
+
+        # Verificar se já existe um mapa com coordenadas próximas
+        map_repo = MapRepository(db)
+        existing_map = await map_repo.find_by_coordinates_proximity(
+            origin_lat=origin_location.latitude,
+            origin_lon=origin_location.longitude,
+            dest_lat=dest_location.latitude,
+            dest_lon=dest_location.longitude,
+            tolerance_km=tolerance_km,
+        )
+
+        if existing_map:
+            logger.info(f"⚠️ Mapa duplicado detectado por proximidade: {existing_map.id}")
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "Já existe um mapa com origem e destino equivalentes",
+                    "existing_map_id": str(existing_map.id),
+                    "origin": existing_map.origin,
+                    "destination": existing_map.destination,
+                    "hint": "Você pode adicionar este mapa à sua mapoteca"
+                }
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"⚠️ Erro ao verificar duplicatas: {e}. Continuando sem validação.")
 
     # Store user_id for the background task
     user_id = str(current_user.id)

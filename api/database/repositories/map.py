@@ -2,10 +2,11 @@
 Map repository for database operations.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from uuid import UUID
+import math
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -119,3 +120,112 @@ class MapRepository(BaseRepository[Map]):
             .limit(limit)
         )
         return list(result.scalars().all())
+
+    async def find_by_coordinates_proximity(
+        self,
+        origin_lat: float,
+        origin_lon: float,
+        dest_lat: float,
+        dest_lon: float,
+        tolerance_km: float = 5.0,
+    ) -> Optional[Map]:
+        """
+        Find a map with origin and destination within tolerance of given coordinates.
+
+        Uses Haversine formula to calculate distance between coordinates.
+
+        Args:
+            origin_lat: Origin latitude
+            origin_lon: Origin longitude
+            dest_lat: Destination latitude
+            dest_lon: Destination longitude
+            tolerance_km: Maximum distance in km to consider a match
+
+        Returns:
+            First matching map or None
+        """
+        # Get all maps with their coordinates extracted from segments
+        result = await self.session.execute(
+            select(
+                Map,
+                # Extract origin coordinates from first segment
+                Map.segments[0]["start_coordinates"]["latitude"].astext.label(
+                    "map_origin_lat"
+                ),
+                Map.segments[0]["start_coordinates"]["longitude"].astext.label(
+                    "map_origin_lon"
+                ),
+                # Extract destination coordinates from last segment
+                func.jsonb_array_length(Map.segments).label("seg_count"),
+            ).where(func.jsonb_array_length(Map.segments) > 0)
+        )
+
+        rows = result.all()
+
+        for row in rows:
+            map_obj = row[0]
+            try:
+                map_origin_lat = float(row.map_origin_lat) if row.map_origin_lat else None
+                map_origin_lon = float(row.map_origin_lon) if row.map_origin_lon else None
+
+                if map_origin_lat is None or map_origin_lon is None:
+                    continue
+
+                # Get destination from last segment
+                segments = map_obj.segments
+                if not segments:
+                    continue
+
+                last_segment = segments[-1]
+                end_coords = last_segment.get("end_coordinates", {})
+                map_dest_lat = end_coords.get("latitude")
+                map_dest_lon = end_coords.get("longitude")
+
+                if map_dest_lat is None or map_dest_lon is None:
+                    continue
+
+                # Calculate distances using Haversine formula
+                origin_distance = self._haversine_distance(
+                    origin_lat, origin_lon, map_origin_lat, map_origin_lon
+                )
+                dest_distance = self._haversine_distance(
+                    dest_lat, dest_lon, map_dest_lat, map_dest_lon
+                )
+
+                # Check if both origin and destination are within tolerance
+                if origin_distance <= tolerance_km and dest_distance <= tolerance_km:
+                    return map_obj
+
+            except (ValueError, TypeError, KeyError):
+                continue
+
+        return None
+
+    @staticmethod
+    def _haversine_distance(
+        lat1: float, lon1: float, lat2: float, lon2: float
+    ) -> float:
+        """
+        Calculate the great-circle distance between two points on Earth.
+
+        Args:
+            lat1, lon1: First point coordinates
+            lat2, lon2: Second point coordinates
+
+        Returns:
+            Distance in kilometers
+        """
+        R = 6371  # Earth's radius in kilometers
+
+        lat1_rad = math.radians(lat1)
+        lat2_rad = math.radians(lat2)
+        delta_lat = math.radians(lat2 - lat1)
+        delta_lon = math.radians(lon2 - lon1)
+
+        a = (
+            math.sin(delta_lat / 2) ** 2
+            + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon / 2) ** 2
+        )
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+        return R * c

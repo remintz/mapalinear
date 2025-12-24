@@ -90,6 +90,13 @@ class ProviderSettings(BaseSettings):
         description="Enable HERE Maps enrichment for OSM POIs (adds phone, website, hours). Only applies when POI_PROVIDER=osm."
     )
 
+    # Map duplication detection settings
+    duplicate_map_tolerance_km: float = Field(
+        default=5.0,
+        alias="DUPLICATE_MAP_TOLERANCE_KM",
+        description="Maximum distance in km between origin/destination coordinates to consider maps as duplicates"
+    )
+
     # Google OAuth settings
     google_client_id: Optional[str] = Field(
         default=None,

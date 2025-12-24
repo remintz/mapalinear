@@ -10,11 +10,13 @@ import {
   Save,
   Loader2,
   MapPin,
+  Copy,
 } from "lucide-react";
 import { toast } from "sonner";
 
 interface SystemSettings {
   poi_search_radius_km: string;
+  duplicate_map_tolerance_km: string;
 }
 
 export default function AdminSettingsPage() {
@@ -22,6 +24,7 @@ export default function AdminSettingsPage() {
   const router = useRouter();
   const [settings, setSettings] = useState<SystemSettings>({
     poi_search_radius_km: "5",
+    duplicate_map_tolerance_km: "10",
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -100,6 +103,15 @@ export default function AdminSettingsPage() {
     setSettings((prev) => ({
       ...prev,
       poi_search_radius_km: numericValue,
+    }));
+  };
+
+  const handleToleranceChange = (value: string) => {
+    // Allow only numbers
+    const numericValue = value.replace(/[^0-9]/g, "");
+    setSettings((prev) => ({
+      ...prev,
+      duplicate_map_tolerance_km: numericValue,
     }));
   };
 
@@ -185,6 +197,47 @@ export default function AdminSettingsPage() {
               <div className="flex justify-between text-xs text-gray-400">
                 <span>1 km</span>
                 <span>20 km</span>
+              </div>
+            </div>
+
+            {/* Duplicate Map Tolerance */}
+            <div className="space-y-3">
+              <label className="block">
+                <span className="flex items-center gap-2 text-sm font-medium text-gray-900">
+                  <Copy className="w-4 h-4 text-orange-600" />
+                  Tolerância para detecção de mapas duplicados
+                </span>
+                <span className="text-sm text-gray-500 mt-1 block">
+                  Define a distância máxima entre coordenadas de origem/destino para considerar dois mapas como duplicados.
+                  Valores menores exigem correspondência mais exata.
+                  Valores maiores permitem variações na forma como as cidades são escritas.
+                </span>
+              </label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min="1"
+                  max="50"
+                  step="1"
+                  value={settings.duplicate_map_tolerance_km || "10"}
+                  onChange={(e) => handleToleranceChange(e.target.value)}
+                  className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-orange-600"
+                />
+                <div className="flex items-center gap-1 min-w-[80px]">
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={settings.duplicate_map_tolerance_km || "10"}
+                    onChange={(e) => handleToleranceChange(e.target.value)}
+                    className="w-16 px-2 py-1 text-center border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  />
+                  <span className="text-sm text-gray-600">km</span>
+                </div>
+              </div>
+              <div className="flex justify-between text-xs text-gray-400">
+                <span>1 km</span>
+                <span>50 km</span>
               </div>
             </div>
           </div>
