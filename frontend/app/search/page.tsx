@@ -1,13 +1,13 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { Suspense, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { SearchForm } from '@/components/forms/SearchForm';
 import { useAsyncRouteSearch } from '@/hooks/useAsyncRouteSearch';
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 
-export default function SearchPage() {
+function SearchPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const operationId = searchParams.get('operationId');
@@ -92,5 +92,13 @@ export default function SearchPage() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function SearchPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50 flex items-center justify-center">Carregando...</div>}>
+      <SearchPageContent />
+    </Suspense>
   );
 }

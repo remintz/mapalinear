@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Button, Card, CardContent } from '@/components/ui';
 import { MapPin, ArrowLeft, Bug, Loader2, Menu, Download, X, Fuel, Utensils, Bed, Tent, Hospital, Ticket, Building2, Home, FileText } from 'lucide-react';
@@ -24,7 +24,7 @@ interface RouteSearchResponse {
   milestones: any[];
 }
 
-export default function MapPage() {
+function MapPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const mapId = searchParams.get('mapId');
@@ -712,5 +712,20 @@ export default function MapPage() {
         </>
       )}
     </div>
+  );
+}
+
+export default function MapPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto" />
+          <p className="mt-4 text-gray-600">Carregando...</p>
+        </div>
+      </div>
+    }>
+      <MapPageContent />
+    </Suspense>
   );
 }
