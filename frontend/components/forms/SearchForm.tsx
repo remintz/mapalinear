@@ -3,8 +3,8 @@
 import React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Search, MapPin, Settings } from 'lucide-react';
-import { Button, Input, Card, CardHeader, CardTitle, CardContent } from '@/components/ui';
+import { Search } from 'lucide-react';
+import { Button, Card, CardHeader, CardTitle, CardContent, CityCombobox } from '@/components/ui';
 import { searchFormSchema, SearchFormData } from '@/lib/validations';
 
 interface SearchFormProps {
@@ -25,7 +25,6 @@ export function SearchForm({
   estimatedCompletion
 }: SearchFormProps) {
   const {
-    register,
     handleSubmit,
     formState: { errors },
     watch,
@@ -75,16 +74,14 @@ export function SearchForm({
               <label htmlFor="origin" className="block text-sm font-medium text-gray-700">
                 Origem
               </label>
-              <div className="relative">
-                <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <Input
-                  id="origin"
-                  {...register('origin')}
-                  placeholder="São Paulo, SP"
-                  className="pl-10"
-                  disabled={isLoading}
-                />
-              </div>
+              <CityCombobox
+                id="origin"
+                value={watchedValues.origin}
+                onChange={(value) => setValue('origin', value)}
+                placeholder="Digite a cidade de origem..."
+                disabled={isLoading}
+                error={!!errors.origin}
+              />
               {errors.origin && (
                 <p className="text-sm text-red-600">{errors.origin.message}</p>
               )}
@@ -94,16 +91,14 @@ export function SearchForm({
               <label htmlFor="destination" className="block text-sm font-medium text-gray-700">
                 Destino
               </label>
-              <div className="relative">
-                <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <Input
-                  id="destination"
-                  {...register('destination')}
-                  placeholder="Rio de Janeiro, RJ"
-                  className="pl-10"
-                  disabled={isLoading}
-                />
-              </div>
+              <CityCombobox
+                id="destination"
+                value={watchedValues.destination}
+                onChange={(value) => setValue('destination', value)}
+                placeholder="Digite a cidade de destino..."
+                disabled={isLoading}
+                error={!!errors.destination}
+              />
               {errors.destination && (
                 <p className="text-sm text-red-600">{errors.destination.message}</p>
               )}

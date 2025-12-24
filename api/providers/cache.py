@@ -201,6 +201,7 @@ class UnifiedCache:
             'route': self.settings.geo_cache_ttl_route,
             'poi_search': self.settings.geo_cache_ttl_poi,
             'poi_details': self.settings.geo_cache_ttl_poi_details,
+            'municipalities': 604800,  # 7 days - IBGE data rarely changes
         }
     
     async def _get_pool(self):

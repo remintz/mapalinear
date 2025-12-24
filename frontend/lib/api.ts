@@ -257,6 +257,13 @@ class APIClient {
     });
     return response.data;
   }
+
+  // Municipalities functions
+  async getMunicipalities(uf?: string): Promise<Municipality[]> {
+    const params = uf ? `?uf=${uf}` : '';
+    const { data } = await this.client.get<Municipality[]>(`/municipalities${params}`);
+    return data;
+  }
 }
 
 // Types for saved maps
@@ -269,6 +276,13 @@ export interface SavedMap {
   creation_date: string;
   road_refs: string[];
   milestone_count: number;
+}
+
+// Types for municipalities
+export interface Municipality {
+  id: number;
+  nome: string;
+  uf: string;
 }
 
 export const apiClient = new APIClient();

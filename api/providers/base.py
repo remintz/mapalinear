@@ -16,6 +16,7 @@ class ProviderType(Enum):
     OSM = "osm"
     HERE = "here"
     TOMTOM = "tomtom"
+    IBGE = "ibge"
 
 
 class GeoProvider(ABC):
