@@ -6,6 +6,7 @@ import { Button, Card, CardContent } from '@/components/ui';
 import { MapPin, ArrowLeft, Bug, Loader2, Menu, Download, X, Fuel, Utensils, Bed, Tent, Hospital, Ticket, Building2, Home, FileText } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
+import { useSession } from 'next-auth/react';
 import { POIFeed } from '@/components/ui/POIFeed';
 import { POIFilters } from '@/components/ui/POIFilters';
 import { SimulationControls } from '@/components/ui/SimulationControls';
@@ -24,9 +25,28 @@ interface RouteSearchResponse {
   milestones: any[];
 }
 
+const SIMULATE_USER_KEY = 'mapalinear_simulate_user';
+
 function MapPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { data: session } = useSession();
+  const isActualAdmin = session?.user?.isAdmin ?? false;
+
+  // State for simulating regular user (set via Admin page)
+  const [isSimulatingUser, setIsSimulatingUser] = useState(false);
+
+  // Initialize from sessionStorage on mount
+  useEffect(() => {
+    const stored = sessionStorage.getItem(SIMULATE_USER_KEY);
+    if (stored === 'true') {
+      setIsSimulatingUser(true);
+    }
+  }, []);
+
+  // Effective admin status (false when simulating user)
+  const isAdmin = isActualAdmin && !isSimulatingUser;
+
   const mapId = searchParams.get('mapId');
   const operationId = searchParams.get('operationId');
 
@@ -75,7 +95,6 @@ function MapPageContent() {
 
           setData(routeData);
           setIsLoading(false);
-          toast.success('Mapa carregado com sucesso!');
         } catch (error) {
           console.error('Error loading saved map:', error);
           setError('Erro ao carregar mapa salvo');
@@ -128,7 +147,6 @@ function MapPageContent() {
                 milestones: operation.result.milestones || []
               };
               setData(routeData);
-              toast.success('Mapa criado com sucesso!');
 
               // Update URL to use mapId instead of operationId
               if (operation.result.id) {
@@ -293,8 +311,6 @@ function MapPageContent() {
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-
-      toast.success(`Arquivo ${format.toUpperCase()} baixado com sucesso!`);
     } catch (error) {
       console.error('Erro ao exportar:', error);
       toast.error(`Erro ao exportar ${format.toUpperCase()}`);
@@ -337,8 +353,6 @@ function MapPageContent() {
       a.click();
       window.URL.revokeObjectURL(blobUrl);
       document.body.removeChild(a);
-
-      toast.success('PDF baixado com sucesso!');
     } catch (error) {
       console.error('Erro ao exportar PDF:', error);
       toast.error('Erro ao exportar PDF');
@@ -505,14 +519,16 @@ function MapPageContent() {
                 )}
                 <span className="hidden sm:inline">PDF</span>
               </button>
-              {/* Desktop: Show options button in header */}
-              <button
-                onClick={() => setIsAdminMenuOpen(true)}
-                className="hidden lg:flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 px-3 py-1 rounded-lg hover:bg-gray-100 transition-colors"
-              >
-                <Menu className="h-4 w-4" />
-                <span>Opções</span>
-              </button>
+              {/* Desktop: Show options button in header (admin only) */}
+              {isAdmin && (
+                <button
+                  onClick={() => setIsAdminMenuOpen(true)}
+                  className="hidden lg:flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 px-3 py-1 rounded-lg hover:bg-gray-100 transition-colors"
+                >
+                  <Menu className="h-4 w-4" />
+                  <span>Opções</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -536,15 +552,17 @@ function MapPageContent() {
 
           {/* Content - POI Feed */}
           <div className="flex-1 lg:max-w-3xl">
-            {/* Simulation Controls - Fixed at top of feed */}
-            <div className="mb-4">
-              <SimulationControls
-                state={simulation.state}
-                controls={simulation.controls}
-                isOnRoute={tracking.isOnRoute}
-                distanceToRoute={tracking.distanceToRoute}
-              />
-            </div>
+            {/* Simulation Controls - Only visible for admins */}
+            {isAdmin && (
+              <div className="mb-4">
+                <SimulationControls
+                  state={simulation.state}
+                  controls={simulation.controls}
+                  isOnRoute={tracking.isOnRoute}
+                  distanceToRoute={tracking.distanceToRoute}
+                />
+              </div>
+            )}
 
             {/* Tracking Status (when on route) */}
             {tracking.isOnRoute && tracking.distanceTraveled !== null && (
@@ -574,15 +592,17 @@ function MapPageContent() {
               autoScroll={simulation.state.isActive || tracking.isOnRoute}
             />
 
-            {/* Debug Link - Mobile only */}
-            <div className="mt-8 pb-8 text-center lg:hidden">
-              <button
-                onClick={() => setIsAdminMenuOpen(true)}
-                className="text-xs text-gray-400 hover:text-gray-600 underline"
-              >
-                Opções avançadas
-              </button>
-            </div>
+            {/* Debug Link - Mobile only (admin only) */}
+            {isAdmin && (
+              <div className="mt-8 pb-8 text-center lg:hidden">
+                <button
+                  onClick={() => setIsAdminMenuOpen(true)}
+                  className="text-xs text-gray-400 hover:text-gray-600 underline"
+                >
+                  Opções avançadas
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </main>

@@ -68,7 +68,6 @@ export default function DebugSegmentsPage() {
 
         const data = await response.json();
         setDebugData(data);
-        toast.success(`${data.total_segments} segmentos carregados!`);
       } catch (error) {
         console.error('Erro:', error);
         const errorMessage = error instanceof Error ? error.message : 'Erro ao buscar segmentos';

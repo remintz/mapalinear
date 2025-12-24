@@ -38,7 +38,11 @@ export function LoginButton() {
           </span>
         </div>
         <button
-          onClick={() => signOut()}
+          onClick={() => {
+            // Clear admin simulation mode on logout
+            sessionStorage.removeItem('mapalinear_simulate_user');
+            signOut();
+          }}
           className="flex items-center gap-1 px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
           title="Sair"
         >
