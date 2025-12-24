@@ -25,7 +25,7 @@ services:
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
-        value: "3.11"
+        value: "3.11.11"
       - key: POSTGRES_HOST
         fromDatabase:
           name: mapalinear-db
