@@ -9,8 +9,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from api.database.models.map import Map
 from api.database.models.user import User
+from api.database.models.user_map import UserMap
 from api.database.repositories.base import BaseRepository
 
 # Default admin users by name
@@ -141,9 +141,9 @@ class UserRepository(BaseRepository[User]):
         if not user:
             return None
 
-        # Get map count
+        # Get map count (via UserMap junction table)
         result = await self.session.execute(
-            select(func.count(Map.id)).where(Map.user_id == user_id)
+            select(func.count(UserMap.id)).where(UserMap.user_id == user_id)
         )
         map_count = result.scalar() or 0
 
@@ -162,10 +162,10 @@ class UserRepository(BaseRepository[User]):
         # Get all users
         users = await self.get_all_users()
 
-        # Get map counts for all users
+        # Get map counts for all users (via UserMap junction table)
         result = await self.session.execute(
-            select(Map.user_id, func.count(Map.id).label("count"))
-            .group_by(Map.user_id)
+            select(UserMap.user_id, func.count(UserMap.id).label("count"))
+            .group_by(UserMap.user_id)
         )
         map_counts = {row.user_id: row.count for row in result.all()}
 
