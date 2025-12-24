@@ -59,7 +59,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_async_operations_operation_type'), 'async_operations', ['operation_type'], unique=False)
     op.create_index(op.f('ix_async_operations_started_at'), 'async_operations', ['started_at'], unique=False)
     op.create_index(op.f('ix_async_operations_status'), 'async_operations', ['status'], unique=False)
-    op.drop_table('cache_stats')
+    op.execute('DROP TABLE IF EXISTS cache_stats')
     op.alter_column('cache_entries', 'key',
                existing_type=sa.TEXT(),
                type_=sa.String(length=500),
