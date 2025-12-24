@@ -60,7 +60,8 @@ async def start_async_linear_map(
                 max_distance_from_road=request.max_distance_from_road,
                 max_detour_distance_km=request.max_detour_distance_km,
                 min_distance_from_origin_km=request.min_distance_from_origin_km,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
+                user_id=user_id
             )
             
             # Converter para dicionário para armazenamento

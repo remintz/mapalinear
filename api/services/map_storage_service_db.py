@@ -466,18 +466,20 @@ def _create_standalone_session():
     return engine, session_maker
 
 
-def save_map_sync(linear_map: LinearMapResponse) -> str:
+def save_map_sync(linear_map: LinearMapResponse, user_id: Optional[str] = None) -> str:
     """
     Sync wrapper for saving a map to the database.
     Use this from sync contexts (like RoadService.generate_linear_map).
 
     Args:
         linear_map: The linear map to save
+        user_id: Optional user ID to associate the map with
 
     Returns:
         The ID of the saved map
     """
     import asyncio
+    from uuid import UUID as PyUUID
 
     async def _save():
         engine, session_maker = _create_standalone_session()
@@ -485,7 +487,9 @@ def save_map_sync(linear_map: LinearMapResponse) -> str:
             async with session_maker() as session:
                 try:
                     storage = MapStorageServiceDB(session)
-                    result = await storage.save_map(linear_map)
+                    # Convert string user_id to UUID if provided
+                    uuid_user_id = PyUUID(user_id) if user_id else None
+                    result = await storage.save_map(linear_map, user_id=uuid_user_id)
                     await session.commit()
                     return result
                 except Exception:

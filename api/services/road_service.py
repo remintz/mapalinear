@@ -201,7 +201,8 @@ class RoadService:
         max_detour_distance_km: float = 5.0,  # Maximum detour distance from junction to POI
         min_distance_from_origin_km: float = 0.0,  # Deprecated - kept for backwards compatibility
         progress_callback: Optional[Callable[[float], None]] = None,
-        segment_length_km: float = 1.0
+        segment_length_km: float = 1.0,
+        user_id: Optional[str] = None
     ) -> LinearMapResponse:
         """
         Generate a linear map of a route between origin and destination.
@@ -215,6 +216,7 @@ class RoadService:
         
         Args:
             min_distance_from_origin_km: DEPRECATED - No longer used. POIs are filtered by city name instead.
+            user_id: Optional user ID to associate the map with.
         
         Returns:
             LinearMapResponse with segments and milestones
@@ -291,7 +293,7 @@ class RoadService:
         # Save linear map to database
         try:
             from .map_storage_service_db import save_map_sync
-            map_id = save_map_sync(linear_map)
+            map_id = save_map_sync(linear_map, user_id=user_id)
             linear_map.id = map_id
         except Exception as e:
             logger.error(f"Erro ao salvar mapa linear no banco: {e}")
