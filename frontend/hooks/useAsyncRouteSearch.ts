@@ -1,7 +1,10 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { apiClient } from '@/lib/api';
 import { RouteSearchRequest, RouteSearchResponse, AsyncOperation, POIType } from '@/lib/types';
 import { SearchFormData } from '@/lib/validations';
+
+// Cache for system settings
+let cachedPoiSearchRadius: number | null = null;
 
 interface UseAsyncRouteSearchReturn {
   searchRoute: (data: SearchFormData) => void;
@@ -158,26 +161,44 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
       setProgressPercent(0);
       setProgressMessage('Iniciando busca...');
       setEstimatedCompletion(null);
-      
+
+      // Fetch POI search radius from system settings if not cached
+      let poiSearchRadius = cachedPoiSearchRadius;
+      if (poiSearchRadius === null) {
+        try {
+          const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
+          const settingsResponse = await fetch(`${apiUrl}/settings`);
+          if (settingsResponse.ok) {
+            const settings = await settingsResponse.json();
+            poiSearchRadius = parseInt(settings.settings?.poi_search_radius_km || '5', 10);
+            cachedPoiSearchRadius = poiSearchRadius;
+          } else {
+            poiSearchRadius = 5; // Default fallback
+          }
+        } catch {
+          poiSearchRadius = 5; // Default fallback on error
+        }
+      }
+
       // Convert form data to API request format
       // Note: Backend always searches for all POI types, frontend filters display
       const requestData: RouteSearchRequest = {
         origin: formData.origin,
         destination: formData.destination,
-        max_distance: formData.maxDistance,
+        max_distance: poiSearchRadius,
       };
 
       // Start async operation
       const { operation_id } = await apiClient.startAsyncRouteSearch(requestData);
-      
+
       // Start polling for progress
       startPolling(operation_id);
-      
+
     } catch (err) {
       setIsLoading(false);
       setProgressMessage('Criar Mapa');
       setProgressPercent(0);
-      
+
       const errorMessage = err instanceof Error ? err.message : 'Erro ao iniciar busca da rota.';
       setError(errorMessage);
     }

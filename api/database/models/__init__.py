@@ -11,6 +11,7 @@ from api.database.models.map_poi import MapPOI
 from api.database.models.poi import POI
 from api.database.models.user import User
 from api.database.models.user_map import UserMap
+from api.database.models.system_settings import SystemSettings
 
 __all__ = [
     "ApiCallLog",
@@ -23,4 +24,5 @@ __all__ = [
     "GooglePlacesCache",
     "User",
     "UserMap",
+    "SystemSettings",
 ]

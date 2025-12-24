@@ -84,19 +84,22 @@ export default function AdminPage() {
             </div>
           </Link>
 
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 opacity-50 cursor-not-allowed">
+          <Link
+            href="/admin/settings"
+            className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
+          >
             <div className="flex items-center gap-4">
-              <div className="p-3 bg-gray-100 rounded-lg">
-                <Settings className="w-6 h-6 text-gray-400" />
+              <div className="p-3 bg-green-100 rounded-lg">
+                <Settings className="w-6 h-6 text-green-600" />
               </div>
               <div>
-                <h2 className="text-lg font-semibold text-gray-400">Configurações</h2>
-                <p className="text-sm text-gray-400">
-                  Em breve
+                <h2 className="text-lg font-semibold text-gray-900">Configurações</h2>
+                <p className="text-sm text-gray-500">
+                  Parâmetros globais do sistema
                 </p>
               </div>
             </div>
-          </div>
+          </Link>
 
           {/* Simulate User Card */}
           <div

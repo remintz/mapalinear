@@ -11,6 +11,7 @@ from api.database.repositories.map import MapRepository
 from api.database.repositories.map_poi import MapPOIRepository
 from api.database.repositories.poi import POIRepository
 from api.database.repositories.user import UserRepository
+from api.database.repositories.system_settings import SystemSettingsRepository
 
 __all__ = [
     "ApiCallLogRepository",
@@ -23,4 +24,5 @@ __all__ = [
     "CacheRepository",
     "GooglePlacesCacheRepository",
     "UserRepository",
+    "SystemSettingsRepository",
 ]
