@@ -128,7 +128,7 @@ def setup_error_handlers(app):
         """Handler para exceções HTTP."""
         # Use um ID único para o erro
         error_id = hashlib.md5(f"{time.time()}-{request.url.path}".encode()).hexdigest()[:8]
-        
+
         # Capturar o stack trace para erros 500
         stack_trace = None
         if exc.status_code >= 500:
@@ -138,14 +138,25 @@ def setup_error_handlers(app):
             logger.error(f"{error_msg}\n╭─ Stack Trace ─────────────────────────╮\n{formatted_trace}\n╰───────────────────────────────────────╯")
         else:
             logger.warning(f"⚠️ HTTP#{error_id}: {exc.status_code} - {exc.detail}")
-        
+
+        # Handle detail that can be a string or a dict
+        detail = exc.detail
+        if isinstance(detail, dict):
+            # Extract message from dict, keep other fields in details
+            message = detail.get("message", str(detail))
+            details = {k: v for k, v in detail.items() if k != "message"}
+        else:
+            message = str(detail)
+            details = None
+
         error_detail = ErrorDetail(
             status_code=exc.status_code,
-            message=str(exc.detail),
+            message=message,
             error_type="http_exception",
-            stack_trace=stack_trace
+            stack_trace=stack_trace,
+            details=details if details else None
         )
-        
+
         return JSONResponse(
             status_code=exc.status_code,
             content=error_detail.to_dict()

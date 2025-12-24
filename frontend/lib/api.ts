@@ -103,10 +103,30 @@ class APIClient {
           throw new Error('Sessão expirada. Faça login novamente.');
         }
 
+        if (error.response?.status === 409) {
+          // Handle duplicate/conflict errors
+          // Backend returns: { status_code, message, error_type, details }
+          const responseData = error.response.data;
+          const details = responseData?.details;
+
+          // Build user-friendly message
+          let message = responseData?.message || 'Já existe um mapa com esta origem e destino.';
+          if (details?.origin && details?.destination) {
+            message += ` (${details.origin} → ${details.destination})`;
+          }
+          if (details?.hint) {
+            message += `. ${details.hint}.`;
+          }
+
+          const err = new Error(message) as Error & { details: typeof details };
+          err.details = details;
+          throw err;
+        }
+
         if (error.response?.status === 500) {
           throw new Error('Erro interno do servidor. Tente novamente.');
         }
-        
+
         if (error.code === 'ECONNABORTED') {
           throw new Error('A busca está demorando mais que o esperado. Tente novamente com uma rota menor ou verifique sua conexão.');
         }
