@@ -9,6 +9,7 @@ from api.database.models.map import Map
 from api.database.models.map_poi import MapPOI
 from api.database.models.poi import POI
 from api.database.models.user import User
+from api.database.models.user_map import UserMap
 
 __all__ = [
     "ApiCallLog",
@@ -19,4 +20,5 @@ __all__ = [
     "CacheEntry",
     "GooglePlacesCache",
     "User",
+    "UserMap",
 ]

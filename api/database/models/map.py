@@ -1,6 +1,7 @@
 """
 Map SQLAlchemy model.
 """
+
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 from uuid import uuid4
@@ -14,6 +15,7 @@ from api.database.connection import Base
 if TYPE_CHECKING:
     from api.database.models.map_poi import MapPOI
     from api.database.models.user import User
+    from api.database.models.user_map import UserMap
 
 
 class Map(Base):
@@ -28,9 +30,6 @@ class Map(Base):
 
     id: Mapped[UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid4
-    )
-    user_id: Mapped[Optional[UUID]] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
     )
     origin: Mapped[str] = mapped_column(String(500))
     destination: Mapped[str] = mapped_column(String(500))
@@ -49,8 +48,22 @@ class Map(Base):
         default=func.now(), onupdate=func.now()
     )
 
+    # Creator reference (for audit purposes, not ownership)
+    created_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     # Relationships
-    user: Mapped[Optional["User"]] = relationship("User", back_populates="maps")
+    # User-map associations (for shared maps)
+    user_maps: Mapped[List["UserMap"]] = relationship(
+        "UserMap", back_populates="map", cascade="all, delete-orphan"
+    )
+    # Creator reference (for audit purposes)
+    created_by: Mapped[Optional["User"]] = relationship(
+        "User", foreign_keys=[created_by_user_id]
+    )
     map_pois: Mapped[List["MapPOI"]] = relationship(
         "MapPOI", back_populates="map", cascade="all, delete-orphan"
     )

@@ -118,8 +118,53 @@ class APIClient {
   }
 
   // Saved Maps functions
+
+  /**
+   * List maps in the current user's collection.
+   */
   async listMaps(): Promise<SavedMap[]> {
     const { data } = await this.client.get<SavedMap[]>('/maps');
+    return data;
+  }
+
+  /**
+   * Get suggested maps for the create page.
+   * Optionally sorted by proximity to user's location.
+   */
+  async getSuggestedMaps(options?: {
+    limit?: number;
+    lat?: number;
+    lon?: number;
+  }): Promise<SavedMap[]> {
+    const params = new URLSearchParams();
+    if (options?.limit !== undefined) params.append('limit', options.limit.toString());
+    if (options?.lat !== undefined) params.append('lat', options.lat.toString());
+    if (options?.lon !== undefined) params.append('lon', options.lon.toString());
+
+    const queryString = params.toString();
+    const url = queryString ? `/maps/suggested?${queryString}` : '/maps/suggested';
+    const { data } = await this.client.get<SavedMap[]>(url);
+    return data;
+  }
+
+  /**
+   * List all available maps (for browsing/adopting).
+   */
+  async listAvailableMaps(options?: {
+    skip?: number;
+    limit?: number;
+    origin?: string;
+    destination?: string;
+  }): Promise<SavedMap[]> {
+    const params = new URLSearchParams();
+    if (options?.skip !== undefined) params.append('skip', options.skip.toString());
+    if (options?.limit !== undefined) params.append('limit', options.limit.toString());
+    if (options?.origin) params.append('origin', options.origin);
+    if (options?.destination) params.append('destination', options.destination);
+
+    const queryString = params.toString();
+    const url = queryString ? `/maps/available?${queryString}` : '/maps/available';
+    const { data } = await this.client.get<SavedMap[]>(url);
     return data;
   }
 
@@ -128,10 +173,33 @@ class APIClient {
     return data;
   }
 
-  async deleteMap(mapId: string): Promise<void> {
-    await this.client.delete(`/maps/${mapId}`);
+  /**
+   * Add an existing map to the user's collection.
+   */
+  async adoptMap(mapId: string): Promise<{ message: string }> {
+    const { data } = await this.client.post<{ message: string }>(`/maps/${mapId}/adopt`);
+    return data;
   }
 
+  /**
+   * Remove map from collection (regular user) or permanently delete (admin).
+   */
+  async deleteMap(mapId: string): Promise<{ message: string }> {
+    const { data } = await this.client.delete<{ message: string }>(`/maps/${mapId}`);
+    return data;
+  }
+
+  /**
+   * Permanently delete a map (admin only).
+   */
+  async permanentlyDeleteMap(mapId: string): Promise<{ message: string }> {
+    const { data } = await this.client.delete<{ message: string }>(`/maps/${mapId}/permanent`);
+    return data;
+  }
+
+  /**
+   * Regenerate a map with fresh data (admin only).
+   */
   async regenerateMap(mapId: string): Promise<{ operation_id: string }> {
     const { data } = await this.client.post<{ operation_id: string }>(`/maps/${mapId}/regenerate`);
     return data;

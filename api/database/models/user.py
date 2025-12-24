@@ -1,6 +1,7 @@
 """
 User SQLAlchemy model for authentication.
 """
+
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 from uuid import uuid4
@@ -12,7 +13,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from api.database.connection import Base
 
 if TYPE_CHECKING:
-    from api.database.models.map import Map
+    from api.database.models.user_map import UserMap
 
 
 class User(Base):
@@ -42,8 +43,9 @@ class User(Base):
     last_login_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
 
     # Relationships
-    maps: Mapped[List["Map"]] = relationship(
-        "Map", back_populates="user", cascade="all, delete-orphan"
+    # User-map associations (for shared maps)
+    user_maps: Mapped[List["UserMap"]] = relationship(
+        "UserMap", back_populates="user", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:

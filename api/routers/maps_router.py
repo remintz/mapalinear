@@ -3,10 +3,13 @@ Router for managing saved linear maps.
 
 Endpoints:
 - GET /api/maps - List all saved maps for current user
+- GET /api/maps/available - List all available maps (for browsing/adopting)
 - GET /api/maps/{map_id} - Get a specific map
 - GET /api/maps/{map_id}/pdf - Export map to PDF
-- DELETE /api/maps/{map_id} - Delete a saved map
-- POST /api/maps/{map_id}/regenerate - Regenerate a map
+- POST /api/maps/{map_id}/adopt - Add existing map to user's collection
+- DELETE /api/maps/{map_id} - Unlink map (user) or permanently delete (admin)
+- DELETE /api/maps/{map_id}/permanent - Permanently delete a map (admin only)
+- POST /api/maps/{map_id}/regenerate - Regenerate a map (admin only)
 """
 
 import logging
@@ -21,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import MapPOIRepository, MapRepository, POIRepository, get_db
 from ..database.models.user import User
-from ..middleware.auth import get_current_user
+from ..middleware.auth import get_current_admin, get_current_user
 from ..models.road_models import LinearMapResponse, SavedMapResponse
 from ..services.async_service import AsyncService
 from ..services.map_storage_service_db import MapStorageServiceDB
@@ -46,11 +49,83 @@ async def list_saved_maps(
     """
     try:
         storage = MapStorageServiceDB(db)
-        maps = await storage.list_maps(user_id=current_user.id)
+        maps = await storage.list_user_maps(user_id=current_user.id)
         return maps
     except Exception as e:
         logger.error(f"Error listing maps: {e}")
         raise HTTPException(status_code=500, detail="Error listing saved maps")
+
+
+@router.get("/suggested", response_model=List[SavedMapResponse])
+async def get_suggested_maps(
+    limit: int = Query(10, ge=1, le=20, description="Maximum maps to return"),
+    lat: Optional[float] = Query(
+        None, description="User latitude for proximity sorting"
+    ),
+    lon: Optional[float] = Query(
+        None, description="User longitude for proximity sorting"
+    ),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get suggested maps for the create page.
+
+    Returns a small number of maps, optionally sorted by proximity to user's location.
+    If lat/lon provided, maps with origin near the user are prioritized.
+
+    Args:
+        limit: Maximum number of maps to return (default 10)
+        lat: User's latitude (optional, for proximity sorting)
+        lon: User's longitude (optional, for proximity sorting)
+
+    Returns:
+        List of suggested maps
+    """
+    try:
+        storage = MapStorageServiceDB(db)
+        maps = await storage.get_suggested_maps(limit=limit, user_lat=lat, user_lon=lon)
+        return maps
+    except Exception as e:
+        logger.error(f"Error getting suggested maps: {e}")
+        raise HTTPException(status_code=500, detail="Error getting suggested maps")
+
+
+@router.get("/available", response_model=List[SavedMapResponse])
+async def list_available_maps(
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(100, ge=1, le=500, description="Maximum records to return"),
+    origin: Optional[str] = Query(None, description="Filter by origin (partial match)"),
+    destination: Optional[str] = Query(
+        None, description="Filter by destination (partial match)"
+    ),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    List all available maps for browsing/adopting.
+
+    Users can search for existing maps by origin/destination and add them
+    to their collection instead of creating duplicates.
+
+    Args:
+        skip: Number of records to skip for pagination
+        limit: Maximum number of records to return
+        origin: Optional filter by origin location (partial match)
+        destination: Optional filter by destination location (partial match)
+
+    Returns:
+        List of available maps
+    """
+    try:
+        storage = MapStorageServiceDB(db)
+        maps = await storage.list_available_maps(
+            skip=skip, limit=limit, origin=origin, destination=destination
+        )
+        return maps
+    except Exception as e:
+        logger.error(f"Error listing available maps: {e}")
+        raise HTTPException(status_code=500, detail="Error listing available maps")
 
 
 @router.get("/{map_id}", response_model=LinearMapResponse)
@@ -61,6 +136,8 @@ async def get_saved_map(
 ):
     """
     Get a specific saved map by ID.
+
+    User must have the map in their collection to access it.
 
     Args:
         map_id: ID of the map to retrieve
@@ -98,11 +175,14 @@ async def export_map_to_pdf(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     types: Optional[str] = Query(
-        None, description="Tipos de POI separados por vírgula (ex: gas_station,restaurant)"
+        None,
+        description="Tipos de POI separados por virgula (ex: gas_station,restaurant)",
     ),
 ):
     """
     Export a saved map to PDF format.
+
+    User must have the map in their collection to export it.
 
     Args:
         map_id: ID of the map to export
@@ -147,6 +227,41 @@ async def export_map_to_pdf(
         raise HTTPException(status_code=500, detail=f"Error exporting to PDF: {str(e)}")
 
 
+@router.post("/{map_id}/adopt")
+async def adopt_map(
+    map_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Add an existing map to user's collection.
+
+    This allows users to "adopt" maps created by other users without
+    creating duplicates in the system.
+
+    Args:
+        map_id: ID of the map to adopt
+
+    Returns:
+        Success message
+    """
+    try:
+        storage = MapStorageServiceDB(db)
+
+        success = await storage.adopt_map(map_id, user_id=current_user.id)
+
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Map {map_id} not found")
+
+        await db.commit()
+        return {"message": f"Map {map_id} added to your collection"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adopting map {map_id}: {e}")
+        raise HTTPException(status_code=500, detail="Error adopting map")
+
+
 @router.delete("/{map_id}")
 async def delete_saved_map(
     map_id: str,
@@ -154,7 +269,62 @@ async def delete_saved_map(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Delete a saved map.
+    Remove a map from user's collection (unlink).
+
+    For regular users, this only removes the map from their collection.
+    The map remains in the system for other users.
+
+    For admins, this permanently deletes the map from the system.
+
+    Args:
+        map_id: ID of the map to remove/delete
+
+    Returns:
+        Success message
+    """
+    try:
+        storage = MapStorageServiceDB(db)
+
+        # Check if user has this map
+        has_map = await storage.user_has_map(current_user.id, map_id)
+        if not has_map:
+            raise HTTPException(
+                status_code=404, detail=f"Map {map_id} not found in your collection"
+            )
+
+        if current_user.is_admin:
+            # Admin: permanently delete the map
+            success = await storage.delete_map_permanently(map_id)
+            if not success:
+                raise HTTPException(status_code=500, detail="Failed to delete map")
+            await db.commit()
+            return {"message": f"Map {map_id} permanently deleted"}
+        else:
+            # Regular user: just unlink
+            success = await storage.unlink_map(map_id, user_id=current_user.id)
+            if not success:
+                raise HTTPException(
+                    status_code=500, detail="Failed to remove map from collection"
+                )
+            await db.commit()
+            return {"message": f"Map {map_id} removed from your collection"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting/unlinking map {map_id}: {e}")
+        raise HTTPException(status_code=500, detail="Error removing map")
+
+
+@router.delete("/{map_id}/permanent")
+async def permanently_delete_map(
+    map_id: str,
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Permanently delete a map from the system (admin only).
+
+    This removes the map and all user associations. Cannot be undone.
 
     Args:
         map_id: ID of the map to delete
@@ -165,19 +335,22 @@ async def delete_saved_map(
     try:
         storage = MapStorageServiceDB(db)
 
-        if not await storage.map_exists(map_id, user_id=current_user.id):
+        # Check if map exists
+        exists = await storage.map_exists(map_id)
+        if not exists:
             raise HTTPException(status_code=404, detail=f"Map {map_id} not found")
 
-        success = await storage.delete_map(map_id, user_id=current_user.id)
+        success = await storage.delete_map_permanently(map_id)
 
         if not success:
             raise HTTPException(status_code=500, detail="Failed to delete map")
 
-        return {"message": f"Map {map_id} deleted successfully"}
+        await db.commit()
+        return {"message": f"Map {map_id} permanently deleted"}
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error deleting map {map_id}: {e}")
+        logger.error(f"Error permanently deleting map {map_id}: {e}")
         raise HTTPException(status_code=500, detail="Error deleting map")
 
 
@@ -185,11 +358,11 @@ async def delete_saved_map(
 async def regenerate_map(
     map_id: str,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Regenerate a saved map (creates a new async operation).
+    Regenerate a saved map (admin only).
 
     This endpoint loads the existing map metadata, creates a new async operation
     to regenerate the map with fresh data, and deletes the old map.
@@ -203,8 +376,8 @@ async def regenerate_map(
     try:
         storage = MapStorageServiceDB(db)
 
-        # Load existing map to get origin/destination
-        existing_map = await storage.load_map(map_id, user_id=current_user.id)
+        # Admin can load any map (don't filter by user_id)
+        existing_map = await storage.load_map(map_id)
         if existing_map is None:
             raise HTTPException(status_code=404, detail=f"Map {map_id} not found")
 
@@ -246,7 +419,9 @@ async def regenerate_map(
                     "origin": linear_map.origin,
                     "destination": linear_map.destination,
                     "total_length_km": linear_map.total_length_km,
-                    "segments": [s.model_dump(mode="json") for s in linear_map.segments],
+                    "segments": [
+                        s.model_dump(mode="json") for s in linear_map.segments
+                    ],
                     "milestones": [
                         m.model_dump(mode="json") for m in linear_map.milestones
                     ],

@@ -1,14 +1,16 @@
 """
 Map repository for database operations.
 """
+
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from api.database.models.map import Map
+from api.database.models.user_map import UserMap
 from api.database.repositories.base import BaseRepository
 
 
@@ -19,47 +21,34 @@ class MapRepository(BaseRepository[Map]):
         """Initialize with session."""
         super().__init__(session, Map)
 
-    async def get_by_id_with_pois(
-        self, id: UUID, user_id: Optional[UUID] = None
-    ) -> Optional[Map]:
+    async def get_by_id_with_pois(self, id: UUID) -> Optional[Map]:
         """
         Get a map by ID with all related POIs loaded.
 
         Args:
             id: Map UUID
-            user_id: Optional user ID to filter by owner
 
         Returns:
             Map instance with POIs or None if not found
         """
-        query = select(Map).where(Map.id == id).options(selectinload(Map.map_pois))
-
-        if user_id is not None:
-            query = query.where(Map.user_id == user_id)
-
-        result = await self.session.execute(query)
+        result = await self.session.execute(
+            select(Map).where(Map.id == id).options(selectinload(Map.map_pois))
+        )
         return result.scalar_one_or_none()
 
-    async def get_user_maps(
-        self, user_id: UUID, skip: int = 0, limit: int = 100
-    ) -> List[Map]:
+    async def get_all_maps(self, skip: int = 0, limit: int = 100) -> List[Map]:
         """
-        Get all maps for a specific user.
+        Get all available maps (for browsing).
 
         Args:
-            user_id: User UUID
             skip: Number of records to skip
             limit: Maximum number of records to return
 
         Returns:
-            List of user's maps ordered by creation date
+            List of maps ordered by creation date
         """
         result = await self.session.execute(
-            select(Map)
-            .where(Map.user_id == user_id)
-            .order_by(Map.created_at.desc())
-            .offset(skip)
-            .limit(limit)
+            select(Map).order_by(Map.created_at.desc()).offset(skip).limit(limit)
         )
         return list(result.scalars().all())
 
@@ -77,10 +66,7 @@ class MapRepository(BaseRepository[Map]):
             List of matching maps
         """
         result = await self.session.execute(
-            select(Map).where(
-                Map.origin == origin,
-                Map.destination == destination
-            )
+            select(Map).where(Map.origin == origin, Map.destination == destination)
         )
         return list(result.scalars().all())
 
@@ -94,9 +80,7 @@ class MapRepository(BaseRepository[Map]):
         Returns:
             List of maps on that road
         """
-        result = await self.session.execute(
-            select(Map).where(Map.road_id == road_id)
-        )
+        result = await self.session.execute(select(Map).where(Map.road_id == road_id))
         return list(result.scalars().all())
 
     async def get_recent(self, limit: int = 10) -> List[Map]:
@@ -110,15 +94,11 @@ class MapRepository(BaseRepository[Map]):
             List of recent maps ordered by creation date
         """
         result = await self.session.execute(
-            select(Map)
-            .order_by(Map.created_at.desc())
-            .limit(limit)
+            select(Map).order_by(Map.created_at.desc()).limit(limit)
         )
         return list(result.scalars().all())
 
-    async def search_by_location(
-        self, location: str, limit: int = 10
-    ) -> List[Map]:
+    async def search_by_location(self, location: str, limit: int = 10) -> List[Map]:
         """
         Search maps by origin or destination containing location string.
 
@@ -133,8 +113,8 @@ class MapRepository(BaseRepository[Map]):
         result = await self.session.execute(
             select(Map)
             .where(
-                (Map.origin.ilike(search_pattern)) |
-                (Map.destination.ilike(search_pattern))
+                (Map.origin.ilike(search_pattern))
+                | (Map.destination.ilike(search_pattern))
             )
             .limit(limit)
         )
