@@ -18,11 +18,29 @@ import httpx
 import asyncio
 from unittest.mock import patch, AsyncMock, Mock
 from fastapi.testclient import TestClient
+from uuid import uuid4
+from datetime import datetime
 
 # Mock the providers to avoid import errors during testing
 from api.providers.base import GeoProvider, ProviderType
 from api.providers.models import GeoLocation, Route, POI, POICategory
 from api.providers.manager import create_provider
+
+
+def create_mock_user():
+    """Create a mock user for authentication."""
+    user = Mock()
+    user.id = uuid4()
+    user.google_id = "test_google_123"
+    user.email = "test@example.com"
+    user.name = "Test User"
+    user.avatar_url = None
+    user.is_active = True
+    user.is_admin = False
+    user.created_at = datetime.now()
+    user.updated_at = datetime.now()
+    user.last_login_at = datetime.now()
+    return user
 
 
 class APIProviderMock(GeoProvider):
@@ -139,9 +157,10 @@ def mock_provider():
 
 @pytest.fixture
 def api_client(mock_provider):
-    """Create a test client for the API."""
+    """Create a test client for the API with mocked authentication."""
     from api.models.road_models import AsyncOperationResponse, OperationStatus
-    from datetime import datetime
+    from api.middleware.auth import get_current_user
+    from api.main import app
     import uuid
 
     # Store created operations for get_operation to retrieve
@@ -165,14 +184,22 @@ def api_client(mock_provider):
     def mock_run_async(operation_id: str, function, *args, **kwargs):
         pass  # Do nothing - prevents background DB access
 
+    # Create mock user for authentication
+    mock_user = create_mock_user()
+
+    # Override the authentication dependency
+    app.dependency_overrides[get_current_user] = lambda: mock_user
+
     with patch("api.providers.manager.create_provider", return_value=mock_provider), \
          patch("api.services.async_service.AsyncService.create_operation", side_effect=mock_create_operation), \
          patch("api.services.async_service.AsyncService.get_operation", side_effect=mock_get_operation), \
          patch("api.services.async_service.AsyncService.run_async", side_effect=mock_run_async):
-        from api.main import app
 
         with TestClient(app) as client:
             yield client
+
+    # Clean up dependency overrides
+    app.dependency_overrides.clear()
 
 
 # Removed - replaced with inline async client in tests
@@ -380,7 +407,8 @@ class TestAsyncOperations:
     async def test_concurrent_operations(self, mock_provider):
         """It should handle multiple concurrent operations."""
         from api.models.road_models import AsyncOperationResponse, OperationStatus
-        from datetime import datetime
+        from api.middleware.auth import get_current_user
+        from api.main import app
         import uuid
 
         # Create a mock for AsyncService.create_operation that returns unique operation IDs
@@ -397,13 +425,18 @@ class TestAsyncOperations:
         def mock_run_async(operation_id: str, function, *args, **kwargs):
             pass  # Do nothing - prevents background DB access
 
+        # Create mock user for authentication
+        mock_user = create_mock_user()
+
+        # Override the authentication dependency
+        app.dependency_overrides[get_current_user] = lambda: mock_user
+
         with patch("api.providers.manager.create_provider", return_value=mock_provider), \
              patch("api.routers.operations_router.AsyncService.create_operation", side_effect=mock_create_operation), \
              patch("api.routers.operations_router.AsyncService.run_async", side_effect=mock_run_async):
-            from api.main import app
 
             async with httpx.AsyncClient(
-                app=app, base_url="http://testserver"
+                transport=httpx.ASGITransport(app=app), base_url="http://testserver"
             ) as client:
                 request_data = {
                     "origin": "São Paulo, SP",
@@ -431,6 +464,9 @@ class TestAsyncOperations:
                     data = response.json()
                     assert "operation_id" in data
                     assert "status" in data
+
+        # Clean up dependency overrides
+        app.dependency_overrides.clear()
 
 
 class TestBackwardCompatibility:

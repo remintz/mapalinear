@@ -10,6 +10,8 @@ import os
 import asyncio
 from typing import AsyncGenerator, Generator
 from unittest.mock import Mock, AsyncMock
+from uuid import uuid4
+from datetime import datetime
 
 # Add the project root to Python path
 import sys
@@ -21,6 +23,27 @@ from api.providers.base import GeoProvider, ProviderType
 from api.providers.models import GeoLocation, Route, POI, POICategory
 from api.providers.cache import UnifiedCache
 from api.providers.manager import GeoProviderManager
+
+
+@pytest.fixture
+def mock_user():
+    """Create a mock user for authentication testing.
+
+    Returns a Mock object that mimics the User model without
+    requiring database access.
+    """
+    user = Mock()
+    user.id = uuid4()
+    user.google_id = "test_google_123"
+    user.email = "test@example.com"
+    user.name = "Test User"
+    user.avatar_url = None
+    user.is_active = True
+    user.is_admin = False
+    user.created_at = datetime.now()
+    user.updated_at = datetime.now()
+    user.last_login_at = datetime.now()
+    return user
 
 
 @pytest.fixture(scope="session")
