@@ -17,8 +17,10 @@ import {
   CheckCircle,
   XCircle,
   Loader2,
+  Eye,
 } from "lucide-react";
 import { AdminUser, AdminUserListResponse } from "@/lib/types";
+import { useImpersonation } from "@/hooks/useImpersonation";
 
 export default function AdminUsersPage() {
   const { data: session, status } = useSession();
@@ -27,6 +29,21 @@ export default function AdminUsersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [updatingUser, setUpdatingUser] = useState<string | null>(null);
+
+  const {
+    startImpersonation,
+    isImpersonating,
+  } = useImpersonation();
+  const [impersonatingUserId, setImpersonatingUserId] = useState<string | null>(null);
+
+  const handleImpersonate = async (userId: string, userName: string) => {
+    if (!confirm(`Deseja visualizar o sistema como ${userName}?`)) {
+      return;
+    }
+    setImpersonatingUserId(userId);
+    await startImpersonation(userId);
+    setImpersonatingUserId(null);
+  };
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -193,8 +210,11 @@ export default function AdminUsersPage() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Cadastro
                   </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Admin
+                  </th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Ações
                   </th>
                 </tr>
               </thead>
@@ -280,7 +300,7 @@ export default function AdminUsersPage() {
                           {formatDate(user.created_at)}
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right">
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
                         <button
                           onClick={() => toggleAdmin(user.id, user.is_admin)}
                           disabled={updatingUser === user.id}
@@ -304,6 +324,26 @@ export default function AdminUsersPage() {
                             </>
                           )}
                         </button>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right">
+                        {/* Can only impersonate non-admin users that are not yourself */}
+                        {!user.is_admin && user.id !== session?.user?.id && (
+                          <button
+                            onClick={() => handleImpersonate(user.id, user.name)}
+                            disabled={impersonatingUserId === user.id || isImpersonating}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-amber-100 text-amber-700 hover:bg-amber-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Visualizar sistema como este usuário"
+                          >
+                            {impersonatingUserId === user.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <>
+                                <Eye className="w-4 h-4" />
+                                Visualizar
+                              </>
+                            )}
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );

@@ -1,7 +1,9 @@
 """
 Authentication service for Google OAuth and JWT handling.
 """
+
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 from uuid import UUID
@@ -25,6 +27,13 @@ class AuthError(Exception):
         self.message = message
         self.status_code = status_code
         super().__init__(message)
+
+
+@dataclass
+class VerifyResult:
+    """Result of JWT verification."""
+
+    user: User
 
 
 class AuthService:
@@ -63,7 +72,10 @@ class AuthService:
             )
 
             # Verify issuer
-            if idinfo["iss"] not in ["accounts.google.com", "https://accounts.google.com"]:
+            if idinfo["iss"] not in [
+                "accounts.google.com",
+                "https://accounts.google.com",
+            ]:
                 raise AuthError("Invalid token issuer")
 
             return {
@@ -124,7 +136,9 @@ class AuthService:
         Returns:
             JWT token string
         """
-        expire = datetime.now(timezone.utc) + timedelta(hours=self.settings.jwt_expire_hours)
+        expire = datetime.now(timezone.utc) + timedelta(
+            hours=self.settings.jwt_expire_hours
+        )
 
         payload = {
             "sub": str(user.id),
@@ -142,7 +156,7 @@ class AuthService:
 
         return token
 
-    async def verify_jwt(self, token: str) -> User:
+    async def verify_jwt(self, token: str) -> VerifyResult:
         """
         Verify a JWT token and return the user.
 
@@ -150,7 +164,7 @@ class AuthService:
             token: JWT token string
 
         Returns:
-            User instance
+            VerifyResult with user
 
         Raises:
             AuthError: If token is invalid or user not found
@@ -174,7 +188,7 @@ class AuthService:
             if not user.is_active:
                 raise AuthError("User account is deactivated", status_code=403)
 
-            return user
+            return VerifyResult(user=user)
 
         except JWTError as e:
             logger.warning(f"JWT verification failed: {e}")

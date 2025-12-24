@@ -200,3 +200,21 @@ export interface AdminUserListResponse {
   users: AdminUser[];
   total: number;
 }
+
+// Impersonation types
+export interface ImpersonationResponse {
+  user: AdminUser;
+  message: string;
+  session_id: string;
+}
+
+export interface StopImpersonationResponse {
+  user: AdminUser;
+  message: string;
+}
+
+export interface ImpersonationStatusResponse {
+  is_impersonating: boolean;
+  current_user: AdminUser;
+  real_admin: AdminUser | null;
+}

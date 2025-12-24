@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Navigation } from "@/components/layout/Navigation";
+import { ImpersonationBanner } from "@/components/layout/ImpersonationBanner";
 import { QueryProvider } from "@/components/providers/QueryProvider";
 import { AuthProvider } from "@/components/providers/AuthProvider";
 import { Toaster } from "sonner";
@@ -34,6 +35,7 @@ export default function RootLayout({
         <AuthProvider>
           <QueryProvider>
             <div className="min-h-screen flex flex-col">
+              <ImpersonationBanner />
               <Navigation />
               <main className="flex-1">
                 {children}
