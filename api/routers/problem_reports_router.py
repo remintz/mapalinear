@@ -84,6 +84,8 @@ class POIResponse(BaseModel):
     id: str
     name: str
     type: str
+    latitude: float
+    longitude: float
 
 
 class ProblemReportResponse(BaseModel):
@@ -630,6 +632,8 @@ def _format_report(report) -> ProblemReportResponse:
             id=str(report.poi.id),
             name=report.poi.name,
             type=report.poi.type,
+            latitude=report.poi.latitude,
+            longitude=report.poi.longitude,
         ) if report.poi else None,
         attachments=[
             AttachmentResponse(

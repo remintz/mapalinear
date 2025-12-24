@@ -115,6 +115,33 @@ export default function ReportDetailsPage() {
     return `https://www.google.com/maps?q=${lat},${lon}`;
   };
 
+  // Calculate distance between two coordinates using Haversine formula
+  const calculateDistance = (
+    lat1: number,
+    lon1: number,
+    lat2: number,
+    lon2: number
+  ): number => {
+    const R = 6371; // Earth's radius in km
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  };
+
+  const formatDistance = (km: number): string => {
+    if (km < 1) {
+      return `${Math.round(km * 1000)} m`;
+    }
+    return `${km.toFixed(1)} km`;
+  };
+
   if (status === 'loading' || isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -206,6 +233,21 @@ export default function ReportDetailsPage() {
                   <p className="font-medium text-gray-900">
                     {report.poi.name} ({report.poi.type})
                   </p>
+                  {report.latitude != null && report.longitude != null && (
+                    <p className="text-sm text-gray-600">
+                      Distância do usuário ao POI:{' '}
+                      <span className="font-medium">
+                        {formatDistance(
+                          calculateDistance(
+                            report.latitude,
+                            report.longitude,
+                            report.poi.latitude,
+                            report.poi.longitude
+                          )
+                        )}
+                      </span>
+                    </p>
+                  )}
                 </div>
               )}
 
