@@ -23,8 +23,8 @@ def upgrade() -> None:
     op.add_column('pois', sa.Column('rating_count', sa.Integer(), nullable=True))
     op.add_column('pois', sa.Column('google_maps_uri', sa.String(length=500), nullable=True))
 
-    # Remove unused cache_stats table
-    op.drop_table('cache_stats')
+    # Remove unused cache_stats table (if exists)
+    op.execute('DROP TABLE IF EXISTS cache_stats')
 
 
 def downgrade() -> None:
