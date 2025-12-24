@@ -14,8 +14,7 @@ import {
   Plus,
   Loader2,
   Clock,
-  ChevronRight,
-  Navigation
+  ChevronRight
 } from 'lucide-react';
 import Link from 'next/link';
 import { apiClient, SavedMap } from '@/lib/api';
@@ -168,12 +167,6 @@ function SearchPageContent() {
             <div className="flex items-center gap-2">
               <Map className="h-5 w-5 text-blue-600" />
               <h2 className="text-lg font-semibold text-gray-900">Mapas Disponíveis</h2>
-              {userLocation && (
-                <Badge variant="outline" className="text-xs flex items-center gap-1">
-                  <Navigation className="h-3 w-3" />
-                  Próximos a você
-                </Badge>
-              )}
             </div>
             <Link
               href="/maps/available"
