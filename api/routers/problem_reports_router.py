@@ -19,7 +19,9 @@ from api.database.repositories.problem_report import ProblemReportRepository
 from api.database.repositories.problem_type import ProblemTypeRepository
 from api.database.repositories.report_attachment import ReportAttachmentRepository
 from api.middleware.auth import get_current_admin, get_current_user
+from api.services.audio_service import convert_audio_to_mp3, is_audio_mime_type
 from api.services.auth_service import AuthError, AuthService
+from api.services.image_service import convert_image_to_jpeg, is_image_mime_type
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +34,6 @@ security = HTTPBearer(auto_error=False)
 MAX_PHOTOS = 3
 MAX_AUDIO = 1
 MAX_FILE_SIZE_MB = 10
-ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
-ALLOWED_AUDIO_TYPES = {"audio/webm", "audio/mp3", "audio/mpeg", "audio/wav", "audio/ogg", "audio/mp4"}
 
 
 # Response models
@@ -254,11 +254,11 @@ async def create_report(
     # Process photos
     for photo in photos:
         if photo.filename and photo.size > 0:
-            # Validate file type
-            if photo.content_type not in ALLOWED_IMAGE_TYPES:
+            # Validate it's an image file
+            if not is_image_mime_type(photo.content_type):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Tipo de imagem nao permitido: {photo.content_type}",
+                    detail=f"Arquivo nao e uma imagem: {photo.content_type}",
                 )
 
             # Validate file size
@@ -268,24 +268,30 @@ async def create_report(
                     detail=f"Imagem muito grande. Maximo: {MAX_FILE_SIZE_MB}MB",
                 )
 
-            # Read and store
+            # Read and convert to JPEG if needed (handles HEIC from iPhones)
             data = await photo.read()
+            converted_data, mime_type, filename = convert_image_to_jpeg(
+                data=data,
+                original_mime_type=photo.content_type,
+                original_filename=photo.filename,
+            )
+
             await attachment_repo.create_attachment(
                 report_id=report.id,
                 type="image",
-                filename=photo.filename,
-                mime_type=photo.content_type,
-                size_bytes=len(data),
-                data=data,
+                filename=filename,
+                mime_type=mime_type,
+                size_bytes=len(converted_data),
+                data=converted_data,
             )
 
     # Process audio
     if audio and audio.filename and audio.size > 0:
-        # Validate file type
-        if audio.content_type not in ALLOWED_AUDIO_TYPES:
+        # Validate it's an audio file
+        if not is_audio_mime_type(audio.content_type):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Tipo de audio nao permitido: {audio.content_type}",
+                detail=f"Arquivo nao e um audio: {audio.content_type}",
             )
 
         # Validate file size
@@ -295,15 +301,21 @@ async def create_report(
                 detail=f"Audio muito grande. Maximo: {MAX_FILE_SIZE_MB}MB",
             )
 
-        # Read and store
+        # Read and convert to MP3 if needed
         data = await audio.read()
+        converted_data, mime_type, filename = await convert_audio_to_mp3(
+            data=data,
+            original_mime_type=audio.content_type,
+            original_filename=audio.filename,
+        )
+
         await attachment_repo.create_attachment(
             report_id=report.id,
             type="audio",
-            filename=audio.filename,
-            mime_type=audio.content_type,
-            size_bytes=len(data),
-            data=data,
+            filename=filename,
+            mime_type=mime_type,
+            size_bytes=len(converted_data),
+            data=converted_data,
         )
 
     await db.commit()
