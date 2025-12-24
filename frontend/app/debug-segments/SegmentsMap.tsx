@@ -72,14 +72,14 @@ const createNumberIcon = (number: number, isStart: boolean) => {
 
 export default function SegmentsMap({ segments }: SegmentsMapProps) {
   // Calcular o centro do mapa
-  const center = useMemo(() => {
+  const center = useMemo((): [number, number] => {
     if (segments.length === 0) return [-23.5505, -46.6333]; // Default: São Paulo
 
     const firstSegment = segments[0];
     return [
       firstSegment.start_coordinates.latitude,
       firstSegment.start_coordinates.longitude
-    ] as [number, number];
+    ];
   }, [segments]);
 
   // Gerar cores diferentes para cada segmento

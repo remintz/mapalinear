@@ -23,9 +23,6 @@ export function useRouteSearch(): UseRouteSearchReturn {
       const requestData: RouteSearchRequest = {
         origin: formData.origin,
         destination: formData.destination,
-        include_gas_stations: formData.includeGasStations,
-        include_restaurants: formData.includeRestaurants,
-        include_toll_booths: formData.includeTollBooths,
         max_distance: formData.maxDistance,
       };
 
