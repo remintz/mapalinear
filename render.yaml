@@ -1,0 +1,90 @@
+# Render Blueprint - MapaLinear
+# Deploy: https://dashboard.render.com/select-repo?type=blueprint
+# Docs: https://render.com/docs/blueprint-spec
+
+databases:
+  - name: mapalinear-db
+    plan: free # Grátis por 90 dias, depois $7/mês (starter)
+    databaseName: mapalinear
+    user: mapalinear
+    region: ohio # Mais próximo do Brasil
+
+services:
+  # Backend - FastAPI
+  - type: web
+    name: mapalinear-api
+    runtime: python
+    plan: free
+    region: ohio
+    buildCommand: |
+      pip install poetry &&
+      poetry config virtualenvs.create false &&
+      poetry install --only main &&
+      alembic upgrade head
+    startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: POSTGRES_HOST
+        fromDatabase:
+          name: mapalinear-db
+          property: host
+      - key: POSTGRES_PORT
+        fromDatabase:
+          name: mapalinear-db
+          property: port
+      - key: POSTGRES_DATABASE
+        fromDatabase:
+          name: mapalinear-db
+          property: database
+      - key: POSTGRES_USER
+        fromDatabase:
+          name: mapalinear-db
+          property: user
+      - key: POSTGRES_PASSWORD
+        fromDatabase:
+          name: mapalinear-db
+          property: password
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mapalinear-db
+          property: connectionString
+      # Providers
+      - key: POI_PROVIDER
+        value: osm
+      # Secrets - configure no dashboard do Render após deploy
+      - key: HERE_API_KEY
+        sync: false
+      - key: GOOGLE_PLACES_API_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+
+  # Frontend - NextJS
+  - type: web
+    name: mapalinear-frontend
+    runtime: node
+    plan: free
+    region: ohio
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      # IMPORTANTE: Após o deploy, atualize manualmente no dashboard:
+      # NEXT_PUBLIC_API_URL = https://mapalinear-api.onrender.com/api
+      - key: NEXT_PUBLIC_API_URL
+        value: https://mapalinear-api.onrender.com/api
+      - key: NEXTAUTH_URL
+        value: https://mapalinear-frontend.onrender.com
+      - key: NEXTAUTH_SECRET
+        generateValue: true
+      # Secrets - configure no dashboard do Render após deploy
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
