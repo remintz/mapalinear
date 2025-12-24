@@ -211,6 +211,7 @@ async def regenerate_map(
         # Store map info before the session closes
         origin = existing_map.origin
         destination = existing_map.destination
+        user_id = str(current_user.id)
 
         # Create new async operation for regeneration
         road_service = RoadService()
@@ -231,6 +232,7 @@ async def regenerate_map(
                     destination=destination,
                     max_distance_from_road=3000,  # Default value
                     progress_callback=progress_callback,
+                    user_id=user_id,
                 )
 
                 # Delete old map using sync wrapper
