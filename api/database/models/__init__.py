@@ -12,6 +12,9 @@ from api.database.models.poi import POI
 from api.database.models.user import User
 from api.database.models.user_map import UserMap
 from api.database.models.system_settings import SystemSettings
+from api.database.models.problem_type import ProblemType
+from api.database.models.report_attachment import ReportAttachment
+from api.database.models.problem_report import ProblemReport
 
 __all__ = [
     "ApiCallLog",
@@ -25,4 +28,7 @@ __all__ = [
     "User",
     "UserMap",
     "SystemSettings",
+    "ProblemType",
+    "ReportAttachment",
+    "ProblemReport",
 ]

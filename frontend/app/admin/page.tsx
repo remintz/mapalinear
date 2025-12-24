@@ -4,7 +4,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Users, Settings, Shield, UserX } from "lucide-react";
+import { Users, Settings, Shield, UserX, AlertTriangle, FileWarning } from "lucide-react";
 import { toast } from "sonner";
 
 const SIMULATE_USER_KEY = 'mapalinear_simulate_user';
@@ -96,6 +96,40 @@ export default function AdminPage() {
                 <h2 className="text-lg font-semibold text-gray-900">Configurações</h2>
                 <p className="text-sm text-gray-500">
                   Parâmetros globais do sistema
+                </p>
+              </div>
+            </div>
+          </Link>
+
+          <Link
+            href="/admin/problem-types"
+            className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
+          >
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-amber-100 rounded-lg">
+                <FileWarning className="w-6 h-6 text-amber-600" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Tipos de Problema</h2>
+                <p className="text-sm text-gray-500">
+                  Configurar tipos de problemas
+                </p>
+              </div>
+            </div>
+          </Link>
+
+          <Link
+            href="/admin/reports"
+            className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
+          >
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-red-100 rounded-lg">
+                <AlertTriangle className="w-6 h-6 text-red-600" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Reports de Problemas</h2>
+                <p className="text-sm text-gray-500">
+                  Gerenciar problemas reportados
                 </p>
               </div>
             </div>

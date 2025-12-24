@@ -284,6 +284,131 @@ class APIClient {
     const { data } = await this.client.get<Municipality[]>(`/municipalities${params}`);
     return data;
   }
+
+  // Problem Reports functions
+
+  /**
+   * Get active problem types for the report form.
+   */
+  async getProblemTypes(): Promise<ProblemType[]> {
+    const { data } = await this.client.get<{ types: ProblemType[] }>('/reports/types');
+    return data.types;
+  }
+
+  /**
+   * Submit a new problem report with attachments.
+   */
+  async submitProblemReport(formData: FormData): Promise<{ id: string; message: string }> {
+    const { data } = await this.client.post<{ id: string; message: string }>(
+      '/reports',
+      formData,
+      {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      }
+    );
+    return data;
+  }
+
+  // Admin Problem Reports functions
+
+  /**
+   * List all problem types (admin).
+   */
+  async getAdminProblemTypes(): Promise<{ types: ProblemTypeAdmin[]; total: number }> {
+    const { data } = await this.client.get('/admin/problem-types');
+    return data;
+  }
+
+  /**
+   * Create a new problem type (admin).
+   */
+  async createProblemType(params: {
+    name: string;
+    description?: string;
+    sort_order?: number;
+  }): Promise<ProblemTypeAdmin> {
+    const { data } = await this.client.post<ProblemTypeAdmin>('/admin/problem-types', params);
+    return data;
+  }
+
+  /**
+   * Update a problem type (admin).
+   */
+  async updateProblemType(
+    id: string,
+    params: {
+      name?: string;
+      description?: string;
+      is_active?: boolean;
+      sort_order?: number;
+    }
+  ): Promise<ProblemTypeAdmin> {
+    const { data } = await this.client.put<ProblemTypeAdmin>(`/admin/problem-types/${id}`, params);
+    return data;
+  }
+
+  /**
+   * Delete (deactivate) a problem type (admin).
+   */
+  async deleteProblemType(id: string): Promise<void> {
+    await this.client.delete(`/admin/problem-types/${id}`);
+  }
+
+  /**
+   * List problem reports (admin).
+   */
+  async getProblemReports(options?: {
+    skip?: number;
+    limit?: number;
+    status_filter?: string;
+    map_id?: string;
+  }): Promise<ProblemReportListResponse> {
+    const params = new URLSearchParams();
+    if (options?.skip !== undefined) params.append('skip', options.skip.toString());
+    if (options?.limit !== undefined) params.append('limit', options.limit.toString());
+    if (options?.status_filter) params.append('status_filter', options.status_filter);
+    if (options?.map_id) params.append('map_id', options.map_id);
+
+    const queryString = params.toString();
+    const url = queryString ? `/reports?${queryString}` : '/reports';
+    const { data } = await this.client.get<ProblemReportListResponse>(url);
+    return data;
+  }
+
+  /**
+   * Get a single problem report (admin).
+   */
+  async getProblemReport(id: string): Promise<ProblemReport> {
+    const { data } = await this.client.get<ProblemReport>(`/reports/${id}`);
+    return data;
+  }
+
+  /**
+   * Update report status (admin).
+   */
+  async updateProblemReportStatus(id: string, status: string): Promise<ProblemReport> {
+    const { data } = await this.client.put<ProblemReport>(`/reports/${id}/status`, { status });
+    return data;
+  }
+
+  /**
+   * Delete a problem report (admin).
+   */
+  async deleteProblemReport(id: string): Promise<{ message: string }> {
+    const { data } = await this.client.delete<{ message: string }>(`/reports/${id}`);
+    return data;
+  }
+
+  /**
+   * Get attachment download URL with optional token for img src authentication.
+   */
+  getAttachmentUrl(reportId: string, attachmentId: string, token?: string): string {
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
+    const url = `${baseUrl}/reports/${reportId}/attachments/${attachmentId}`;
+    return token ? `${url}?token=${encodeURIComponent(token)}` : url;
+  }
 }
 
 // Types for saved maps
@@ -303,6 +428,63 @@ export interface Municipality {
   id: number;
   nome: string;
   uf: string;
+}
+
+// Types for problem reports
+export interface ProblemType {
+  id: string;
+  name: string;
+  description: string | null;
+}
+
+export interface ProblemTypeAdmin extends ProblemType {
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProblemReportAttachment {
+  id: string;
+  type: 'image' | 'audio';
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+}
+
+export interface ProblemReport {
+  id: string;
+  status: 'nova' | 'em_andamento' | 'concluido';
+  description: string;
+  latitude: number | null;
+  longitude: number | null;
+  created_at: string;
+  updated_at: string;
+  problem_type: ProblemType;
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    avatar_url: string | null;
+  };
+  map: {
+    id: string;
+    origin: string;
+    destination: string;
+  } | null;
+  poi: {
+    id: string;
+    name: string;
+    type: string;
+  } | null;
+  attachments: ProblemReportAttachment[];
+  attachment_count: number;
+}
+
+export interface ProblemReportListResponse {
+  reports: ProblemReport[];
+  total: number;
+  counts_by_status: Record<string, number>;
 }
 
 export const apiClient = new APIClient();

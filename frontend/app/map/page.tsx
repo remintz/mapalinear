@@ -15,6 +15,7 @@ import { useRouteSimulation } from '@/hooks/useRouteSimulation';
 import { useRouteTracking } from '@/hooks/useRouteTracking';
 import { useGeolocation } from '@/hooks/useGeolocation';
 import { RouteSegment } from '@/lib/types';
+import { ReportProblemButton } from '@/components/reports/ReportProblemButton';
 
 interface RouteSearchResponse {
   origin: string;
@@ -606,6 +607,18 @@ function MapPageContent() {
           </div>
         </div>
       </main>
+
+      {/* Report Problem Button */}
+      <ReportProblemButton
+        mapId={mapId || undefined}
+        pois={filteredPOIs.map(poi => ({
+          id: poi.id || String(poi.osm_id || poi.here_id || Math.random()),
+          name: poi.name || poi.type,
+          type: poi.type,
+          distance_from_origin_km: poi.distance_from_origin_km,
+        }))}
+        userLocation={currentPosition ? { lat: currentPosition.lat, lon: currentPosition.lon } : undefined}
+      />
 
       {/* Admin/Debug Slide-out Menu */}
       {isAdminMenuOpen && (
