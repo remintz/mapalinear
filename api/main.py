@@ -54,10 +54,13 @@ async def log_requests(request: Request, call_next):
         raise
 
 # Configuração de CORS
+# Nota: allow_credentials não é usado pois a autenticação é via Bearer token (JWT)
+# e não via cookies. Usar allow_credentials=True com allow_origins=["*"] causa
+# erro CORS nos navegadores.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
