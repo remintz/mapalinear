@@ -658,3 +658,105 @@ async def get_map_details(
         created_by_user_id=str(map_obj.created_by_user_id) if map_obj.created_by_user_id else None,
         poi_counts=dict(poi_counts),
     )
+
+
+# Database maintenance models
+class DatabaseStatsResponse(BaseModel):
+    """Current database statistics."""
+
+    total_pois: int = Field(..., description="Total number of POIs")
+    referenced_pois: int = Field(..., description="POIs referenced by maps")
+    unreferenced_pois: int = Field(..., description="Orphan POIs not in any map")
+    total_maps: int = Field(..., description="Total number of maps")
+    total_map_pois: int = Field(..., description="Total map-POI relationships")
+    pending_operations: int = Field(..., description="Operations in progress")
+    stale_operations: int = Field(..., description="Stale operations (>2h)")
+
+
+class MaintenanceResultResponse(BaseModel):
+    """Result of a maintenance operation."""
+
+    orphan_pois_found: int = Field(..., description="Number of orphan POIs found")
+    orphan_pois_deleted: int = Field(..., description="Number of orphan POIs deleted")
+    is_referenced_fixed: int = Field(..., description="Number of is_referenced flags fixed")
+    stale_operations_cleaned: int = Field(..., description="Number of stale operations cleaned")
+    execution_time_ms: int = Field(..., description="Execution time in milliseconds")
+    dry_run: bool = Field(..., description="Whether this was a dry run")
+
+
+@router.get("/maintenance/stats", response_model=DatabaseStatsResponse)
+async def get_database_stats(
+    admin_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+) -> DatabaseStatsResponse:
+    """
+    Get current database statistics.
+
+    Shows counts of POIs, maps, and identifies potential issues like orphan POIs.
+
+    Requires admin privileges.
+
+    Args:
+        admin_user: Current admin user (injected)
+        db: Database session
+
+    Returns:
+        Database statistics
+    """
+    from api.services.database_maintenance_service import DatabaseMaintenanceService
+
+    service = DatabaseMaintenanceService(db)
+    stats = await service.get_database_stats()
+
+    return DatabaseStatsResponse(
+        total_pois=stats.total_pois,
+        referenced_pois=stats.referenced_pois,
+        unreferenced_pois=stats.unreferenced_pois,
+        total_maps=stats.total_maps,
+        total_map_pois=stats.total_map_pois,
+        pending_operations=stats.pending_operations,
+        stale_operations=stats.stale_operations,
+    )
+
+
+@router.post("/maintenance/run", response_model=MaintenanceResultResponse)
+async def run_maintenance(
+    dry_run: bool = True,
+    admin_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+) -> MaintenanceResultResponse:
+    """
+    Run database maintenance tasks.
+
+    This will:
+    - Delete orphan POIs (POIs not referenced by any map)
+    - Fix incorrect is_referenced flags
+    - Clean up stale async operations
+
+    Requires admin privileges.
+
+    Args:
+        dry_run: If True, only report what would be done without making changes
+        admin_user: Current admin user (injected)
+        db: Database session
+
+    Returns:
+        Maintenance results
+    """
+    from api.services.database_maintenance_service import DatabaseMaintenanceService
+
+    logger.info(
+        f"Admin {admin_user.email} initiated database maintenance (dry_run={dry_run})"
+    )
+
+    service = DatabaseMaintenanceService(db)
+    stats = await service.run_full_maintenance(dry_run=dry_run)
+
+    return MaintenanceResultResponse(
+        orphan_pois_found=stats.orphan_pois_found,
+        orphan_pois_deleted=stats.orphan_pois_deleted,
+        is_referenced_fixed=stats.is_referenced_fixed,
+        stale_operations_cleaned=stats.stale_operations_cleaned,
+        execution_time_ms=stats.execution_time_ms,
+        dry_run=dry_run,
+    )

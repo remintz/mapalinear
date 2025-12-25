@@ -11,12 +11,36 @@ import {
   Loader2,
   MapPin,
   Copy,
+  Database,
+  Trash2,
+  AlertTriangle,
+  CheckCircle,
+  RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 
 interface SystemSettings {
   poi_search_radius_km: string;
   duplicate_map_tolerance_km: string;
+}
+
+interface DatabaseStats {
+  total_pois: number;
+  referenced_pois: number;
+  unreferenced_pois: number;
+  total_maps: number;
+  total_map_pois: number;
+  pending_operations: number;
+  stale_operations: number;
+}
+
+interface MaintenanceResult {
+  orphan_pois_found: number;
+  orphan_pois_deleted: number;
+  is_referenced_fixed: number;
+  stale_operations_cleaned: number;
+  execution_time_ms: number;
+  dry_run: boolean;
 }
 
 export default function AdminSettingsPage() {
@@ -29,6 +53,12 @@ export default function AdminSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Database maintenance state
+  const [dbStats, setDbStats] = useState<DatabaseStats | null>(null);
+  const [loadingStats, setLoadingStats] = useState(false);
+  const [runningMaintenance, setRunningMaintenance] = useState(false);
+  const [lastMaintenanceResult, setLastMaintenanceResult] = useState<MaintenanceResult | null>(null);
 
   const fetchSettings = useCallback(async () => {
     try {
@@ -114,6 +144,77 @@ export default function AdminSettingsPage() {
       duplicate_map_tolerance_km: numericValue,
     }));
   };
+
+  const fetchDatabaseStats = useCallback(async () => {
+    try {
+      setLoadingStats(true);
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api"}/admin/maintenance/stats`,
+        {
+          headers: {
+            Authorization: `Bearer ${session?.accessToken}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Falha ao carregar estatísticas do banco");
+      }
+
+      const data = await response.json();
+      setDbStats(data);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao carregar estatísticas");
+    } finally {
+      setLoadingStats(false);
+    }
+  }, [session?.accessToken]);
+
+  const runMaintenance = async (dryRun: boolean) => {
+    try {
+      setRunningMaintenance(true);
+      setLastMaintenanceResult(null);
+
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api"}/admin/maintenance/run?dry_run=${dryRun}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session?.accessToken}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.detail || "Falha ao executar manutenção");
+      }
+
+      const result: MaintenanceResult = await response.json();
+      setLastMaintenanceResult(result);
+
+      if (dryRun) {
+        toast.info(`Simulação concluída em ${result.execution_time_ms}ms`);
+      } else {
+        toast.success(
+          `Manutenção concluída: ${result.orphan_pois_deleted} POIs removidos, ${result.is_referenced_fixed} flags corrigidas`
+        );
+        // Refresh stats after real maintenance
+        fetchDatabaseStats();
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro na manutenção");
+    } finally {
+      setRunningMaintenance(false);
+    }
+  };
+
+  // Load database stats when page loads
+  useEffect(() => {
+    if (session?.accessToken && !loading) {
+      fetchDatabaseStats();
+    }
+  }, [session?.accessToken, loading, fetchDatabaseStats]);
 
   if (status === "loading" || loading) {
     return (
@@ -261,6 +362,170 @@ export default function AdminSettingsPage() {
                 </>
               )}
             </button>
+          </div>
+        </div>
+
+        {/* Database Maintenance Section */}
+        <div className="mt-8 bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+          <div className="p-6 border-b border-gray-200">
+            <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
+              <Database className="w-5 h-5 text-purple-600" />
+              Manutenção do Banco de Dados
+            </h2>
+            <p className="mt-1 text-sm text-gray-600">
+              Limpe dados órfãos e corrija inconsistências no banco de dados
+            </p>
+          </div>
+
+          <div className="p-6 space-y-6">
+            {/* Database Stats */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-gray-900">
+                  Estatísticas do Banco
+                </span>
+                <button
+                  onClick={fetchDatabaseStats}
+                  disabled={loadingStats}
+                  className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-4 h-4 ${loadingStats ? "animate-spin" : ""}`} />
+                  Atualizar
+                </button>
+              </div>
+
+              {loadingStats ? (
+                <div className="flex items-center justify-center py-4">
+                  <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+                </div>
+              ) : dbStats ? (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <div className="text-2xl font-bold text-gray-900">
+                      {dbStats.total_maps}
+                    </div>
+                    <div className="text-xs text-gray-500">Mapas</div>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <div className="text-2xl font-bold text-gray-900">
+                      {dbStats.total_pois}
+                    </div>
+                    <div className="text-xs text-gray-500">POIs Total</div>
+                  </div>
+                  <div className="bg-green-50 rounded-lg p-3">
+                    <div className="text-2xl font-bold text-green-700">
+                      {dbStats.referenced_pois}
+                    </div>
+                    <div className="text-xs text-green-600">POIs em Mapas</div>
+                  </div>
+                  <div className={`rounded-lg p-3 ${dbStats.unreferenced_pois > 0 ? "bg-amber-50" : "bg-gray-50"}`}>
+                    <div className={`text-2xl font-bold ${dbStats.unreferenced_pois > 0 ? "text-amber-700" : "text-gray-900"}`}>
+                      {dbStats.unreferenced_pois}
+                    </div>
+                    <div className={`text-xs ${dbStats.unreferenced_pois > 0 ? "text-amber-600" : "text-gray-500"}`}>
+                      POIs Órfãos
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-sm text-gray-500 py-4 text-center">
+                  Clique em &quot;Atualizar&quot; para carregar estatísticas
+                </div>
+              )}
+
+              {dbStats && (dbStats.pending_operations > 0 || dbStats.stale_operations > 0) && (
+                <div className="mt-3 flex gap-4 text-sm">
+                  {dbStats.pending_operations > 0 && (
+                    <span className="text-blue-600">
+                      {dbStats.pending_operations} operações em andamento
+                    </span>
+                  )}
+                  {dbStats.stale_operations > 0 && (
+                    <span className="text-amber-600">
+                      {dbStats.stale_operations} operações travadas
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Maintenance Actions */}
+            <div className="space-y-3 pt-4 border-t border-gray-200">
+              <span className="text-sm font-medium text-gray-900">
+                Ações de Manutenção
+              </span>
+              <p className="text-sm text-gray-500">
+                A manutenção irá:
+              </p>
+              <ul className="text-sm text-gray-600 list-disc list-inside space-y-1">
+                <li>Remover POIs que não estão em nenhum mapa</li>
+                <li>Corrigir flags de referência incorretas</li>
+                <li>Limpar operações travadas há mais de 2 horas</li>
+              </ul>
+
+              {/* Last Maintenance Result */}
+              {lastMaintenanceResult && (
+                <div className={`mt-4 p-4 rounded-lg ${lastMaintenanceResult.dry_run ? "bg-blue-50 border border-blue-200" : "bg-green-50 border border-green-200"}`}>
+                  <div className="flex items-center gap-2 mb-2">
+                    {lastMaintenanceResult.dry_run ? (
+                      <AlertTriangle className="w-4 h-4 text-blue-600" />
+                    ) : (
+                      <CheckCircle className="w-4 h-4 text-green-600" />
+                    )}
+                    <span className={`font-medium ${lastMaintenanceResult.dry_run ? "text-blue-700" : "text-green-700"}`}>
+                      {lastMaintenanceResult.dry_run ? "Resultado da Simulação" : "Manutenção Concluída"}
+                    </span>
+                  </div>
+                  <div className="text-sm space-y-1">
+                    <p className={lastMaintenanceResult.dry_run ? "text-blue-600" : "text-green-600"}>
+                      {lastMaintenanceResult.orphan_pois_found > 0
+                        ? `${lastMaintenanceResult.dry_run ? "Seriam removidos" : "Removidos"} ${lastMaintenanceResult.orphan_pois_deleted} POIs órfãos`
+                        : "Nenhum POI órfão encontrado"}
+                    </p>
+                    <p className={lastMaintenanceResult.dry_run ? "text-blue-600" : "text-green-600"}>
+                      {lastMaintenanceResult.is_referenced_fixed > 0
+                        ? `${lastMaintenanceResult.dry_run ? "Seriam corrigidas" : "Corrigidas"} ${lastMaintenanceResult.is_referenced_fixed} flags`
+                        : "Todas as flags estão corretas"}
+                    </p>
+                    <p className={lastMaintenanceResult.dry_run ? "text-blue-600" : "text-green-600"}>
+                      {lastMaintenanceResult.stale_operations_cleaned > 0
+                        ? `Limpas ${lastMaintenanceResult.stale_operations_cleaned} operações travadas`
+                        : "Nenhuma operação travada"}
+                    </p>
+                    <p className="text-gray-500 text-xs mt-2">
+                      Tempo de execução: {lastMaintenanceResult.execution_time_ms}ms
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-3 mt-4">
+                <button
+                  onClick={() => runMaintenance(true)}
+                  disabled={runningMaintenance}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {runningMaintenance ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4" />
+                  )}
+                  Simular
+                </button>
+                <button
+                  onClick={() => runMaintenance(false)}
+                  disabled={runningMaintenance}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {runningMaintenance ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="w-4 h-4" />
+                  )}
+                  Executar Limpeza
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
