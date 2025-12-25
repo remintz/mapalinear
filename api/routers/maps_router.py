@@ -137,7 +137,8 @@ async def get_saved_map(
     """
     Get a specific saved map by ID.
 
-    User must have the map in their collection to access it.
+    User must have the map in their collection to access it,
+    unless they are an admin (can view any map).
 
     Args:
         map_id: ID of the map to retrieve
@@ -147,7 +148,12 @@ async def get_saved_map(
     """
     try:
         storage = MapStorageServiceDB(db)
-        linear_map = await storage.load_map(map_id, user_id=current_user.id)
+
+        # Admins can view any map, regular users only their own collection
+        if current_user.is_admin:
+            linear_map = await storage.load_map(map_id)
+        else:
+            linear_map = await storage.load_map(map_id, user_id=current_user.id)
 
         if linear_map is None:
             raise HTTPException(status_code=404, detail=f"Map {map_id} not found")

@@ -218,3 +218,24 @@ export interface ImpersonationStatusResponse {
   current_user: AdminUser;
   real_admin: AdminUser | null;
 }
+
+// Admin Map types
+export interface AdminMap {
+  id: string;
+  origin: string;
+  destination: string;
+  total_length_km: number;
+  created_at: string;
+  updated_at: string;
+  user_count: number;
+  created_by_user_id?: string;
+}
+
+export interface AdminMapListResponse {
+  maps: AdminMap[];
+  total: number;
+}
+
+export interface AdminMapDetail extends AdminMap {
+  poi_counts: Record<string, number>;
+}

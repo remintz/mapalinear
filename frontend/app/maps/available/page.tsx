@@ -20,6 +20,7 @@ import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiClient, SavedMap } from '@/lib/api';
+import RouteMapModal from '@/components/RouteMapModal';
 
 export default function AvailableMapsPage() {
   const [availableMaps, setAvailableMaps] = useState<SavedMap[]>([]);
@@ -29,6 +30,7 @@ export default function AvailableMapsPage() {
   const [adoptingId, setAdoptingId] = useState<string | null>(null);
   const [searchOrigin, setSearchOrigin] = useState('');
   const [searchDestination, setSearchDestination] = useState('');
+  const [osmMapId, setOsmMapId] = useState<string | null>(null);
   const router = useRouter();
 
   // Load user's maps to know which ones they already have
@@ -82,7 +84,7 @@ export default function AvailableMapsPage() {
   };
 
   const handleViewOnMap = (mapId: string) => {
-    router.push(`/map/view/${mapId}`);
+    setOsmMapId(mapId);
   };
 
   const handleAdoptMap = async (mapId: string) => {
@@ -293,6 +295,15 @@ export default function AvailableMapsPage() {
           </div>
         )}
       </main>
+
+      {/* OSM Map Modal */}
+      {osmMapId && (
+        <RouteMapModal
+          mapId={osmMapId}
+          isOpen={true}
+          onClose={() => setOsmMapId(null)}
+        />
+      )}
     </div>
   );
 }

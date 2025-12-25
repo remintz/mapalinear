@@ -16,6 +16,7 @@ import { useRouteTracking } from '@/hooks/useRouteTracking';
 import { useGeolocation } from '@/hooks/useGeolocation';
 import { RouteSegment, POI, Milestone } from '@/lib/types';
 import { ReportProblemButton } from '@/components/reports/ReportProblemButton';
+import RouteMapModal from '@/components/RouteMapModal';
 
 interface RouteSearchResponse {
   origin: string;
@@ -58,6 +59,7 @@ function MapPageContent() {
   const [progressPercent, setProgressPercent] = useState<number>(0);
   const [isExporting, setIsExporting] = useState(false);
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
+  const [osmMapOpen, setOsmMapOpen] = useState(false);
 
   // Active filters stored as a Set of filter IDs
   const [activeFilters, setActiveFilters] = useState<Set<string>>(
@@ -509,7 +511,7 @@ function MapPageContent() {
               {/* View Route on Map Button */}
               {mapId && (
                 <button
-                  onClick={() => router.push(`/map/view/${mapId}`)}
+                  onClick={() => setOsmMapOpen(true)}
                   className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900 px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors border border-gray-200"
                   title="Ver rota no mapa"
                 >
@@ -754,6 +756,15 @@ function MapPageContent() {
             </div>
           </div>
         </>
+      )}
+
+      {/* OSM Map Modal */}
+      {mapId && (
+        <RouteMapModal
+          mapId={mapId}
+          isOpen={osmMapOpen}
+          onClose={() => setOsmMapOpen(false)}
+        />
       )}
     </div>
   );

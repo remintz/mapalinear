@@ -6,7 +6,6 @@ import { MapCardBase } from '@/components/ui/MapCardBase';
 import {
   Map,
   Trash2,
-  RefreshCw,
   FolderOpen,
   Loader2,
   Plus,
@@ -15,18 +14,15 @@ import {
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { apiClient, SavedMap } from '@/lib/api';
-import { useSession } from 'next-auth/react';
+import RouteMapModal from '@/components/RouteMapModal';
 
 export default function SavedMapsPage() {
   const [myMaps, setMyMaps] = useState<SavedMap[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [osmMapId, setOsmMapId] = useState<string | null>(null);
   const router = useRouter();
-  const { data: session } = useSession();
-
-  const isAdmin = (session?.user as { isAdmin?: boolean })?.isAdmin ?? false;
 
   useEffect(() => {
     loadMyMaps();
@@ -53,7 +49,7 @@ export default function SavedMapsPage() {
   };
 
   const handleViewOnMap = (mapId: string) => {
-    router.push(`/map/view/${mapId}`);
+    setOsmMapId(mapId);
   };
 
   const handleRemoveFromCollection = async (mapId: string) => {
@@ -69,25 +65,6 @@ export default function SavedMapsPage() {
       toast.error('Erro ao remover mapa');
     } finally {
       setDeletingId(null);
-    }
-  };
-
-  const handleRegenerateMap = async (mapId: string) => {
-    if (!isAdmin) {
-      toast.error('Apenas administradores podem regenerar mapas');
-      return;
-    }
-
-    try {
-      setRegeneratingId(mapId);
-      const data = await apiClient.regenerateMap(mapId);
-      toast.success('Regeneração iniciada! Acompanhe o progresso.');
-      router.push(`/map?operationId=${data.operation_id}`);
-    } catch (error) {
-      console.error('Error regenerating map:', error);
-      toast.error('Erro ao regenerar mapa');
-    } finally {
-      setRegeneratingId(null);
     }
   };
 
@@ -111,22 +88,6 @@ export default function SavedMapsPage() {
         >
           <MapPinned className="h-4 w-4" />
         </Button>
-        {isAdmin && (
-          <Button
-            onClick={() => handleRegenerateMap(map.id)}
-            size="sm"
-            variant="outline"
-            disabled={regeneratingId === map.id}
-            className="px-3"
-            title="Regenerar mapa (Admin)"
-          >
-            {regeneratingId === map.id ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-          </Button>
-        )}
         <Button
           onClick={() => handleRemoveFromCollection(map.id)}
           size="sm"
@@ -217,6 +178,15 @@ export default function SavedMapsPage() {
           </div>
         )}
       </main>
+
+      {/* OSM Map Modal */}
+      {osmMapId && (
+        <RouteMapModal
+          mapId={osmMapId}
+          isOpen={true}
+          onClose={() => setOsmMapId(null)}
+        />
+      )}
     </div>
   );
 }

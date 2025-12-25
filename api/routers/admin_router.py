@@ -517,3 +517,144 @@ async def get_impersonation_status(
         current_user=current_user_response,
         real_admin=real_admin_response,
     )
+
+
+# Map admin models
+class MapAdminResponse(BaseModel):
+    """Map information for admin views."""
+
+    id: str = Field(..., description="Map UUID")
+    origin: str = Field(..., description="Origin location")
+    destination: str = Field(..., description="Destination location")
+    total_length_km: float = Field(..., description="Total route length in km")
+    created_at: datetime = Field(..., description="When map was created")
+    updated_at: datetime = Field(..., description="When map was last updated")
+    user_count: int = Field(0, description="Number of users with this map")
+    created_by_user_id: Optional[str] = Field(None, description="Creator user ID")
+
+    model_config = {"from_attributes": True}
+
+
+class MapListResponse(BaseModel):
+    """Response with list of maps."""
+
+    maps: List[MapAdminResponse]
+    total: int = Field(..., description="Total number of maps")
+
+
+class MapDetailResponse(MapAdminResponse):
+    """Detailed map information for admin views."""
+
+    poi_counts: dict = Field(default_factory=dict, description="POI counts by category")
+
+
+@router.get("/maps", response_model=MapListResponse)
+async def list_maps(
+    skip: int = 0,
+    limit: int = 100,
+    admin_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+) -> MapListResponse:
+    """
+    List all maps with their user counts.
+
+    Requires admin privileges.
+
+    Args:
+        skip: Number of records to skip
+        limit: Maximum number of records to return
+        admin_user: Current admin user (injected)
+        db: Database session
+
+    Returns:
+        List of all maps with stats
+    """
+    from api.database.repositories.map import MapRepository
+
+    map_repo = MapRepository(db)
+    maps_with_counts = await map_repo.get_all_maps_with_user_count(skip=skip, limit=limit)
+    total = await map_repo.count_all_maps()
+
+    maps = [
+        MapAdminResponse(
+            id=str(data["map"].id),
+            origin=data["map"].origin,
+            destination=data["map"].destination,
+            total_length_km=data["map"].total_length_km,
+            created_at=data["map"].created_at,
+            updated_at=data["map"].updated_at,
+            user_count=data["user_count"],
+            created_by_user_id=str(data["map"].created_by_user_id) if data["map"].created_by_user_id else None,
+        )
+        for data in maps_with_counts
+    ]
+
+    return MapListResponse(maps=maps, total=total)
+
+
+@router.get("/maps/{map_id}", response_model=MapDetailResponse)
+async def get_map_details(
+    map_id: str,
+    admin_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+) -> MapDetailResponse:
+    """
+    Get detailed information about a specific map.
+
+    Requires admin privileges.
+
+    Args:
+        map_id: UUID of map to get
+        admin_user: Current admin user (injected)
+        db: Database session
+
+    Returns:
+        Detailed map information including POI counts by category
+    """
+    from collections import Counter
+
+    from sqlalchemy.orm import selectinload
+
+    from api.database.models.map import Map
+    from api.database.models.map_poi import MapPOI
+    from api.database.models.poi import POI
+    from api.database.repositories.map import MapRepository
+    from api.database.repositories.user_map import UserMapRepository
+
+    try:
+        uuid = UUID(map_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid map ID format",
+        )
+
+    map_repo = MapRepository(db)
+    map_obj = await map_repo.get_by_id_with_pois(uuid)
+
+    if not map_obj:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Map not found",
+        )
+
+    # Count POIs by type
+    poi_counts: dict = Counter()
+    for map_poi in map_obj.map_pois:
+        if map_poi.poi:
+            poi_counts[map_poi.poi.type] += 1
+
+    user_map_repo = UserMapRepository(db)
+    user_count = await user_map_repo.get_map_user_count(uuid)
+
+    return MapDetailResponse(
+        id=str(map_obj.id),
+        origin=map_obj.origin,
+        destination=map_obj.destination,
+        total_length_km=map_obj.total_length_km,
+        created_at=map_obj.created_at,
+        updated_at=map_obj.updated_at,
+        user_count=user_count,
+        created_by_user_id=str(map_obj.created_by_user_id) if map_obj.created_by_user_id else None,
+        poi_counts=dict(poi_counts),
+    )

@@ -20,6 +20,7 @@ import {
 import Link from 'next/link';
 import { apiClient, SavedMap } from '@/lib/api';
 import { toast } from 'sonner';
+import RouteMapModal from '@/components/RouteMapModal';
 
 interface SearchFormData {
   origin: string;
@@ -44,6 +45,7 @@ function SearchPageContent() {
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number } | null>(null);
   const [adoptingId, setAdoptingId] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [osmMapId, setOsmMapId] = useState<string | null>(null);
 
   // Get user location
   useEffect(() => {
@@ -134,7 +136,7 @@ function SearchPageContent() {
   };
 
   const handleViewOnMap = (mapId: string) => {
-    router.push(`/map/view/${mapId}`);
+    setOsmMapId(mapId);
   };
 
   const MapCard = ({ map }: { map: SavedMap }) => (
@@ -329,6 +331,15 @@ function SearchPageContent() {
           </div>
         )}
       </main>
+
+      {/* OSM Map Modal */}
+      {osmMapId && (
+        <RouteMapModal
+          mapId={osmMapId}
+          isOpen={true}
+          onClose={() => setOsmMapId(null)}
+        />
+      )}
     </div>
   );
 }

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from api.database.models.map import Map
+from api.database.models.map_poi import MapPOI
 from api.database.models.user_map import UserMap
 from api.database.repositories.base import BaseRepository
 
@@ -33,7 +34,9 @@ class MapRepository(BaseRepository[Map]):
             Map instance with POIs or None if not found
         """
         result = await self.session.execute(
-            select(Map).where(Map.id == id).options(selectinload(Map.map_pois))
+            select(Map).where(Map.id == id).options(
+                selectinload(Map.map_pois).selectinload(MapPOI.poi)
+            )
         )
         return result.scalar_one_or_none()
 
@@ -229,3 +232,37 @@ class MapRepository(BaseRepository[Map]):
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
         return R * c
+
+    async def get_all_maps_with_user_count(
+        self, skip: int = 0, limit: int = 100
+    ) -> List[dict]:
+        """
+        Get all maps with their user count for admin view.
+
+        Args:
+            skip: Number of records to skip
+            limit: Maximum number of records to return
+
+        Returns:
+            List of dicts with map and user_count
+        """
+        result = await self.session.execute(
+            select(Map, func.count(UserMap.id).label("user_count"))
+            .outerjoin(UserMap, Map.id == UserMap.map_id)
+            .group_by(Map.id)
+            .order_by(Map.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        rows = result.all()
+        return [{"map": row[0], "user_count": row[1]} for row in rows]
+
+    async def count_all_maps(self) -> int:
+        """
+        Count total number of maps.
+
+        Returns:
+            Total number of maps
+        """
+        result = await self.session.execute(select(func.count()).select_from(Map))
+        return result.scalar_one()
