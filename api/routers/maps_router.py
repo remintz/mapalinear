@@ -263,7 +263,7 @@ async def adopt_map(
 
 
 @router.delete("/{map_id}")
-async def delete_saved_map(
+async def remove_map_from_collection(
     map_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -271,13 +271,13 @@ async def delete_saved_map(
     """
     Remove a map from user's collection (unlink).
 
-    For regular users, this only removes the map from their collection.
+    This only removes the map from the user's collection.
     The map remains in the system for other users.
 
-    For admins, this permanently deletes the map from the system.
+    For permanent deletion, use DELETE /maps/{map_id}/permanent (admin only).
 
     Args:
-        map_id: ID of the map to remove/delete
+        map_id: ID of the map to remove from collection
 
     Returns:
         Success message
@@ -292,26 +292,18 @@ async def delete_saved_map(
                 status_code=404, detail=f"Map {map_id} not found in your collection"
             )
 
-        if current_user.is_admin:
-            # Admin: permanently delete the map
-            success = await storage.delete_map_permanently(map_id)
-            if not success:
-                raise HTTPException(status_code=500, detail="Failed to delete map")
-            await db.commit()
-            return {"message": f"Map {map_id} permanently deleted"}
-        else:
-            # Regular user: just unlink
-            success = await storage.unlink_map(map_id, user_id=current_user.id)
-            if not success:
-                raise HTTPException(
-                    status_code=500, detail="Failed to remove map from collection"
-                )
-            await db.commit()
-            return {"message": f"Map {map_id} removed from your collection"}
+        # Always just unlink (remove from collection)
+        success = await storage.unlink_map(map_id, user_id=current_user.id)
+        if not success:
+            raise HTTPException(
+                status_code=500, detail="Failed to remove map from collection"
+            )
+        await db.commit()
+        return {"message": f"Map {map_id} removed from your collection"}
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error deleting/unlinking map {map_id}: {e}")
+        logger.error(f"Error unlinking map {map_id}: {e}")
         raise HTTPException(status_code=500, detail="Error removing map")
 
 

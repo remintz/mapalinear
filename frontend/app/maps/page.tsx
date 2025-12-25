@@ -1,16 +1,13 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/badge';
+import { MapCardBase } from '@/components/ui/MapCardBase';
 import {
   Map,
   Trash2,
   RefreshCw,
   FolderOpen,
-  Calendar,
-  MapPin,
   Loader2,
   Plus,
   MapPinned
@@ -59,20 +56,16 @@ export default function SavedMapsPage() {
     router.push(`/map/view/${mapId}`);
   };
 
-  const handleDeleteMap = async (mapId: string) => {
-    const confirmMessage = isAdmin
-      ? 'Tem certeza que deseja DELETAR PERMANENTEMENTE este mapa?'
-      : 'Remover este mapa da sua coleção?';
-
-    if (!confirm(confirmMessage)) return;
+  const handleRemoveFromCollection = async (mapId: string) => {
+    if (!confirm('Remover este mapa da sua coleção?')) return;
 
     try {
       setDeletingId(mapId);
       const response = await apiClient.deleteMap(mapId);
-      toast.success(response.message || 'Mapa removido com sucesso');
+      toast.success(response.message || 'Mapa removido da coleção');
       loadMyMaps();
     } catch (error) {
-      console.error('Error deleting map:', error);
+      console.error('Error removing map:', error);
       toast.error('Erro ao remover mapa');
     } finally {
       setDeletingId(null);
@@ -98,100 +91,57 @@ export default function SavedMapsPage() {
     }
   };
 
-  const formatDate = (dateString: string) => {
-    try {
-      const date = new Date(dateString);
-      if (isNaN(date.getTime())) {
-        return 'Data inválida';
-      }
-      return new Intl.DateTimeFormat('pt-BR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      }).format(date);
-    } catch {
-      return 'Data inválida';
-    }
-  };
-
   const MapCard = ({ map }: { map: SavedMap }) => {
     return (
-      <Card key={map.id} className="hover:shadow-md transition-shadow">
-        <CardContent className="p-4">
-          {/* Route Info */}
-          <div className="mb-3">
-            <h3 className="text-base font-semibold text-gray-900 mb-1 truncate">
-              {map.origin} → {map.destination}
-            </h3>
-            <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
-              <span className="flex items-center gap-1">
-                <Calendar className="h-3 w-3" />
-                {formatDate(map.creation_date)}
-              </span>
-              <span className="flex items-center gap-1">
-                <MapPin className="h-3 w-3" />
-                {map.milestone_count} pontos
-              </span>
-              <Badge variant="secondary" className="bg-blue-100 text-blue-800 text-xs">
-                {map.total_length_km.toFixed(1)} km
-              </Badge>
-            </div>
-          </div>
-
-          {/* Action Buttons */}
-          <div className="flex gap-2">
-            <Button
-              onClick={() => handleOpenMap(map.id)}
-              className="flex-1"
-              size="sm"
-            >
-              <FolderOpen className="h-4 w-4 mr-1" />
-              Abrir
-            </Button>
-            <Button
-              onClick={() => handleViewOnMap(map.id)}
-              size="sm"
-              variant="outline"
-              className="px-3"
-              title="Ver rota no mapa"
-            >
-              <MapPinned className="h-4 w-4" />
-            </Button>
-            {isAdmin && (
-              <Button
-                onClick={() => handleRegenerateMap(map.id)}
-                size="sm"
-                variant="outline"
-                disabled={regeneratingId === map.id}
-                className="px-3"
-                title="Regenerar mapa (Admin)"
-              >
-                {regeneratingId === map.id ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-4 w-4" />
-                )}
-              </Button>
+      <MapCardBase map={map}>
+        <Button
+          onClick={() => handleOpenMap(map.id)}
+          className="flex-1"
+          size="sm"
+        >
+          <FolderOpen className="h-4 w-4 mr-1" />
+          Abrir
+        </Button>
+        <Button
+          onClick={() => handleViewOnMap(map.id)}
+          size="sm"
+          variant="outline"
+          className="px-3"
+          title="Ver rota no mapa"
+        >
+          <MapPinned className="h-4 w-4" />
+        </Button>
+        {isAdmin && (
+          <Button
+            onClick={() => handleRegenerateMap(map.id)}
+            size="sm"
+            variant="outline"
+            disabled={regeneratingId === map.id}
+            className="px-3"
+            title="Regenerar mapa (Admin)"
+          >
+            {regeneratingId === map.id ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
             )}
-            <Button
-              onClick={() => handleDeleteMap(map.id)}
-              size="sm"
-              variant="destructive"
-              disabled={deletingId === map.id}
-              className="px-3"
-              title={isAdmin ? "Deletar permanentemente" : "Remover da coleção"}
-            >
-              {deletingId === map.id ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Trash2 className="h-4 w-4" />
-              )}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+          </Button>
+        )}
+        <Button
+          onClick={() => handleRemoveFromCollection(map.id)}
+          size="sm"
+          variant="destructive"
+          disabled={deletingId === map.id}
+          className="px-3"
+          title="Remover da coleção"
+        >
+          {deletingId === map.id ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Trash2 className="h-4 w-4" />
+          )}
+        </Button>
+      </MapCardBase>
     );
   };
 

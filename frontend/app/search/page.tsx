@@ -6,7 +6,7 @@ import { SearchForm } from '@/components/forms/SearchForm';
 import { useAsyncRouteSearch } from '@/hooks/useAsyncRouteSearch';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/badge';
+import { MapCardBase } from '@/components/ui/MapCardBase';
 import {
   ArrowLeft,
   Map,
@@ -14,7 +14,8 @@ import {
   Plus,
   Loader2,
   Clock,
-  ChevronRight
+  ChevronRight,
+  MapPinned
 } from 'lucide-react';
 import Link from 'next/link';
 import { apiClient, SavedMap } from '@/lib/api';
@@ -38,6 +39,7 @@ function SearchPageContent() {
 
   // State for suggested maps
   const [suggestedMaps, setSuggestedMaps] = useState<SavedMap[]>([]);
+  const [myMapIds, setMyMapIds] = useState<Set<string>>(new Set());
   const [loadingMaps, setLoadingMaps] = useState(true);
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number } | null>(null);
   const [adoptingId, setAdoptingId] = useState<string | null>(null);
@@ -61,22 +63,38 @@ function SearchPageContent() {
     }
   }, []);
 
-  // Load suggested maps
+  // Load user's maps to know which ones they already have
+  const loadMyMaps = useCallback(async () => {
+    try {
+      const maps = await apiClient.listMaps();
+      setMyMapIds(new Set(maps.map(m => m.id)));
+    } catch (error) {
+      console.error('Error loading my maps:', error);
+    }
+  }, []);
+
+  // Load suggested maps (excluding user's own maps)
   const loadSuggestedMaps = useCallback(async () => {
     try {
       setLoadingMaps(true);
       const maps = await apiClient.getSuggestedMaps({
-        limit: 10,
+        limit: 20, // Get more to account for filtering
         lat: userLocation?.lat,
         lon: userLocation?.lon
       });
-      setSuggestedMaps(maps);
+      // Filter out maps the user already has
+      const filteredMaps = maps.filter(map => !myMapIds.has(map.id));
+      setSuggestedMaps(filteredMaps.slice(0, 9)); // Show max 9
     } catch (error) {
       console.error('Error loading suggested maps:', error);
     } finally {
       setLoadingMaps(false);
     }
-  }, [userLocation]);
+  }, [userLocation, myMapIds]);
+
+  useEffect(() => {
+    loadMyMaps();
+  }, [loadMyMaps]);
 
   useEffect(() => {
     loadSuggestedMaps();
@@ -115,48 +133,42 @@ function SearchPageContent() {
     }
   };
 
+  const handleViewOnMap = (mapId: string) => {
+    router.push(`/map/view/${mapId}`);
+  };
+
   const MapCard = ({ map }: { map: SavedMap }) => (
-    <button
-      type="button"
-      onClick={() => handleAdoptMap(map.id)}
-      className="w-full text-left"
-    >
-      <Card className="hover:shadow-md transition-shadow cursor-pointer group">
-        <CardContent className="p-3">
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex-1 min-w-0">
-              <h3 className="text-sm font-medium text-gray-900 truncate group-hover:text-blue-600">
-                {map.origin}
-              </h3>
-              <div className="flex items-center gap-1 text-xs text-gray-500">
-                <span>→</span>
-                <span className="truncate">{map.destination}</span>
-              </div>
-              <div className="flex items-center gap-2 mt-1">
-                <Badge variant="secondary" className="bg-blue-50 text-blue-700 text-xs px-1.5 py-0">
-                  {map.total_length_km.toFixed(0)} km
-                </Badge>
-                <span className="text-xs text-gray-400">
-                  {map.milestone_count} pontos
-                </span>
-              </div>
-            </div>
-            {adoptingId === map.id ? (
-              <Loader2 className="h-5 w-5 text-blue-600 animate-spin flex-shrink-0" />
-            ) : (
-              <Plus className="h-5 w-5 text-gray-400 group-hover:text-blue-600 flex-shrink-0" />
-            )}
-          </div>
-        </CardContent>
-      </Card>
-    </button>
+    <MapCardBase map={map}>
+      <Button
+        onClick={() => handleAdoptMap(map.id)}
+        className="flex-1"
+        size="sm"
+        disabled={adoptingId === map.id}
+      >
+        {adoptingId === map.id ? (
+          <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+        ) : (
+          <Plus className="h-4 w-4 mr-1" />
+        )}
+        Adicionar
+      </Button>
+      <Button
+        onClick={() => handleViewOnMap(map.id)}
+        size="sm"
+        variant="outline"
+        className="px-3"
+        title="Ver rota no mapa"
+      >
+        <MapPinned className="h-4 w-4" />
+      </Button>
+    </MapCardBase>
   );
 
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="sticky top-0 z-20 bg-white border-b border-gray-200 shadow-sm">
-        <div className="max-w-4xl mx-auto px-4 py-4">
+        <div className="max-w-6xl mx-auto px-4 py-4">
           <div className="flex items-center gap-3">
             <Link href="/" className="text-blue-600 hover:text-blue-700">
               <ArrowLeft className="h-5 w-5" />
@@ -169,7 +181,7 @@ function SearchPageContent() {
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-4 py-6">
+      <main className="max-w-6xl mx-auto px-4 py-6">
         {/* Suggested Maps Section */}
         <section className="mb-8">
           <div className="flex items-center justify-between mb-4">
@@ -194,12 +206,11 @@ function SearchPageContent() {
             <Card className="bg-gray-50 border-dashed">
               <CardContent className="p-6 text-center">
                 <Map className="h-10 w-10 text-gray-300 mx-auto mb-2" />
-                <p className="text-sm text-gray-500">Nenhum mapa disponível ainda.</p>
-                <p className="text-xs text-gray-400 mt-1">Seja o primeiro a criar um mapa!</p>
+                <p className="text-sm text-gray-500">Nenhum mapa que você não tenha em sua coleção.</p>
               </CardContent>
             </Card>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {suggestedMaps.slice(0, 9).map((map) => (
                 <MapCard key={map.id} map={map} />
               ))}
@@ -249,10 +260,9 @@ function SearchPageContent() {
                 <div className="mt-4 p-3 bg-amber-50 rounded-lg border border-amber-100">
                   <div className="flex items-start gap-2">
                     <Clock className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
-                    <div className="text-xs text-amber-700">
-                      <p className="font-medium">Atenção:</p>
-                      <p>A criação de um novo mapa pode demorar alguns minutos dependendo das distâncias envolvidas.</p>
-                    </div>
+                    <p className="text-xs text-amber-700">
+                      <span className="font-medium">Atenção:</span> A criação de um novo mapa pode demorar alguns minutos dependendo das distâncias envolvidas.
+                    </p>
                   </div>
                 </div>
               </CardContent>
