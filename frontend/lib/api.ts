@@ -1,5 +1,5 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
-import { getSession } from 'next-auth/react';
+import { getSession, signOut } from 'next-auth/react';
 import { RouteSearchRequest, RouteSearchResponse, AsyncOperation, ExportRouteData } from './types';
 
 // Helper to wait for session with retry
@@ -28,6 +28,7 @@ class APIClient {
   private client: AxiosInstance;
   private cachedToken: string | null = null;
   private tokenExpiry: number = 0;
+  private isSigningOut: boolean = false;
 
   constructor() {
     this.client = axios.create({
@@ -96,9 +97,12 @@ class APIClient {
           this.cachedToken = null;
           this.tokenExpiry = 0;
 
-          // Redirect to login on auth error
-          if (typeof window !== 'undefined') {
-            window.location.href = '/login';
+          // Force signOut to clear NextAuth session and redirect to login
+          // This ensures the expired token is cleared and user must re-authenticate
+          // Use flag to prevent multiple signOut calls from parallel requests
+          if (typeof window !== 'undefined' && !this.isSigningOut) {
+            this.isSigningOut = true;
+            signOut({ callbackUrl: '/login' });
           }
           throw new Error('Sessão expirada. Faça login novamente.');
         }
