@@ -13,7 +13,8 @@ import {
   Loader2,
   ArrowLeft,
   Calendar,
-  Check
+  Check,
+  MapPinned
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
@@ -78,6 +79,10 @@ export default function AvailableMapsPage() {
 
   const handleOpenMap = (mapId: string) => {
     router.push(`/map?mapId=${mapId}`);
+  };
+
+  const handleViewOnMap = (mapId: string) => {
+    router.push(`/map/view/${mapId}`);
   };
 
   const handleAdoptMap = async (mapId: string) => {
@@ -147,25 +152,45 @@ export default function AvailableMapsPage() {
                 >
                   Abrir Mapa
                 </Button>
+                <Button
+                  onClick={() => handleViewOnMap(map.id)}
+                  size="sm"
+                  variant="outline"
+                  className="px-3"
+                  title="Ver rota no mapa"
+                >
+                  <MapPinned className="h-4 w-4" />
+                </Button>
                 <Badge variant="outline" className="flex items-center gap-1 text-green-700 border-green-300">
                   <Check className="h-3 w-3" />
                   Na coleção
                 </Badge>
               </>
             ) : (
-              <Button
-                onClick={() => handleAdoptMap(map.id)}
-                className="flex-1"
-                size="sm"
-                disabled={adoptingId === map.id}
-              >
-                {adoptingId === map.id ? (
-                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                ) : (
-                  <Plus className="h-4 w-4 mr-1" />
-                )}
-                Adicionar à Coleção
-              </Button>
+              <>
+                <Button
+                  onClick={() => handleAdoptMap(map.id)}
+                  className="flex-1"
+                  size="sm"
+                  disabled={adoptingId === map.id}
+                >
+                  {adoptingId === map.id ? (
+                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  ) : (
+                    <Plus className="h-4 w-4 mr-1" />
+                  )}
+                  Adicionar à Coleção
+                </Button>
+                <Button
+                  onClick={() => handleViewOnMap(map.id)}
+                  size="sm"
+                  variant="outline"
+                  className="px-3"
+                  title="Ver rota no mapa"
+                >
+                  <MapPinned className="h-4 w-4" />
+                </Button>
+              </>
             )}
           </div>
         </CardContent>

@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Button, Card, CardContent } from '@/components/ui';
-import { MapPin, Bug, Loader2, Menu, Download, X, Fuel, Utensils, Bed, Tent, Hospital, Ticket, Building2, Home, FileText } from 'lucide-react';
+import { MapPin, Bug, Loader2, Menu, Download, X, Fuel, Utensils, Bed, Tent, Hospital, Ticket, Building2, Home, FileText, MapPinned } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { useSession } from 'next-auth/react';
@@ -506,6 +506,17 @@ function MapPageContent() {
               <span className="text-sm font-medium text-zinc-900 bg-zinc-100 px-3 py-1 rounded-full whitespace-nowrap">
                 {data.total_distance_km ? data.total_distance_km.toFixed(1) : '0.0'} km
               </span>
+              {/* View Route on Map Button */}
+              {mapId && (
+                <button
+                  onClick={() => router.push(`/map/view/${mapId}`)}
+                  className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900 px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors border border-gray-200"
+                  title="Ver rota no mapa"
+                >
+                  <MapPinned className="h-4 w-4" />
+                  <span className="hidden sm:inline">Mapa</span>
+                </button>
+              )}
               {/* PDF Export Button */}
               <button
                 onClick={() => downloadPDF()}

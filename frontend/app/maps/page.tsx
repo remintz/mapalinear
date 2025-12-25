@@ -12,7 +12,8 @@ import {
   Calendar,
   MapPin,
   Loader2,
-  Plus
+  Plus,
+  MapPinned
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
@@ -52,6 +53,10 @@ export default function SavedMapsPage() {
 
   const handleOpenMap = (mapId: string) => {
     router.push(`/map?mapId=${mapId}`);
+  };
+
+  const handleViewOnMap = (mapId: string) => {
+    router.push(`/map/view/${mapId}`);
   };
 
   const handleDeleteMap = async (mapId: string) => {
@@ -144,6 +149,15 @@ export default function SavedMapsPage() {
             >
               <FolderOpen className="h-4 w-4 mr-1" />
               Abrir
+            </Button>
+            <Button
+              onClick={() => handleViewOnMap(map.id)}
+              size="sm"
+              variant="outline"
+              className="px-3"
+              title="Ver rota no mapa"
+            >
+              <MapPinned className="h-4 w-4" />
             </Button>
             {isAdmin && (
               <Button
