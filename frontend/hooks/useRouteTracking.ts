@@ -11,8 +11,10 @@ export interface RouteTrackingResult {
   distanceTraveled: number | null;
   // The nearest point on the route
   nearestPoint: Coordinates | null;
-  // Index of the next POI ahead (or null if none or not on route)
+  // Index of the next POI ahead in the SORTED list (or null if none or not on route)
   nextPOIIndex: number | null;
+  // The next POI ahead (or null if none or not on route)
+  nextPOI: (POI | Milestone) | null;
   // Function to check if a POI has been passed
   isPOIPassed: (poi: POI | Milestone) => boolean;
 }
@@ -105,12 +107,19 @@ export function useRouteTracking({
     };
   }, [nearestResult]);
 
+  // Get the actual next POI from sorted list
+  const nextPOI = useMemo(() => {
+    if (nextPOIIndex === null) return null;
+    return sortedPois[nextPOIIndex] || null;
+  }, [nextPOIIndex, sortedPois]);
+
   return {
     isOnRoute: nearestResult?.isOnRoute ?? false,
     distanceToRoute: nearestResult?.distanceToRoute ?? null,
     distanceTraveled: nearestResult?.isOnRoute ? nearestResult.distanceFromOrigin : null,
     nearestPoint: nearestResult?.nearestPoint ?? null,
     nextPOIIndex,
+    nextPOI,
     isPOIPassed,
   };
 }
