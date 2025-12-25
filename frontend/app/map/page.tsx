@@ -773,6 +773,7 @@ function MapPageContent() {
           mapId={mapId}
           isOpen={osmMapOpen}
           onClose={() => setOsmMapOpen(false)}
+          filteredPOIs={filteredPOIs}
         />
       )}
     </div>

@@ -2,11 +2,10 @@
 
 import React, { useEffect, useState, useMemo } from 'react';
 import dynamic from 'next/dynamic';
-import { X, Loader2, MapPin, Route } from 'lucide-react';
+import { X, Loader2, MapPin, Route, Calendar } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/badge';
 import { apiClient } from '@/lib/api';
-import { RouteSearchResponse } from '@/lib/types';
+import { RouteSearchResponse, POI, Milestone } from '@/lib/types';
 import { useGeolocation } from '@/hooks/useGeolocation';
 
 // Support both coordinate formats from API
@@ -31,9 +30,10 @@ interface RouteMapModalProps {
   mapId: string;
   isOpen: boolean;
   onClose: () => void;
+  filteredPOIs?: (POI | Milestone)[];
 }
 
-export default function RouteMapModal({ mapId, isOpen, onClose }: RouteMapModalProps) {
+export default function RouteMapModal({ mapId, isOpen, onClose, filteredPOIs }: RouteMapModalProps) {
   const [routeData, setRouteData] = useState<RouteSearchResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -125,12 +125,13 @@ export default function RouteMapModal({ mapId, isOpen, onClose }: RouteMapModalP
                       </span>
                       <span className="flex items-center gap-1">
                         <MapPin className="h-3 w-3" />
-                        {routeCoordinates.length} pontos
+                        {filteredPOIs?.length ?? 0} POIs
                       </span>
-                      {routeData.segments && (
-                        <Badge variant="secondary" className="text-xs">
-                          {routeData.segments.length} segmentos
-                        </Badge>
+                      {(routeData.created_at || routeData.creation_date) && (
+                        <span className="flex items-center gap-1">
+                          <Calendar className="h-3 w-3" />
+                          {new Date(routeData.created_at || routeData.creation_date || '').toLocaleDateString('pt-BR')}
+                        </span>
                       )}
                     </div>
                   </>
@@ -173,6 +174,7 @@ export default function RouteMapModal({ mapId, isOpen, onClose }: RouteMapModalP
               origin={routeData.origin}
               destination={routeData.destination}
               userPosition={userPosition ? { lat: userPosition.lat, lon: userPosition.lon } : undefined}
+              pois={filteredPOIs}
             />
           ) : (
             <div className="h-full flex items-center justify-center bg-gray-100">

@@ -4,6 +4,7 @@ import React, { useEffect, useMemo } from 'react';
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { POI, Milestone } from '@/lib/types';
 
 // Support both coordinate formats from API
 interface CoordinatePoint {
@@ -23,7 +24,50 @@ interface RouteMapViewProps {
   origin: string;
   destination: string;
   userPosition?: UserPosition;
+  pois?: (POI | Milestone)[];
 }
+
+// POI type configuration with colors and icons
+const POI_CONFIG: Record<string, { color: string; icon: string; label: string }> = {
+  gas_station: { color: '#f59e0b', icon: '⛽', label: 'Posto' },
+  restaurant: { color: '#ef4444', icon: '🍽️', label: 'Restaurante' },
+  fast_food: { color: '#ef4444', icon: '🍔', label: 'Fast Food' },
+  cafe: { color: '#ef4444', icon: '☕', label: 'Cafe' },
+  hotel: { color: '#8b5cf6', icon: '🏨', label: 'Hotel' },
+  camping: { color: '#22c55e', icon: '⛺', label: 'Camping' },
+  hospital: { color: '#dc2626', icon: '🏥', label: 'Hospital' },
+  toll_booth: { color: '#6b7280', icon: '💰', label: 'Pedagio' },
+  city: { color: '#3b82f6', icon: '🏙️', label: 'Cidade' },
+  town: { color: '#60a5fa', icon: '🏘️', label: 'Vila' },
+  village: { color: '#93c5fd', icon: '🏡', label: 'Povoado' },
+  rest_area: { color: '#14b8a6', icon: '🅿️', label: 'Area de descanso' },
+  police: { color: '#1d4ed8', icon: '👮', label: 'Policia' },
+  default: { color: '#6b7280', icon: '📍', label: 'POI' },
+};
+
+// Create POI icon based on type
+const createPOIIcon = (type: string) => {
+  const config = POI_CONFIG[type] || POI_CONFIG.default;
+
+  return L.divIcon({
+    html: `<div style="
+      background-color: ${config.color};
+      color: white;
+      border: 2px solid white;
+      border-radius: 50%;
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+    ">${config.icon}</div>`,
+    className: '',
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+  });
+};
 
 // Helper to extract lat/lon from either format
 function getLat(coord: CoordinatePoint): number {
@@ -142,7 +186,7 @@ const createUserIcon = () => {
   });
 };
 
-export default function RouteMapView({ coordinates, origin, destination, userPosition }: RouteMapViewProps) {
+export default function RouteMapView({ coordinates, origin, destination, userPosition, pois }: RouteMapViewProps) {
   // Convert coordinates to Leaflet format [lat, lng]
   const routePositions = useMemo((): [number, number][] => {
     return coordinates
@@ -224,6 +268,42 @@ export default function RouteMapView({ coordinates, origin, destination, userPos
             </Popup>
           </Marker>
         )}
+
+        {/* POI markers */}
+        {pois && pois.map((poi, index) => {
+          const coords = poi.coordinates as CoordinatePoint | undefined;
+          const lat = coords?.lat ?? coords?.latitude;
+          const lon = coords?.lon ?? coords?.longitude;
+          if (!lat || !lon) return null;
+
+          const config = POI_CONFIG[poi.type] || POI_CONFIG.default;
+          const poiIcon = createPOIIcon(poi.type);
+
+          return (
+            <Marker
+              key={poi.id || `poi-${index}`}
+              position={[lat, lon]}
+              icon={poiIcon}
+            >
+              <Popup>
+                <div className="text-sm min-w-[150px]">
+                  <p className="font-bold" style={{ color: config.color }}>
+                    {config.icon} {poi.name || config.label}
+                  </p>
+                  <p className="text-gray-600 text-xs mt-1">
+                    {config.label} - {poi.distance_from_origin_km?.toFixed(1)} km
+                  </p>
+                  {poi.brand && (
+                    <p className="text-gray-500 text-xs">{poi.brand}</p>
+                  )}
+                  {poi.city && (
+                    <p className="text-gray-500 text-xs">{poi.city}</p>
+                  )}
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
       </MapContainer>
     </div>
   );
