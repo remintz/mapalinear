@@ -139,7 +139,6 @@ export default function Home() {
                 <ul className="text-sm text-blue-700 space-y-2">
                   <li>✓ Salvamento automático</li>
                   <li>✓ Abertura instantânea</li>
-                  <li>✓ Regeneração com dados atualizados</li>
                   <li>✓ Gerenciamento simplificado</li>
                 </ul>
               </CardContent>
@@ -168,7 +167,7 @@ export default function Home() {
         </Card>
 
         {/* Footer Info */}
-        <div className="text-center mt-12 text-gray-600 text-sm">
+        <div className="text-center mt-12 text-gray-500 text-sm space-y-1">
           <p>
             OraPOIS utiliza dados do{' '}
             <a href="https://www.openstreetmap.org" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
@@ -176,6 +175,7 @@ export default function Home() {
             </a>
             {' '}© OpenStreetMap contributors
           </p>
+          <p className="text-xs text-gray-400">© MTZ</p>
         </div>
       </div>
     </div>
