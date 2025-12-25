@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/Input';
+import { CityCombobox } from '@/components/ui/CityCombobox';
 import {
   Globe,
   Search,
@@ -233,21 +233,17 @@ export default function AvailableMapsPage() {
         <div className="max-w-6xl mx-auto px-4">
           <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-3">
             <div className="flex-1">
-              <Input
-                type="text"
+              <CityCombobox
                 placeholder="Filtrar por origem..."
                 value={searchOrigin}
-                onChange={(e) => setSearchOrigin(e.target.value)}
-                className="w-full"
+                onChange={setSearchOrigin}
               />
             </div>
             <div className="flex-1">
-              <Input
-                type="text"
+              <CityCombobox
                 placeholder="Filtrar por destino..."
                 value={searchDestination}
-                onChange={(e) => setSearchDestination(e.target.value)}
-                className="w-full"
+                onChange={setSearchDestination}
               />
             </div>
             <div className="flex gap-2">
