@@ -20,9 +20,29 @@ The project uses a modern full-stack architecture with multi-provider geographic
 Main components:
 - `api/`: FastAPI backend with models, routers, services, and middleware
 - `api/providers/`: Multi-provider geographic data abstraction layer (see PRD)
+- `api/database/`: SQLAlchemy 2.0 async models and repositories (PostgreSQL)
 - `frontend/`: NextJS PWA with offline capabilities, mobile-first design, and travel-focused features
 - `docs/`: Technical documentation including PRDs
 - Asynchronous operations: Long-running tasks (data searches, map generation) are handled asynchronously with progress tracking
+
+### Authentication System
+- **Google OAuth**: Users authenticate via Google ID token
+- **JWT tokens**: Backend issues JWT for session management
+- **Admin impersonation**: Admins can impersonate users for support
+- Key files: `api/routers/auth_router.py`, `api/services/auth_service.py`, `api/middleware/auth.py`
+
+### Database Migrations (Alembic)
+```bash
+# Create a new migration
+alembic revision --autogenerate -m "description"
+
+# Apply migrations
+alembic upgrade head
+
+# Rollback one version
+alembic downgrade -1
+```
+Migrations are in `api/database/migrations/versions/`
 
 ## Common Development Commands
 
@@ -495,6 +515,10 @@ Long-running operations use async tasks stored in PostgreSQL:
 - **Multi-Provider Refactoring**: `docs/PRD-MultiProvider-GeoAPI-Refactoring.md`
   - Complete specification for multi-provider geographic data architecture
   - Defines interfaces, cache system, and implementation roadmap
+  - Status: APPROVED - Ready for implementation
+- **User Analytics**: `docs/PRD-User-Analytics.md`
+  - Audit logging and usage statistics system
+  - Tracks user behavior, device types, feature usage
   - Status: APPROVED - Ready for implementation
 
 ### Development Guidelines for Multi-Provider System
