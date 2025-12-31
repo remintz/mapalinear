@@ -166,15 +166,9 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
       let poiSearchRadius = cachedPoiSearchRadius;
       if (poiSearchRadius === null) {
         try {
-          const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
-          const settingsResponse = await fetch(`${apiUrl}/settings`);
-          if (settingsResponse.ok) {
-            const settings = await settingsResponse.json();
-            poiSearchRadius = parseInt(settings.settings?.poi_search_radius_km || '5', 10);
-            cachedPoiSearchRadius = poiSearchRadius;
-          } else {
-            poiSearchRadius = 5; // Default fallback
-          }
+          const settingsData = await apiClient.getSettings();
+          poiSearchRadius = parseInt(settingsData.settings?.poi_search_radius_km || '5', 10);
+          cachedPoiSearchRadius = poiSearchRadius;
         } catch {
           poiSearchRadius = 5; // Default fallback on error
         }

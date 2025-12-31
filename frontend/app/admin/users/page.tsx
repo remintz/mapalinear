@@ -19,7 +19,8 @@ import {
   Loader2,
   Eye,
 } from "lucide-react";
-import { AdminUser, AdminUserListResponse } from "@/lib/types";
+import { AdminUser } from "@/lib/types";
+import { apiClient } from "@/lib/api";
 import { useImpersonation } from "@/hooks/useImpersonation";
 
 export default function AdminUsersPage() {
@@ -50,27 +51,15 @@ export default function AdminUsersPage() {
       setLoading(true);
       setError(null);
 
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api"}/admin/users`,
-        {
-          headers: {
-            Authorization: `Bearer ${session?.accessToken}`,
-          },
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error("Falha ao carregar usuários");
-      }
-
-      const data: AdminUserListResponse = await response.json();
+      const data = await apiClient.getAdminUsers();
       setUsers(data.users);
     } catch (err) {
+      // apiClient handles 401 automatically and redirects to login
       setError(err instanceof Error ? err.message : "Erro desconhecido");
     } finally {
       setLoading(false);
     }
-  }, [session?.accessToken]);
+  }, []);
 
   useEffect(() => {
     if (status === "loading") return;
@@ -92,27 +81,12 @@ export default function AdminUsersPage() {
     try {
       setUpdatingUser(userId);
 
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api"}/admin/users/${userId}/admin`,
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session?.accessToken}`,
-          },
-          body: JSON.stringify({ is_admin: !currentIsAdmin }),
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error("Falha ao atualizar status de admin");
-      }
-
-      const updatedUser: AdminUser = await response.json();
+      const updatedUser = await apiClient.toggleUserAdmin(userId, !currentIsAdmin);
       setUsers((prev) =>
         prev.map((u) => (u.id === userId ? updatedUser : u))
       );
     } catch (err) {
+      // apiClient handles 401 automatically and redirects to login
       alert(err instanceof Error ? err.message : "Erro ao atualizar");
     } finally {
       setUpdatingUser(null);

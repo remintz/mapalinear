@@ -1,6 +1,18 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import { getSession, signOut } from 'next-auth/react';
-import { RouteSearchRequest, RouteSearchResponse, AsyncOperation, ExportRouteData } from './types';
+import {
+  RouteSearchRequest,
+  RouteSearchResponse,
+  AsyncOperation,
+  ExportRouteData,
+  AdminUser,
+  AdminUserListResponse,
+  ImpersonationStatusResponse,
+  ImpersonationResponse,
+  StopImpersonationResponse,
+  AdminMapListResponse,
+  AdminMapDetail,
+} from './types';
 
 // Helper to wait for session with retry
 async function getSessionWithRetry(maxRetries = 3, delayMs = 500): Promise<string | null> {
@@ -413,6 +425,116 @@ class APIClient {
     const url = `${baseUrl}/reports/${reportId}/attachments/${attachmentId}`;
     return token ? `${url}?token=${encodeURIComponent(token)}` : url;
   }
+
+  // Admin Users functions
+
+  /**
+   * List all users (admin).
+   */
+  async getAdminUsers(): Promise<AdminUserListResponse> {
+    const { data } = await this.client.get<AdminUserListResponse>('/admin/users');
+    return data;
+  }
+
+  /**
+   * Toggle admin status for a user (admin).
+   */
+  async toggleUserAdmin(userId: string, isAdmin: boolean): Promise<AdminUser> {
+    const { data } = await this.client.patch<AdminUser>(`/admin/users/${userId}/admin`, {
+      is_admin: isAdmin,
+    });
+    return data;
+  }
+
+  // Impersonation functions
+
+  /**
+   * Get current impersonation status (admin).
+   */
+  async getImpersonationStatus(): Promise<ImpersonationStatusResponse> {
+    const { data } = await this.client.get<ImpersonationStatusResponse>('/admin/impersonation-status');
+    return data;
+  }
+
+  /**
+   * Start impersonating a user (admin).
+   */
+  async startImpersonation(userId: string): Promise<ImpersonationResponse> {
+    const { data } = await this.client.post<ImpersonationResponse>(`/admin/impersonate/${userId}`);
+    return data;
+  }
+
+  /**
+   * Stop impersonating (admin).
+   */
+  async stopImpersonation(): Promise<StopImpersonationResponse> {
+    const { data } = await this.client.post<StopImpersonationResponse>('/admin/stop-impersonation');
+    return data;
+  }
+
+  // System Settings functions
+
+  /**
+   * Get system settings.
+   */
+  async getSettings(): Promise<{ settings: SystemSettings }> {
+    const { data } = await this.client.get<{ settings: SystemSettings }>('/settings');
+    return data;
+  }
+
+  /**
+   * Update system settings (admin).
+   */
+  async updateSettings(settings: SystemSettings): Promise<{ settings: SystemSettings }> {
+    const { data } = await this.client.put<{ settings: SystemSettings }>('/settings', { settings });
+    return data;
+  }
+
+  // Database Maintenance functions (admin)
+
+  /**
+   * Get database maintenance stats (admin).
+   */
+  async getMaintenanceStats(): Promise<DatabaseStats> {
+    const { data } = await this.client.get<DatabaseStats>('/admin/maintenance/stats');
+    return data;
+  }
+
+  /**
+   * Run database maintenance (admin).
+   */
+  async runMaintenance(dryRun: boolean): Promise<MaintenanceResult> {
+    const { data } = await this.client.post<MaintenanceResult>(`/admin/maintenance/run?dry_run=${dryRun}`);
+    return data;
+  }
+
+  // Admin Maps functions
+
+  /**
+   * Get all maps (admin).
+   */
+  async getAdminMaps(): Promise<AdminMapListResponse> {
+    const { data } = await this.client.get<AdminMapListResponse>('/admin/maps');
+    return data;
+  }
+
+  /**
+   * Get map details (admin).
+   */
+  async getAdminMapDetails(mapId: string): Promise<AdminMapDetail> {
+    const { data } = await this.client.get<AdminMapDetail>(`/admin/maps/${mapId}`);
+    return data;
+  }
+
+  // Debug functions
+
+  /**
+   * Get debug segments data.
+   */
+  async getDebugSegments(): Promise<DebugSegmentsData> {
+    const { data } = await this.client.get<DebugSegmentsData>('/operations/debug/segments');
+    return data;
+  }
 }
 
 // Types for saved maps
@@ -491,6 +613,57 @@ export interface ProblemReportListResponse {
   reports: ProblemReport[];
   total: number;
   counts_by_status: Record<string, number>;
+}
+
+// Types for system settings
+export interface SystemSettings {
+  poi_search_radius_km: string;
+  duplicate_map_tolerance_km: string;
+}
+
+// Types for database maintenance
+export interface DatabaseStats {
+  total_pois: number;
+  referenced_pois: number;
+  unreferenced_pois: number;
+  total_maps: number;
+  total_map_pois: number;
+  pending_operations: number;
+  stale_operations: number;
+}
+
+export interface MaintenanceResult {
+  orphan_pois_found: number;
+  orphan_pois_deleted: number;
+  is_referenced_fixed: number;
+  stale_operations_cleaned: number;
+  execution_time_ms: number;
+  dry_run: boolean;
+}
+
+// Types for debug segments
+export interface DebugSegment {
+  id: string;
+  start_distance_km: number;
+  end_distance_km: number;
+  length_km: number;
+  name: string;
+  start_coordinates: {
+    latitude: number;
+    longitude: number;
+  };
+  end_coordinates: {
+    latitude: number;
+    longitude: number;
+  };
+}
+
+export interface DebugSegmentsData {
+  origin: string;
+  destination: string;
+  total_distance_km: number;
+  total_segments: number;
+  segments: DebugSegment[];
 }
 
 export const apiClient = new APIClient();

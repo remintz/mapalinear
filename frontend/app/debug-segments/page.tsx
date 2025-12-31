@@ -6,6 +6,7 @@ import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import dynamic from 'next/dynamic';
+import { apiClient, DebugSegmentsData } from '@/lib/api';
 
 // Importar o mapa dinamicamente para evitar SSR issues
 const SegmentsMap = dynamic(() => import('./SegmentsMap'), {
@@ -13,62 +14,21 @@ const SegmentsMap = dynamic(() => import('./SegmentsMap'), {
   loading: () => <div className="h-[600px] bg-gray-100 animate-pulse rounded-lg flex items-center justify-center">Carregando mapa...</div>
 });
 
-interface Segment {
-  id: string;
-  start_distance_km: number;
-  end_distance_km: number;
-  length_km: number;
-  name: string;
-  start_coordinates: {
-    latitude: number;
-    longitude: number;
-  };
-  end_coordinates: {
-    latitude: number;
-    longitude: number;
-  };
-}
-
-interface DebugData {
-  origin: string;
-  destination: string;
-  total_distance_km: number;
-  total_segments: number;
-  segments: Segment[];
-}
-
 export default function DebugSegmentsPage() {
   const [isLoading, setIsLoading] = useState(true);
-  const [debugData, setDebugData] = useState<DebugData | null>(null);
+  const [debugData, setDebugData] = useState<DebugSegmentsData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [API_URL, setAPI_URL] = useState<string | null>(null);
-
-  // Detect API URL on client side - always use auto-detection
-  useEffect(() => {
-    const protocol = window.location.protocol;
-    const hostname = window.location.hostname;
-    const detectedUrl = `${protocol}//${hostname}:8001/api`;
-    setAPI_URL(detectedUrl);
-  }, []);
 
   useEffect(() => {
-    if (!API_URL) return; // Wait for API_URL to be detected
-
     const loadSegments = async () => {
       setIsLoading(true);
       setError(null);
 
       try {
-        const response = await fetch(`${API_URL}/operations/debug/segments`);
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.detail || 'Erro ao buscar segmentos');
-        }
-
-        const data = await response.json();
+        const data = await apiClient.getDebugSegments();
         setDebugData(data);
       } catch (error) {
+        // apiClient handles 401 automatically and redirects to login
         console.error('Erro:', error);
         const errorMessage = error instanceof Error ? error.message : 'Erro ao buscar segmentos';
         setError(errorMessage);
@@ -79,7 +39,7 @@ export default function DebugSegmentsPage() {
     };
 
     loadSegments();
-  }, [API_URL]);
+  }, []);
 
   return (
     <div className="container mx-auto px-4 py-8">

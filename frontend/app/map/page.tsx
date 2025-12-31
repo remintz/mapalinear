@@ -66,16 +66,6 @@ function MapPageContent() {
     new Set(['gas_station', 'restaurant', 'hotel', 'camping', 'hospital', 'toll_booth', 'city', 'town', 'village'])
   );
 
-  const [API_URL, setAPI_URL] = useState<string | null>(null);
-
-  // Detect API URL on client side - always use auto-detection
-  useEffect(() => {
-    const protocol = window.location.protocol;
-    const hostname = window.location.hostname;
-    const detectedUrl = `${protocol}//${hostname}:8001/api`;
-    setAPI_URL(detectedUrl);
-  }, []);
-
   // Load saved map if mapId is provided
   useEffect(() => {
     if (mapId) {
@@ -112,18 +102,12 @@ function MapPageContent() {
 
   // Monitor async operation if operationId is provided
   useEffect(() => {
-    if (operationId && !mapId && API_URL) {
+    if (operationId && !mapId) {
       let pollingInterval: NodeJS.Timeout | null = null;
 
       const pollOperationStatus = async () => {
         try {
-          const response = await fetch(`${API_URL}/operations/${operationId}`);
-
-          if (!response.ok) {
-            throw new Error('Erro ao verificar status da operação');
-          }
-
-          const operation = await response.json();
+          const operation = await apiClient.getOperationStatus(operationId);
 
           // Update progress
           if (operation.progress) {
@@ -165,6 +149,7 @@ function MapPageContent() {
             toast.error('Erro ao criar mapa');
           }
         } catch (error) {
+          // apiClient handles 401 automatically and redirects to login
           console.error('Error polling operation:', error);
           if (pollingInterval) {
             clearInterval(pollingInterval);
@@ -186,7 +171,7 @@ function MapPageContent() {
         }
       };
     }
-  }, [operationId, mapId, API_URL]);
+  }, [operationId, mapId, router]);
 
   // Prepare filter options with counts
   const getFilterOptions = () => {
@@ -281,33 +266,23 @@ function MapPageContent() {
   const downloadFile = async (format: 'geojson' | 'gpx', routeData: RouteSearchResponse) => {
     setIsExporting(true);
     try {
-      const response = await fetch(`${API_URL}/export/${format}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          origin: routeData.origin,
-          destination: routeData.destination,
-          total_distance_km: routeData.total_distance_km,
-          segments: routeData.segments || [],
-          pois: filteredPOIs
-        }),
-      });
+      const exportData = {
+        origin: routeData.origin,
+        destination: routeData.destination,
+        total_distance_km: routeData.total_distance_km,
+        segments: routeData.segments || [],
+        pois: filteredPOIs
+      };
 
-      if (!response.ok) {
-        throw new Error(`Erro ao exportar ${format.toUpperCase()}`);
-      }
+      const blob = format === 'geojson'
+        ? await apiClient.exportRouteAsGeoJSON(exportData)
+        : await apiClient.exportRouteAsGPX(exportData);
 
-      const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
 
-      const contentDisposition = response.headers.get('Content-Disposition');
-      const filename = contentDisposition
-        ? contentDisposition.split('filename=')[1]?.replace(/"/g, '')
-        : `rota_${routeData.origin.replace(/[^a-zA-Z0-9]/g, '_')}_${routeData.destination.replace(/[^a-zA-Z0-9]/g, '_')}.${format}`;
+      const filename = `rota_${routeData.origin.replace(/[^a-zA-Z0-9]/g, '_')}_${routeData.destination.replace(/[^a-zA-Z0-9]/g, '_')}.${format}`;
 
       a.download = filename;
       document.body.appendChild(a);
@@ -315,6 +290,7 @@ function MapPageContent() {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (error) {
+      // apiClient handles 401 automatically and redirects to login
       console.error('Erro ao exportar:', error);
       toast.error(`Erro ao exportar ${format.toUpperCase()}`);
     } finally {
@@ -333,23 +309,13 @@ function MapPageContent() {
     try {
       // Build types filter from active filters
       const typesParam = Array.from(activeFilters).join(',');
-      const url = `${API_URL}/maps/${mapId}/pdf${typesParam ? `?types=${typesParam}` : ''}`;
 
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error('Erro ao exportar PDF');
-      }
-
-      const blob = await response.blob();
+      const blob = await apiClient.exportMapToPDF(mapId, typesParam || undefined);
       const blobUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
 
-      const contentDisposition = response.headers.get('Content-Disposition');
-      const filename = contentDisposition
-        ? contentDisposition.split('filename=')[1]?.replace(/"/g, '')
-        : `pois_mapa.pdf`;
+      const filename = `pois_mapa.pdf`;
 
       a.download = filename;
       document.body.appendChild(a);
@@ -357,6 +323,7 @@ function MapPageContent() {
       window.URL.revokeObjectURL(blobUrl);
       document.body.removeChild(a);
     } catch (error) {
+      // apiClient handles 401 automatically and redirects to login
       console.error('Erro ao exportar PDF:', error);
       toast.error('Erro ao exportar PDF');
     } finally {
@@ -367,25 +334,15 @@ function MapPageContent() {
   // Open web tools function
   const openWebTool = async (tool: 'umap' | 'overpass', routeData: RouteSearchResponse) => {
     try {
-      const response = await fetch(`${API_URL}/export/web-urls`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          origin: routeData.origin,
-          destination: routeData.destination,
-          total_distance_km: routeData.total_distance_km,
-          segments: routeData.segments || [],
-          pois: routeData.pois || []
-        }),
-      });
+      const exportData = {
+        origin: routeData.origin,
+        destination: routeData.destination,
+        total_distance_km: routeData.total_distance_km,
+        segments: routeData.segments || [],
+        pois: routeData.pois || []
+      };
 
-      if (!response.ok) {
-        throw new Error('Erro ao gerar URLs');
-      }
-
-      const urlData = await response.json();
+      const urlData = await apiClient.getWebVisualizationURLs(exportData);
       const url = tool === 'umap' ? urlData.umap_url : urlData.overpass_turbo_url;
 
       window.open(url, '_blank');
@@ -396,6 +353,7 @@ function MapPageContent() {
         toast.info('Overpass Turbo aberto! Veja os pontos de interesse existentes na região da rota');
       }
     } catch (error) {
+      // apiClient handles 401 automatically and redirects to login
       console.error('Erro ao abrir ferramenta web:', error);
       toast.error('Erro ao abrir ferramenta web');
     }

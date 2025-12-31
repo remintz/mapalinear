@@ -2,12 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
-import {
-  AdminUser,
-  ImpersonationResponse,
-  ImpersonationStatusResponse,
-  StopImpersonationResponse,
-} from "@/lib/types";
+import { AdminUser } from "@/lib/types";
+import { apiClient } from "@/lib/api";
 
 interface UseImpersonationReturn {
   // State
@@ -37,8 +33,6 @@ export function useImpersonation(): UseImpersonationReturn {
   const [isStopping, setIsStopping] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api";
-
   // Check impersonation status from the server
   const checkStatus = useCallback(async () => {
     if (!session?.accessToken) {
@@ -47,22 +41,7 @@ export function useImpersonation(): UseImpersonationReturn {
     }
 
     try {
-      const response = await fetch(`${apiUrl}/admin/impersonation-status`, {
-        headers: {
-          Authorization: `Bearer ${session.accessToken}`,
-        },
-      });
-
-      if (!response.ok) {
-        // If user is not admin, they won't have access to this endpoint - that's fine
-        if (response.status === 403) {
-          setIsLoading(false);
-          return;
-        }
-        throw new Error("Falha ao verificar status de impersonation");
-      }
-
-      const data: ImpersonationStatusResponse = await response.json();
+      const data = await apiClient.getImpersonationStatus();
 
       setIsImpersonating(data.is_impersonating);
       if (data.is_impersonating) {
@@ -73,12 +52,14 @@ export function useImpersonation(): UseImpersonationReturn {
         setRealAdmin(null);
       }
     } catch (err) {
+      // apiClient handles 401 automatically and redirects to login
+      // For 403 (not admin), we just ignore
       console.error("Error checking impersonation status:", err);
       // Don't set error state for status check failures
     } finally {
       setIsLoading(false);
     }
-  }, [session?.accessToken, apiUrl]);
+  }, [session?.accessToken]);
 
   // Check status on mount and when session changes
   useEffect(() => {
@@ -96,21 +77,7 @@ export function useImpersonation(): UseImpersonationReturn {
       setError(null);
 
       try {
-        const response = await fetch(`${apiUrl}/admin/impersonate/${userId}`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session.accessToken}`,
-          },
-        });
-
-        if (!response.ok) {
-          const data = await response.json();
-          throw new Error(
-            data.message || data.detail || "Falha ao iniciar impersonation"
-          );
-        }
-
-        const data: ImpersonationResponse = await response.json();
+        const data = await apiClient.startImpersonation(userId);
 
         // Update state
         setIsImpersonating(true);
@@ -119,11 +86,12 @@ export function useImpersonation(): UseImpersonationReturn {
         // Reload the page to refresh all data with the impersonated user context
         window.location.href = "/";
       } catch (err) {
+        // apiClient handles 401 automatically and redirects to login
         setError(err instanceof Error ? err.message : "Erro desconhecido");
         setIsStarting(false);
       }
     },
-    [session?.accessToken, apiUrl]
+    [session?.accessToken]
   );
 
   const stopImpersonation = useCallback(async () => {
@@ -136,21 +104,7 @@ export function useImpersonation(): UseImpersonationReturn {
     setError(null);
 
     try {
-      const response = await fetch(`${apiUrl}/admin/stop-impersonation`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.accessToken}`,
-        },
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(
-          data.message || data.detail || "Falha ao parar impersonation"
-        );
-      }
-
-      const _data: StopImpersonationResponse = await response.json();
+      await apiClient.stopImpersonation();
 
       // Clear state
       setIsImpersonating(false);
@@ -160,10 +114,11 @@ export function useImpersonation(): UseImpersonationReturn {
       // Reload to go back to admin session
       window.location.href = "/admin/users";
     } catch (err) {
+      // apiClient handles 401 automatically and redirects to login
       setError(err instanceof Error ? err.message : "Erro desconhecido");
       setIsStopping(false);
     }
-  }, [session?.accessToken, apiUrl]);
+  }, [session?.accessToken]);
 
   return {
     isImpersonating,

@@ -18,7 +18,8 @@ import {
   Eye,
 } from "lucide-react";
 import React from "react";
-import { AdminMap, AdminMapListResponse } from "@/lib/types";
+import { AdminMap } from "@/lib/types";
+import { apiClient } from "@/lib/api";
 import { toast } from "sonner";
 
 export default function AdminMapsPage() {
@@ -40,27 +41,15 @@ export default function AdminMapsPage() {
       setLoading(true);
       setError(null);
 
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api"}/admin/maps`,
-        {
-          headers: {
-            Authorization: `Bearer ${session?.accessToken}`,
-          },
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error("Falha ao carregar mapas");
-      }
-
-      const data: AdminMapListResponse = await response.json();
+      const data = await apiClient.getAdminMaps();
       setMaps(data.maps);
     } catch (err) {
+      // apiClient handles 401 automatically and redirects to login
       setError(err instanceof Error ? err.message : "Erro desconhecido");
     } finally {
       setLoading(false);
     }
-  }, [session?.accessToken]);
+  }, []);
 
   const handleRegenerate = async (e: React.MouseEvent, mapId: string) => {
     e.stopPropagation();
@@ -71,21 +60,7 @@ export default function AdminMapsPage() {
     try {
       setRegeneratingMap(mapId);
 
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api"}/maps/${mapId}/regenerate`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session?.accessToken}`,
-          },
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error("Falha ao iniciar recálculo do mapa");
-      }
-
-      const data = await response.json();
+      const data = await apiClient.regenerateMap(mapId);
       toast.success(`Recálculo iniciado. Operation ID: ${data.operation_id}`);
 
       // Refresh the list after a delay
@@ -93,6 +68,7 @@ export default function AdminMapsPage() {
         fetchMaps();
       }, 2000);
     } catch (err) {
+      // apiClient handles 401 automatically and redirects to login
       toast.error(err instanceof Error ? err.message : "Erro ao recalcular mapa");
     } finally {
       setRegeneratingMap(null);
@@ -118,24 +94,13 @@ export default function AdminMapsPage() {
     try {
       setDeletingMap(mapId);
 
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api"}/maps/${mapId}/permanent`,
-        {
-          method: "DELETE",
-          headers: {
-            Authorization: `Bearer ${session?.accessToken}`,
-          },
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error("Falha ao deletar mapa");
-      }
+      await apiClient.permanentlyDeleteMap(mapId);
 
       toast.success("Mapa deletado permanentemente");
       setMaps((prev) => prev.filter((m) => m.id !== mapId));
       setDeleteConfirmation(null);
     } catch (err) {
+      // apiClient handles 401 automatically and redirects to login
       toast.error(err instanceof Error ? err.message : "Erro ao deletar mapa");
     } finally {
       setDeletingMap(null);

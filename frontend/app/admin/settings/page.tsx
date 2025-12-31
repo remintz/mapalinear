@@ -18,30 +18,12 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
-
-interface SystemSettings {
-  poi_search_radius_km: string;
-  duplicate_map_tolerance_km: string;
-}
-
-interface DatabaseStats {
-  total_pois: number;
-  referenced_pois: number;
-  unreferenced_pois: number;
-  total_maps: number;
-  total_map_pois: number;
-  pending_operations: number;
-  stale_operations: number;
-}
-
-interface MaintenanceResult {
-  orphan_pois_found: number;
-  orphan_pois_deleted: number;
-  is_referenced_fixed: number;
-  stale_operations_cleaned: number;
-  execution_time_ms: number;
-  dry_run: boolean;
-}
+import {
+  apiClient,
+  SystemSettings,
+  DatabaseStats,
+  MaintenanceResult,
+} from "@/lib/api";
 
 export default function AdminSettingsPage() {
   const { data: session, status } = useSession();
@@ -65,27 +47,15 @@ export default function AdminSettingsPage() {
       setLoading(true);
       setError(null);
 
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api"}/settings`,
-        {
-          headers: {
-            Authorization: `Bearer ${session?.accessToken}`,
-          },
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error("Falha ao carregar configurações");
-      }
-
-      const data = await response.json();
+      const data = await apiClient.getSettings();
       setSettings(data.settings);
     } catch (err) {
+      // apiClient handles 401 automatically and redirects to login
       setError(err instanceof Error ? err.message : "Erro desconhecido");
     } finally {
       setLoading(false);
     }
-  }, [session?.accessToken]);
+  }, []);
 
   useEffect(() => {
     if (status === "loading") return;
@@ -102,25 +72,10 @@ export default function AdminSettingsPage() {
     try {
       setSaving(true);
 
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api"}/settings`,
-        {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session?.accessToken}`,
-          },
-          body: JSON.stringify({ settings }),
-        }
-      );
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.detail || "Falha ao salvar configurações");
-      }
-
+      await apiClient.updateSettings(settings);
       toast.success("Configurações salvas com sucesso!");
     } catch (err) {
+      // apiClient handles 401 automatically and redirects to login
       toast.error(err instanceof Error ? err.message : "Erro ao salvar");
     } finally {
       setSaving(false);
@@ -148,49 +103,22 @@ export default function AdminSettingsPage() {
   const fetchDatabaseStats = useCallback(async () => {
     try {
       setLoadingStats(true);
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api"}/admin/maintenance/stats`,
-        {
-          headers: {
-            Authorization: `Bearer ${session?.accessToken}`,
-          },
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error("Falha ao carregar estatísticas do banco");
-      }
-
-      const data = await response.json();
+      const data = await apiClient.getMaintenanceStats();
       setDbStats(data);
     } catch (err) {
+      // apiClient handles 401 automatically and redirects to login
       toast.error(err instanceof Error ? err.message : "Erro ao carregar estatísticas");
     } finally {
       setLoadingStats(false);
     }
-  }, [session?.accessToken]);
+  }, []);
 
   const runMaintenance = async (dryRun: boolean) => {
     try {
       setRunningMaintenance(true);
       setLastMaintenanceResult(null);
 
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api"}/admin/maintenance/run?dry_run=${dryRun}`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session?.accessToken}`,
-          },
-        }
-      );
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.detail || "Falha ao executar manutenção");
-      }
-
-      const result: MaintenanceResult = await response.json();
+      const result = await apiClient.runMaintenance(dryRun);
       setLastMaintenanceResult(result);
 
       if (dryRun) {
@@ -203,6 +131,7 @@ export default function AdminSettingsPage() {
         fetchDatabaseStats();
       }
     } catch (err) {
+      // apiClient handles 401 automatically and redirects to login
       toast.error(err instanceof Error ? err.message : "Erro na manutenção");
     } finally {
       setRunningMaintenance(false);
