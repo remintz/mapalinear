@@ -1951,6 +1951,7 @@ class RoadService:
         main_route_geometry: List[Tuple[float, float]],
         junction_point: Tuple[float, float],
         access_route_geometry: List[Tuple[float, float]],
+        poi_location: Optional[Tuple[float, float]] = None,
         return_debug: bool = False
     ) -> Union[str, Tuple[str, Dict[str, Any]]]:
         """
@@ -1959,10 +1960,14 @@ class RoadService:
         This method looks at the initial direction of the access route from the junction
         point, which represents the actual turn the driver needs to make.
 
+        When the access route is nearly parallel to the main route (e.g., service roads),
+        the method falls back to using the POI location directly for more reliable results.
+
         Args:
             main_route_geometry: Main route geometry as list of (lat, lon) tuples
             junction_point: Junction coordinates (lat, lon)
             access_route_geometry: Access route geometry from lookback to POI
+            poi_location: Optional POI location (lat, lon) for fallback calculation
             return_debug: If True, also return debug calculation info
 
         Returns:
@@ -2033,6 +2038,35 @@ class RoadService:
         # If negative: turning right
         cross_product = road_vector[0] * access_vector[1] - road_vector[1] * access_vector[0]
 
+        # Calculate normalized cross product (sin of angle between vectors)
+        # This helps detect when vectors are nearly parallel
+        road_magnitude = math.sqrt(road_vector[0]**2 + road_vector[1]**2)
+        access_magnitude = math.sqrt(access_vector[0]**2 + access_vector[1]**2)
+
+        used_fallback = False
+        fallback_reason = None
+        original_cross_product = cross_product
+        original_access_vector = access_vector
+
+        # Threshold: sin(5.7°) ≈ 0.1 - if vectors are within ~6° of parallel, use fallback
+        PARALLEL_THRESHOLD = 0.1
+
+        if road_magnitude > 0 and access_magnitude > 0:
+            normalized_cross = abs(cross_product) / (road_magnitude * access_magnitude)
+
+            # If vectors are nearly parallel and we have POI location, use POI as direction
+            if normalized_cross < PARALLEL_THRESHOLD and poi_location is not None:
+                used_fallback = True
+                fallback_reason = f"vectors_nearly_parallel (normalized={normalized_cross:.6f}, threshold={PARALLEL_THRESHOLD})"
+
+                # Use POI location directly instead of access route direction
+                poi_vector = (
+                    poi_location[1] - junction_point[1],  # dx (lon)
+                    poi_location[0] - junction_point[0]   # dy (lat)
+                )
+                access_vector = poi_vector
+                cross_product = road_vector[0] * poi_vector[1] - road_vector[1] * poi_vector[0]
+
         side = 'left' if cross_product > 0 else 'right'
 
         if return_debug:
@@ -2048,8 +2082,17 @@ class RoadService:
                 "access_direction_point_idx": access_direction_point_idx,
                 "access_start": {"lat": access_start[0], "lon": access_start[1]},
                 "access_direction_point": {"lat": access_direction_point[0], "lon": access_direction_point[1]},
-                "method": "access_route_direction"
+                "method": "access_route_direction",
+                "used_fallback": used_fallback,
+                "fallback_reason": fallback_reason,
+                "road_magnitude": road_magnitude,
+                "access_magnitude": access_magnitude,
+                "normalized_cross_product": abs(original_cross_product) / (road_magnitude * access_magnitude) if road_magnitude > 0 and access_magnitude > 0 else None,
             }
+            if used_fallback:
+                debug_info["original_access_vector"] = {"dx": original_access_vector[0], "dy": original_access_vector[1]}
+                debug_info["original_cross_product"] = original_cross_product
+                debug_info["poi_location_used"] = {"lat": poi_location[0], "lon": poi_location[1]} if poi_location else None
             return (side, debug_info)
 
         return side
@@ -2349,11 +2392,13 @@ class RoadService:
                 # Determine which side the driver needs to turn based on access route direction
                 # Use the corresponding point on main route for road direction calculation
                 # but use the access route geometry for turn direction
+                poi_loc = (poi.location.latitude, poi.location.longitude)
                 if return_debug:
                     side, side_debug = self._determine_side_from_access_route(
                         main_route.geometry,
                         corresponding_point_on_main,  # Use main route point for road direction
                         access_route.geometry,
+                        poi_location=poi_loc,
                         return_debug=True
                     )
                     debug_data["side_calculation"] = side_debug
@@ -2373,7 +2418,8 @@ class RoadService:
                     side = self._determine_side_from_access_route(
                         main_route.geometry,
                         corresponding_point_on_main,
-                        access_route.geometry
+                        access_route.geometry,
+                        poi_location=poi_loc
                     )
 
                 junction_info = (junction_distance_km, junction_coords, access_route_distance_km, side)
