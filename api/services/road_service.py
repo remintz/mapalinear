@@ -858,15 +858,25 @@ class RoadService:
                             prev_junction_info, prev_dist, _, _ = best_junction_for_poi[poi.id]
                             prev_junction_km, _, _, _ = prev_junction_info
 
-                            # Calculate what the lookback point would be for this recalculation
-                            poi_distance_km = poi_distance_from_road / 1000.0
-                            lookback_km = min(20.0, max(5.0, poi_distance_km * 2))
-                            lookback_distance_km = max(0, distance_from_origin - lookback_km)
-                            new_lookback = self._interpolate_coordinate_at_distance(
-                                main_route.geometry,
-                                lookback_distance_km,
-                                main_route.total_distance
-                            )
+                            # Calculate what the lookback search point would be for this recalculation
+                            settings = get_settings()
+                            lookback_count = settings.lookback_milestones_count
+                            lookback_index = i - lookback_count
+
+                            if lookback_index >= 0:
+                                new_lookback, _ = search_points[lookback_index]
+                            elif i > 0:
+                                new_lookback, _ = search_points[0]
+                            else:
+                                # Fallback to interpolation (shouldn't happen normally)
+                                poi_distance_km = poi_distance_from_road / 1000.0
+                                lookback_km = min(20.0, max(5.0, poi_distance_km * 2))
+                                lookback_distance_km = max(0, distance_from_origin - lookback_km)
+                                new_lookback = self._interpolate_coordinate_at_distance(
+                                    main_route.geometry,
+                                    lookback_distance_km,
+                                    main_route.total_distance
+                                )
 
                             # Skip 1: If lookback point is very similar to previous (within 500m)
                             if poi.id in junction_lookback_for_poi:
@@ -894,11 +904,14 @@ class RoadService:
                             junction_recalculations += 1
 
                         # Call with return_debug=True when debug_collector is present
+                        # Pass search_points and current index so lookback uses a real road coordinate
                         junction_result = await self._calculate_junction_for_distant_poi(
                             poi=poi,
                             search_point=point,
                             search_point_distance_km=distance_from_origin,
                             main_route=main_route,
+                            all_search_points=search_points,
+                            current_search_point_index=i,
                             return_debug=debug_collector is not None
                         )
 
@@ -918,14 +931,24 @@ class RoadService:
 
                         # Calculate lookback point for tracking (if not already calculated)
                         if not is_recalculation:
-                            poi_distance_km = poi_distance_from_road / 1000.0
-                            lookback_km = min(20.0, max(5.0, poi_distance_km * 2))
-                            lookback_distance_km = max(0, distance_from_origin - lookback_km)
-                            new_lookback = self._interpolate_coordinate_at_distance(
-                                main_route.geometry,
-                                lookback_distance_km,
-                                main_route.total_distance
-                            )
+                            settings = get_settings()
+                            lookback_count = settings.lookback_milestones_count
+                            lookback_index = i - lookback_count
+
+                            if lookback_index >= 0:
+                                new_lookback, _ = search_points[lookback_index]
+                            elif i > 0:
+                                new_lookback, _ = search_points[0]
+                            else:
+                                # Fallback to interpolation
+                                poi_distance_km = poi_distance_from_road / 1000.0
+                                lookback_km = min(20.0, max(5.0, poi_distance_km * 2))
+                                lookback_distance_km = max(0, distance_from_origin - lookback_km)
+                                new_lookback = self._interpolate_coordinate_at_distance(
+                                    main_route.geometry,
+                                    lookback_distance_km,
+                                    main_route.total_distance
+                                )
 
                         # Check if this is better than previous best
                         if poi.id in best_junction_for_poi:
@@ -1010,14 +1033,18 @@ class RoadService:
                        f"passou do junction: {skipped_past_junction}, "
                        f"max tentativas: {skipped_max_attempts})")
 
+        distant_pois_added = 0
+        distant_pois_skipped_already_added = 0
         for poi_id, (junction_info, dist_from_origin, search_pt, poi) in best_junction_for_poi.items():
             # Skip if this POI was already added as a nearby milestone
             if poi_id in milestone_poi_ids:
+                distant_pois_skipped_already_added += 1
                 continue
 
             _, _, access_route_distance_km, _ = junction_info
 
             if access_route_distance_km <= max_detour_distance_km:
+                distant_pois_added += 1
                 # Junction is within acceptable detour distance - create milestone
                 milestone = self._create_milestone_from_poi(
                     poi,
@@ -1034,6 +1061,9 @@ class RoadService:
         logger.info(f"🎯 RESULTADO FINAL: {len(milestones)} milestones encontrados ao longo da rota")
         logger.info(f"📊 POIs únicos encontrados: {len(all_unique_pois_dict)}")
         logger.info(f"📊 POIs distantes analisados: {len(best_junction_for_poi)}")
+        logger.info(f"📊 POIs distantes ADICIONADOS: {distant_pois_added}")
+        if distant_pois_skipped_already_added > 0:
+            logger.info(f"📊 POIs distantes já eram milestones próximos: {distant_pois_skipped_already_added}")
 
         if pois_abandoned_no_junction > 0:
             logger.info(f"🚫 POIs sem entroncamento encontrado: {pois_abandoned_no_junction}")
@@ -2029,15 +2059,16 @@ class RoadService:
         tolerance_meters: float = 100.0
     ) -> Optional[Dict[str, Any]]:
         """
-        Find the intersection point between main route and access route.
+        Find the divergence point where access route leaves the main route.
 
-        This method finds the point where the access route is CLOSEST to
-        the main route - this represents the true junction/crossing point.
+        This method finds the LAST point on the access route that is close to
+        the main route before the routes diverge. This represents the true
+        junction/exit point where the driver leaves the main road.
 
         Args:
             main_route_geometry: Main route geometry [(lat, lon), ...]
             access_route_geometry: Access route to POI [(lat, lon), ...]
-            tolerance_meters: Maximum distance to consider as valid intersection
+            tolerance_meters: Maximum distance to consider as "on the main route"
 
         Returns:
             Dict with:
@@ -2050,14 +2081,21 @@ class RoadService:
         if not main_route_geometry or not access_route_geometry:
             return None
 
-        # Strategy: Find the point on the access route that is CLOSEST to the main route
-        # This represents the actual crossing/junction point
+        # Strategy: Find the LAST point on the access route that is within tolerance
+        # of the main route. This is the divergence/exit point.
+        #
+        # The access route typically:
+        # 1. Starts at the lookback point (on main route)
+        # 2. Follows the main route for some distance
+        # 3. Diverges from the main route to reach the POI
+        #
+        # We want to find point (3) - the last point before diverging.
 
-        best_intersection_point = None
-        best_intersection_on_main = None
-        best_intersection_index = 0
-        best_intersection_distance_m = 0.0
-        min_distance_to_main = float('inf')
+        last_intersection_point = None
+        last_intersection_on_main = None
+        last_intersection_index = 0
+        last_intersection_distance_m = 0.0
+        last_intersection_distance_to_main = 0.0
 
         # Track cumulative distance along access route
         cumulative_distance_m = 0.0
@@ -2087,22 +2125,23 @@ class RoadService:
                     closest_distance = distance
                     closest_main_point = main_point
 
-            # If this is the closest point so far, update best intersection
-            if closest_distance < min_distance_to_main and closest_main_point:
-                min_distance_to_main = closest_distance
-                best_intersection_point = access_point
-                best_intersection_on_main = closest_main_point
-                best_intersection_index = i
-                best_intersection_distance_m = cumulative_distance_m
+            # If this point is within tolerance, it's a candidate for the last intersection
+            # We keep updating as we go, so the last one found is the divergence point
+            if closest_distance < tolerance_meters and closest_main_point:
+                last_intersection_point = access_point
+                last_intersection_on_main = closest_main_point
+                last_intersection_index = i
+                last_intersection_distance_m = cumulative_distance_m
+                last_intersection_distance_to_main = closest_distance
 
-        # Only return if we found an intersection within tolerance
-        if best_intersection_on_main and best_intersection_point and min_distance_to_main < tolerance_meters:
+        # Return the last intersection point (divergence point)
+        if last_intersection_on_main and last_intersection_point:
             return {
-                "exit_point_on_access": best_intersection_point,
-                "corresponding_point_on_main": best_intersection_on_main,
-                "distance_along_access_km": best_intersection_distance_m / 1000.0,
-                "exit_point_index": best_intersection_index,
-                "intersection_distance_m": min_distance_to_main
+                "exit_point_on_access": last_intersection_point,
+                "corresponding_point_on_main": last_intersection_on_main,
+                "distance_along_access_km": last_intersection_distance_m / 1000.0,
+                "exit_point_index": last_intersection_index,
+                "intersection_distance_m": last_intersection_distance_to_main
             }
 
         return None
@@ -2113,6 +2152,8 @@ class RoadService:
         search_point: Tuple[float, float],
         search_point_distance_km: float,
         main_route: Route,
+        all_search_points: List[Tuple[Tuple[float, float], float]],
+        current_search_point_index: int,
         return_debug: bool = False
     ) -> Optional[Union[
         Tuple[float, Tuple[float, float], float, str],
@@ -2124,11 +2165,17 @@ class RoadService:
         For POIs that are far from the road (>500m), this calculates where
         the driver needs to exit the main route to reach the POI.
 
+        Uses a search point N positions back as the lookback point.
+        Search points are at regular intervals (~1km) along the route,
+        ensuring we use coordinates that are on the actual road.
+
         Args:
             poi: The POI object
             search_point: The search point on main route closest to POI (lat, lon)
             search_point_distance_km: Distance of search point from origin
             main_route: The complete main route object with geometry
+            all_search_points: List of all search points [(point, distance), ...]
+            current_search_point_index: Index of current search point in the list
             return_debug: If True, also return debug data
 
         Returns:
@@ -2137,6 +2184,7 @@ class RoadService:
             If return_debug=True, returns (junction_info, debug_data) tuple instead.
         """
         debug_data: Dict[str, Any] = {}
+        settings = get_settings()
 
         # Calculate distance from POI to search point
         poi_distance_from_road_m = self._calculate_distance_meters(
@@ -2144,30 +2192,54 @@ class RoadService:
             search_point[0], search_point[1]
         )
 
-        # Determine lookback distance based on POI distance
-        # Further POIs might have junctions further back
-        poi_distance_km = poi_distance_from_road_m / 1000.0
-        lookback_km = min(20.0, max(5.0, poi_distance_km * 2))
+        # Find lookback point using a search point N positions back
+        # Search points are at ~1km intervals, so N points back ≈ N km back
+        lookback_count = settings.lookback_milestones_count  # Reusing the same setting
 
-        # Find lookback point on main route
-        lookback_distance_km = max(0, search_point_distance_km - lookback_km)
+        lookback_point: Tuple[float, float]
+        lookback_distance_km: float
+        lookback_method: str
 
-        # Interpolate lookback point on main route geometry
-        lookback_point = self._interpolate_coordinate_at_distance(
-            main_route.geometry,
-            lookback_distance_km,
-            main_route.total_distance
-        )
+        # Calculate the index of the lookback search point
+        lookback_index = current_search_point_index - lookback_count
+
+        if lookback_index >= 0:
+            # Use the search point N positions back
+            lookback_point, lookback_distance_km = all_search_points[lookback_index]
+            lookback_method = "search_point"
+            logger.debug(f"🔍 Usando search point {lookback_index} como lookback "
+                        f"(km {lookback_distance_km:.1f}, {lookback_count} pontos atrás)")
+        elif current_search_point_index > 0:
+            # Not enough search points back, use the first one
+            lookback_point, lookback_distance_km = all_search_points[0]
+            lookback_method = "search_point_first"
+            logger.debug(f"🔍 Poucos search points ({current_search_point_index}), usando primeiro "
+                        f"(km {lookback_distance_km:.1f})")
+        else:
+            # We're at the first search point, use interpolation as fallback
+            poi_distance_km = poi_distance_from_road_m / 1000.0
+            lookback_km = min(20.0, max(5.0, poi_distance_km * 2))
+            lookback_distance_km = max(0, search_point_distance_km - lookback_km)
+            lookback_point = self._interpolate_coordinate_at_distance(
+                main_route.geometry,
+                lookback_distance_km,
+                main_route.total_distance
+            )
+            lookback_method = "interpolated"
+            logger.debug(f"🔍 Primeiro search point, usando interpolação (km {lookback_distance_km:.1f})")
 
         # Capture lookback data for debug
         if return_debug:
             debug_data["lookback_data"] = {
                 "poi_distance_from_road_m": poi_distance_from_road_m,
-                "lookback_km": lookback_km,
                 "lookback_distance_km": lookback_distance_km,
                 "lookback_point": {"lat": lookback_point[0], "lon": lookback_point[1]},
                 "search_point": {"lat": search_point[0], "lon": search_point[1]},
-                "search_point_distance_km": search_point_distance_km
+                "search_point_distance_km": search_point_distance_km,
+                "lookback_method": lookback_method,
+                "lookback_index": lookback_index if lookback_index >= 0 else 0,
+                "current_search_point_index": current_search_point_index,
+                "lookback_count_setting": lookback_count
             }
 
         try:

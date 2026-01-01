@@ -45,11 +45,19 @@ class SideCalculationDetail(BaseModel):
 class LookbackDetail(BaseModel):
     """Details of the lookback calculation for distant POIs."""
     poi_distance_from_road_m: float = Field(..., description="Distance from POI to road in meters")
-    lookback_km: float = Field(..., description="Lookback distance used")
+    lookback_km: Optional[float] = Field(None, description="Lookback distance used (only for interpolated method)")
     lookback_distance_km: float = Field(..., description="Distance from origin to lookback point")
     lookback_point: Dict[str, float] = Field(..., description="Lookback point {lat, lon}")
     search_point: Dict[str, float] = Field(..., description="Original search point {lat, lon}")
     search_point_distance_km: float = Field(..., description="Distance from origin to search point")
+    lookback_method: Optional[str] = Field(None, description="Method used: 'search_point', 'search_point_first', or 'interpolated'")
+    lookback_index: Optional[int] = Field(None, description="Index of the search point used as lookback")
+    current_search_point_index: Optional[int] = Field(None, description="Index of the current search point")
+    lookback_count_setting: Optional[int] = Field(None, description="Configured number of search points to look back")
+    # Legacy fields (kept for compatibility with old data)
+    lookback_milestone_name: Optional[str] = Field(None, description="Name of milestone used as lookback point (legacy)")
+    milestones_available_before: Optional[int] = Field(None, description="Number of milestones available before search point (legacy)")
+    lookback_milestones_count_setting: Optional[int] = Field(None, description="Configured number of milestones to look back (legacy)")
 
 
 class RecalculationAttempt(BaseModel):

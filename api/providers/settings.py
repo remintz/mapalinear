@@ -97,6 +97,13 @@ class ProviderSettings(BaseSettings):
         description="Maximum distance in km between origin/destination coordinates to consider maps as duplicates"
     )
 
+    # POI junction calculation settings
+    lookback_milestones_count: int = Field(
+        default=10,
+        alias="LOOKBACK_MILESTONES_COUNT",
+        description="Number of milestones to look back when calculating junction for distant POIs. Uses actual milestone coordinates instead of interpolated points."
+    )
+
     # Google OAuth settings
     google_client_id: Optional[str] = Field(
         default=None,

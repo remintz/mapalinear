@@ -260,11 +260,19 @@ export interface SideCalculationDetail {
 
 export interface LookbackDetail {
   poi_distance_from_road_m: number;
-  lookback_km: number;
+  lookback_km?: number;  // Only for interpolated method
   lookback_distance_km: number;
   lookback_point: { lat: number; lon: number };
   search_point: { lat: number; lon: number };
   search_point_distance_km: number;
+  lookback_method?: 'search_point' | 'search_point_first' | 'interpolated';
+  lookback_index?: number;
+  current_search_point_index?: number;
+  lookback_count_setting?: number;
+  // Legacy fields (kept for compatibility with old data)
+  lookback_milestone_name?: string;
+  milestones_available_before?: number;
+  lookback_milestones_count_setting?: number;
 }
 
 export interface RecalculationAttempt {

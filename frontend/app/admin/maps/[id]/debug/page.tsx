@@ -431,6 +431,21 @@ export default function POIDebugPage() {
                     <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
                       <ChevronLeft className="w-5 h-5 text-blue-600" />
                       Dados de Lookback
+                      {selectedPOI.lookback_data.lookback_method && (
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                          selectedPOI.lookback_data.lookback_method === 'search_point'
+                            ? 'bg-green-100 text-green-700'
+                            : selectedPOI.lookback_data.lookback_method === 'search_point_first'
+                            ? 'bg-yellow-100 text-yellow-700'
+                            : 'bg-gray-100 text-gray-700'
+                        }`}>
+                          {selectedPOI.lookback_data.lookback_method === 'search_point'
+                            ? 'via Search Point'
+                            : selectedPOI.lookback_data.lookback_method === 'search_point_first'
+                            ? 'Search Point (primeiro)'
+                            : 'Interpolado'}
+                        </span>
+                      )}
                     </h3>
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                       <div>
@@ -439,12 +454,36 @@ export default function POIDebugPage() {
                           {selectedPOI.lookback_data.poi_distance_from_road_m.toFixed(1)} m
                         </div>
                       </div>
-                      <div>
-                        <div className="text-sm text-gray-500">Lookback Usado</div>
-                        <div className="font-medium text-gray-900">
-                          {selectedPOI.lookback_data.lookback_km.toFixed(2)} km
+                      {selectedPOI.lookback_data.current_search_point_index != null && (
+                        <div>
+                          <div className="text-sm text-gray-500">Indice Search Point</div>
+                          <div className="font-medium text-gray-900">
+                            {selectedPOI.lookback_data.current_search_point_index}
+                            {selectedPOI.lookback_data.lookback_index != null && (
+                              <span className="text-gray-500 text-xs ml-1">
+                                (lookback: {selectedPOI.lookback_data.lookback_index})
+                              </span>
+                            )}
+                          </div>
                         </div>
-                      </div>
+                      )}
+                      {selectedPOI.lookback_data.lookback_km != null && (
+                        <div>
+                          <div className="text-sm text-gray-500">Lookback Dist.</div>
+                          <div className="font-medium text-gray-900">
+                            {selectedPOI.lookback_data.lookback_km.toFixed(2)} km
+                          </div>
+                        </div>
+                      )}
+                      {/* Legacy field for old data */}
+                      {selectedPOI.lookback_data.lookback_milestone_name && (
+                        <div>
+                          <div className="text-sm text-gray-500">Milestone Usado (legado)</div>
+                          <div className="font-medium text-gray-900">
+                            {selectedPOI.lookback_data.lookback_milestone_name}
+                          </div>
+                        </div>
+                      )}
                       <div>
                         <div className="text-sm text-gray-500">Dist. Ponto Lookback</div>
                         <div className="font-medium text-gray-900">
@@ -469,6 +508,28 @@ export default function POIDebugPage() {
                           {selectedPOI.lookback_data.search_point_distance_km.toFixed(2)} km
                         </div>
                       </div>
+                      {selectedPOI.lookback_data.lookback_count_setting != null && (
+                        <div>
+                          <div className="text-sm text-gray-500">Config. Lookback</div>
+                          <div className="font-medium text-gray-900">
+                            {selectedPOI.lookback_data.lookback_count_setting} pontos
+                          </div>
+                        </div>
+                      )}
+                      {/* Legacy field for old data */}
+                      {selectedPOI.lookback_data.milestones_available_before != null && (
+                        <div>
+                          <div className="text-sm text-gray-500">Milestones Disponiveis (legado)</div>
+                          <div className="font-medium text-gray-900">
+                            {selectedPOI.lookback_data.milestones_available_before}
+                            {selectedPOI.lookback_data.lookback_milestones_count_setting && (
+                              <span className="text-gray-500 text-xs ml-1">
+                                (config: {selectedPOI.lookback_data.lookback_milestones_count_setting})
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
