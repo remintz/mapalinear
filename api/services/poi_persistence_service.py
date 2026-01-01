@@ -78,6 +78,12 @@ def provider_poi_to_db_dict(poi: ProviderPOI) -> dict:
     """
     provider, provider_id = _extract_provider_info(poi)
 
+    # Extract quality data from provider_data
+    provider_data = poi.provider_data or {}
+    quality_score = provider_data.get('quality_score')
+    quality_issues = provider_data.get('quality_issues', [])
+    is_low_quality = provider_data.get('is_low_quality', False)
+
     return {
         "name": poi.name,
         "type": _poi_category_to_type(poi.category),
@@ -89,8 +95,12 @@ def provider_poi_to_db_dict(poi: ProviderPOI) -> dict:
         "rating": poi.rating,
         "rating_count": poi.review_count,
         "amenities": poi.amenities or [],
-        "tags": poi.provider_data or {},
+        "tags": provider_data,
         "is_referenced": False,  # Will be set to True for POIs used in maps
+        # Quality fields
+        "quality_score": quality_score,
+        "quality_issues": quality_issues,
+        "is_low_quality": is_low_quality,
     }
 
 

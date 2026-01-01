@@ -303,6 +303,7 @@ class POIRepository(BaseRepository[POI]):
     ) -> tuple[POI, bool]:
         """
         Get an existing POI by provider ID (osm_id or here_id) or create a new one.
+        If POI exists, updates quality fields and rating fields if new data is available.
 
         Args:
             provider: Provider name ('osm' or 'here')
@@ -321,6 +322,38 @@ class POIRepository(BaseRepository[POI]):
             existing = None
 
         if existing:
+            # Update quality fields if new data is available
+            updated = False
+
+            # Update quality score if not already set
+            if defaults.get("quality_score") is not None and existing.quality_score is None:
+                existing.quality_score = defaults["quality_score"]
+                updated = True
+
+            # Update quality issues if not already set (empty list counts as not set)
+            if defaults.get("quality_issues") and not existing.quality_issues:
+                existing.quality_issues = defaults["quality_issues"]
+                updated = True
+
+            # Update is_low_quality if we have quality data
+            if defaults.get("is_low_quality") and not existing.is_low_quality:
+                existing.is_low_quality = defaults["is_low_quality"]
+                updated = True
+
+            # Update rating fields if new data is available
+            if defaults.get("rating") is not None and existing.rating is None:
+                existing.rating = defaults["rating"]
+                updated = True
+            if defaults.get("rating_count") is not None and existing.rating_count is None:
+                existing.rating_count = defaults["rating_count"]
+                updated = True
+            if defaults.get("city") and not existing.city:
+                existing.city = defaults["city"]
+                updated = True
+
+            if updated:
+                await self.session.flush()
+
             return existing, False
 
         # Create new POI with provider-specific ID
@@ -458,3 +491,285 @@ class POIRepository(BaseRepository[POI]):
 
         await self.session.flush()
         return poi
+
+    async def get_low_quality_pois(
+        self,
+        issue_filter: Optional[str] = None,
+        type_filter: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[POI]:
+        """
+        Get POIs with low quality issues.
+
+        Args:
+            issue_filter: Filter by specific quality issue (e.g., 'abandoned', 'missing_name')
+            type_filter: Filter by POI type (e.g., 'gas_station', 'restaurant')
+            limit: Maximum number of results
+            offset: Offset for pagination
+
+        Returns:
+            List of low quality POIs
+        """
+        conditions = [POI.is_low_quality == True]
+
+        if issue_filter:
+            # Filter POIs where quality_issues contains the specified issue
+            conditions.append(POI.quality_issues.contains([issue_filter]))
+
+        if type_filter:
+            conditions.append(POI.type == type_filter)
+
+        result = await self.session.execute(
+            select(POI)
+            .where(and_(*conditions))
+            .order_by(POI.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def get_low_quality_statistics(self) -> dict:
+        """
+        Get statistics about low quality POIs.
+
+        Returns:
+            Dictionary with statistics:
+            {
+                "total": int,
+                "by_issue": {"abandoned": int, "missing_name": int, ...},
+                "by_type": {"gas_station": int, "restaurant": int, ...}
+            }
+        """
+        from sqlalchemy import func
+
+        # Get total count
+        total_result = await self.session.execute(
+            select(func.count(POI.id))
+            .where(POI.is_low_quality == True)
+        )
+        total = total_result.scalar() or 0
+
+        # Get counts by type
+        type_counts_result = await self.session.execute(
+            select(POI.type, func.count(POI.id))
+            .where(POI.is_low_quality == True)
+            .group_by(POI.type)
+        )
+        by_type = {row[0]: row[1] for row in type_counts_result.all()}
+
+        # Get counts by issue (requires querying each issue type)
+        issue_types = ['abandoned', 'missing_name', 'missing_brand', 'low_score', 'missing_contact', 'missing_hours']
+        by_issue = {}
+
+        for issue in issue_types:
+            issue_count_result = await self.session.execute(
+                select(func.count(POI.id))
+                .where(and_(
+                    POI.is_low_quality == True,
+                    POI.quality_issues.contains([issue])
+                ))
+            )
+            count = issue_count_result.scalar() or 0
+            if count > 0:
+                by_issue[issue] = count
+
+        return {
+            "total": total,
+            "by_issue": by_issue,
+            "by_type": by_type
+        }
+
+    async def count_low_quality_pois(
+        self,
+        issue_filter: Optional[str] = None,
+        type_filter: Optional[str] = None
+    ) -> int:
+        """
+        Count low quality POIs with optional filters.
+
+        Args:
+            issue_filter: Filter by specific quality issue
+            type_filter: Filter by POI type
+
+        Returns:
+            Count of matching POIs
+        """
+        from sqlalchemy import func
+
+        conditions = [POI.is_low_quality == True]
+
+        if issue_filter:
+            conditions.append(POI.quality_issues.contains([issue_filter]))
+
+        if type_filter:
+            conditions.append(POI.type == type_filter)
+
+        result = await self.session.execute(
+            select(func.count(POI.id))
+            .where(and_(*conditions))
+        )
+        return result.scalar() or 0
+
+    async def list_all_pois(
+        self,
+        name_filter: Optional[str] = None,
+        city_filter: Optional[str] = None,
+        type_filter: Optional[str] = None,
+        low_quality_only: bool = False,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[POI]:
+        """
+        List all POIs with optional filters.
+
+        Args:
+            name_filter: Filter by POI name (case-insensitive partial match)
+            city_filter: Filter by city name (case-insensitive partial match)
+            type_filter: Filter by POI type
+            low_quality_only: Show only low quality POIs
+            limit: Maximum number of results
+            offset: Offset for pagination
+
+        Returns:
+            List of POIs matching the filters
+        """
+        conditions = []
+
+        if name_filter:
+            conditions.append(POI.name.ilike(f"%{name_filter}%"))
+
+        if city_filter:
+            conditions.append(POI.city.ilike(f"%{city_filter}%"))
+
+        if type_filter:
+            conditions.append(POI.type == type_filter)
+
+        if low_quality_only:
+            conditions.append(POI.is_low_quality == True)
+
+        # Order by name alphabetically (nulls last)
+        query = select(POI).order_by(POI.name.asc().nulls_last()).offset(offset).limit(limit)
+
+        if conditions:
+            query = query.where(and_(*conditions))
+
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def count_all_pois(
+        self,
+        name_filter: Optional[str] = None,
+        city_filter: Optional[str] = None,
+        type_filter: Optional[str] = None,
+        low_quality_only: bool = False
+    ) -> int:
+        """
+        Count all POIs with optional filters.
+
+        Args:
+            name_filter: Filter by POI name (case-insensitive partial match)
+            city_filter: Filter by city name (case-insensitive partial match)
+            type_filter: Filter by POI type
+            low_quality_only: Count only low quality POIs
+
+        Returns:
+            Count of matching POIs
+        """
+        from sqlalchemy import func
+
+        conditions = []
+
+        if name_filter:
+            conditions.append(POI.name.ilike(f"%{name_filter}%"))
+
+        if city_filter:
+            conditions.append(POI.city.ilike(f"%{city_filter}%"))
+
+        if type_filter:
+            conditions.append(POI.type == type_filter)
+
+        if low_quality_only:
+            conditions.append(POI.is_low_quality == True)
+
+        query = select(func.count(POI.id))
+
+        if conditions:
+            query = query.where(and_(*conditions))
+
+        result = await self.session.execute(query)
+        return result.scalar() or 0
+
+    async def get_distinct_cities(self) -> List[str]:
+        """
+        Get list of distinct cities from POIs.
+
+        Returns:
+            List of city names (sorted)
+        """
+        result = await self.session.execute(
+            select(POI.city)
+            .distinct()
+            .where(POI.city.isnot(None))
+            .order_by(POI.city)
+        )
+        return [row[0] for row in result.all() if row[0]]
+
+    async def get_distinct_types(self) -> List[str]:
+        """
+        Get list of distinct POI types.
+
+        Returns:
+            List of POI types (sorted)
+        """
+        result = await self.session.execute(
+            select(POI.type)
+            .distinct()
+            .order_by(POI.type)
+        )
+        return [row[0] for row in result.all()]
+
+    async def get_statistics(self) -> dict:
+        """
+        Get overall POI statistics.
+
+        Returns:
+            Dictionary with statistics
+        """
+        from sqlalchemy import func
+
+        # Total count
+        total_result = await self.session.execute(
+            select(func.count(POI.id))
+        )
+        total = total_result.scalar() or 0
+
+        # Low quality count
+        low_quality_result = await self.session.execute(
+            select(func.count(POI.id)).where(POI.is_low_quality == True)
+        )
+        low_quality = low_quality_result.scalar() or 0
+
+        # Count by type
+        type_counts_result = await self.session.execute(
+            select(POI.type, func.count(POI.id))
+            .group_by(POI.type)
+        )
+        by_type = {row[0]: row[1] for row in type_counts_result.all()}
+
+        # Count by city (top 20)
+        city_counts_result = await self.session.execute(
+            select(POI.city, func.count(POI.id))
+            .where(POI.city.isnot(None))
+            .group_by(POI.city)
+            .order_by(func.count(POI.id).desc())
+            .limit(20)
+        )
+        by_city = {row[0]: row[1] for row in city_counts_result.all()}
+
+        return {
+            "total": total,
+            "low_quality": low_quality,
+            "by_type": by_type,
+            "by_city": by_city
+        }

@@ -832,7 +832,7 @@ class OSMProvider(GeoProvider):
         return {}
     
     def _parse_osm_element_to_poi(self, element: dict) -> Optional[POI]:
-        """Parse OSM element to POI object with quality filtering."""
+        """Parse OSM element to POI object with quality assessment."""
         try:
             tags = element.get('tags', {})
 
@@ -840,16 +840,13 @@ class OSMProvider(GeoProvider):
             if not tags.get('name') and not tags.get('amenity') and not tags.get('place'):
                 return None
 
-            # Skip abandoned POIs
-            if self._is_poi_abandoned(tags):
-                return None
-
-            # Calculate quality score (always calculate for metadata)
+            # Calculate quality score and identify issues
             quality_score = self._calculate_poi_quality_score(tags)
+            quality_issues = self._identify_quality_issues(tags, quality_score)
+            is_abandoned = self._is_poi_abandoned(tags)
 
-            # TEMPORARILY DISABLED: Quality threshold filtering
-            # if not self._meets_quality_threshold(tags, quality_score):
-            #     return None
+            # Mark as low quality if abandoned or has significant issues
+            is_low_quality = is_abandoned or 'abandoned' in quality_issues
 
             # Get coordinates
             if 'lat' in element and 'lon' in element:
@@ -924,6 +921,9 @@ class OSMProvider(GeoProvider):
                 provider_data={
                     'osm_tags': tags,
                     'quality_score': quality_score,
+                    'quality_issues': quality_issues,
+                    'is_low_quality': is_low_quality,
+                    'is_abandoned': is_abandoned,
                     'element_type': element['type'],
                     'osm_id': element['id']
                 }
@@ -1033,9 +1033,51 @@ class OSMProvider(GeoProvider):
         # Check specific status
         if tags.get('opening_hours') in ['closed', 'no']:
             return True
-            
+
         return False
-    
+
+    def _identify_quality_issues(self, tags: Dict[str, Any], quality_score: float) -> List[str]:
+        """
+        Identify quality issues for a POI.
+
+        Args:
+            tags: OSM tags dictionary
+            quality_score: Calculated quality score
+
+        Returns:
+            List of quality issues found
+        """
+        issues = []
+
+        # Check for abandonment
+        if self._is_poi_abandoned(tags):
+            issues.append('abandoned')
+
+        # Check for missing name
+        if not tags.get('name'):
+            issues.append('missing_name')
+
+        # Check for missing brand/operator (important for gas stations)
+        amenity = tags.get('amenity')
+        if amenity == 'fuel':
+            if not (tags.get('brand') or tags.get('operator')):
+                issues.append('missing_brand')
+
+        # Check for low quality score
+        if quality_score < 0.3:
+            issues.append('low_score')
+
+        # Check for missing contact info
+        if not (tags.get('phone') or tags.get('contact:phone') or
+                tags.get('website') or tags.get('contact:website')):
+            issues.append('missing_contact')
+
+        # Check for missing opening hours
+        if not tags.get('opening_hours'):
+            issues.append('missing_hours')
+
+        return issues
+
     def _calculate_poi_quality_score(self, tags: Dict[str, Any]) -> float:
         """
         Calculate quality score for a POI based on data completeness.

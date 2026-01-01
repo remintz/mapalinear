@@ -21,11 +21,7 @@ import Link from 'next/link';
 import { apiClient, SavedMap } from '@/lib/api';
 import { toast } from 'sonner';
 import RouteMapModal from '@/components/RouteMapModal';
-
-interface SearchFormData {
-  origin: string;
-  destination: string;
-}
+import { SearchFormData } from '@/lib/validations';
 
 interface RouteSearchResult {
   id?: string;

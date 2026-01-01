@@ -4,7 +4,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Users, Settings, Shield, UserX, AlertTriangle, FileWarning, Map } from "lucide-react";
+import { Users, Settings, Shield, UserX, AlertTriangle, FileWarning, Map, MapPin, Tag } from "lucide-react";
 import { toast } from "sonner";
 
 const SIMULATE_USER_KEY = 'mapalinear_simulate_user';
@@ -147,6 +147,40 @@ export default function AdminPage() {
                 <h2 className="text-lg font-semibold text-gray-900">Mapas</h2>
                 <p className="text-sm text-gray-500">
                   Gerenciar mapas do sistema
+                </p>
+              </div>
+            </div>
+          </Link>
+
+          <Link
+            href="/admin/pois"
+            className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
+          >
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-blue-100 rounded-lg">
+                <MapPin className="w-6 h-6 text-blue-600" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Pontos de Interesse</h2>
+                <p className="text-sm text-gray-500">
+                  Gerenciar POIs e qualidade dos dados
+                </p>
+              </div>
+            </div>
+          </Link>
+
+          <Link
+            href="/admin/poi-config"
+            className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
+          >
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-purple-100 rounded-lg">
+                <Tag className="w-6 h-6 text-purple-600" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Configuração de POIs</h2>
+                <p className="text-sm text-gray-500">
+                  Tags obrigatórias por tipo de POI
                 </p>
               </div>
             </div>

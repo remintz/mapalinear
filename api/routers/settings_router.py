@@ -4,7 +4,7 @@ Settings router for system configuration endpoints.
 
 import logging
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -12,7 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.database.connection import get_db
 from api.database.models.user import User
-from api.database.repositories.system_settings import SystemSettingsRepository
+from api.database.repositories.system_settings import (
+    SystemSettingsRepository,
+    AVAILABLE_TAGS,
+    DEFAULT_REQUIRED_TAGS,
+)
 from api.middleware.auth import get_current_admin, get_current_user
 
 logger = logging.getLogger(__name__)
@@ -48,6 +52,133 @@ class UpdateSettingsRequest(BaseModel):
 
     settings: Dict[str, str] = Field(..., description="Settings to update")
 
+
+# ===========================================
+# Required Tags endpoints - MUST be defined BEFORE {key} routes!
+# ===========================================
+
+class RequiredTagsResponse(BaseModel):
+    """Response with required tags configuration."""
+
+    required_tags: Dict[str, List[str]] = Field(
+        ..., description="Required tags per POI type"
+    )
+    available_tags: List[str] = Field(
+        ..., description="Available tags that can be configured"
+    )
+
+
+class UpdateRequiredTagsRequest(BaseModel):
+    """Request to update required tags configuration."""
+
+    required_tags: Dict[str, List[str]] = Field(
+        ..., description="Required tags per POI type"
+    )
+
+
+@router.get("/required-tags", response_model=RequiredTagsResponse)
+async def get_required_tags(
+    db: AsyncSession = Depends(get_db),
+) -> RequiredTagsResponse:
+    """
+    Get required tags configuration.
+
+    Returns the current configuration of required tags per POI type,
+    along with the list of available tags that can be configured.
+
+    Returns:
+        Required tags config and available tags list
+    """
+    repo = SystemSettingsRepository(db)
+    required_tags = await repo.get_required_tags()
+    available_tags = repo.get_available_tags()
+
+    return RequiredTagsResponse(
+        required_tags=required_tags,
+        available_tags=available_tags
+    )
+
+
+@router.put("/required-tags", response_model=RequiredTagsResponse)
+async def update_required_tags(
+    request: UpdateRequiredTagsRequest,
+    admin_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+) -> RequiredTagsResponse:
+    """
+    Update required tags configuration.
+
+    Requires admin privileges.
+
+    Args:
+        request: New required tags configuration
+
+    Returns:
+        Updated required tags config
+    """
+    repo = SystemSettingsRepository(db)
+
+    # Validate that all provided tags are in the available list
+    for poi_type, tags in request.required_tags.items():
+        invalid_tags = [t for t in tags if t not in AVAILABLE_TAGS]
+        if invalid_tags:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Tags inválidas para '{poi_type}': {invalid_tags}. Tags disponíveis: {AVAILABLE_TAGS}"
+            )
+
+    await repo.set_required_tags(
+        required_tags=request.required_tags,
+        updated_by=admin_user.email
+    )
+    await db.commit()
+
+    logger.info(f"Required tags updated by {admin_user.email}")
+
+    required_tags = await repo.get_required_tags()
+    available_tags = repo.get_available_tags()
+
+    return RequiredTagsResponse(
+        required_tags=required_tags,
+        available_tags=available_tags
+    )
+
+
+@router.post("/required-tags/reset", response_model=RequiredTagsResponse)
+async def reset_required_tags(
+    admin_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+) -> RequiredTagsResponse:
+    """
+    Reset required tags to default configuration.
+
+    Requires admin privileges.
+
+    Returns:
+        Default required tags config
+    """
+    repo = SystemSettingsRepository(db)
+
+    await repo.set_required_tags(
+        required_tags=DEFAULT_REQUIRED_TAGS,
+        updated_by=admin_user.email
+    )
+    await db.commit()
+
+    logger.info(f"Required tags reset to defaults by {admin_user.email}")
+
+    required_tags = await repo.get_required_tags()
+    available_tags = repo.get_available_tags()
+
+    return RequiredTagsResponse(
+        required_tags=required_tags,
+        available_tags=available_tags
+    )
+
+
+# ===========================================
+# General settings endpoints
+# ===========================================
 
 # Public endpoint to get settings (for frontend use)
 @router.get("", response_model=SettingsResponse)

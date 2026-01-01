@@ -8,9 +8,13 @@ Tests for POI quality assessment and filtering:
 - extract_amenities
 - format_opening_hours
 - filter_by_excluded_cities
+- calculate_missing_tags
+- get_osm_tags_from_poi
+- update_poi_quality_fields
 """
 
 import pytest
+from unittest.mock import MagicMock
 
 from api.models.road_models import Coordinates, MilestoneType, RoadMilestone
 from api.services.poi_quality_service import (
@@ -21,6 +25,9 @@ from api.services.poi_quality_service import (
     extract_amenities,
     format_opening_hours,
     filter_by_excluded_cities,
+    calculate_missing_tags,
+    get_osm_tags_from_poi,
+    update_poi_quality_fields,
 )
 
 
@@ -416,3 +423,177 @@ class TestPOIQualityServiceInstance:
         score = service.calculate_quality_score(tags)
         assert score >= 0.3  # Verify score meets threshold
         assert service.meets_quality_threshold(tags, score) is True
+
+
+class TestCalculateMissingTags:
+    """Tests for calculate_missing_tags function."""
+
+    def test_no_missing_tags(self):
+        """All required tags present should return empty list."""
+        osm_tags = {"name": "Posto Shell", "brand": "Shell"}
+        required_tags = ["name", "brand"]
+        result = calculate_missing_tags(osm_tags, required_tags)
+        assert result == []
+
+    def test_all_tags_missing(self):
+        """No required tags present should return all."""
+        osm_tags = {}
+        required_tags = ["name", "brand"]
+        result = calculate_missing_tags(osm_tags, required_tags)
+        assert sorted(result) == ["brand", "name"]
+
+    def test_some_tags_missing(self):
+        """Partial tags should return only missing."""
+        osm_tags = {"name": "Posto Shell"}
+        required_tags = ["name", "brand", "phone"]
+        result = calculate_missing_tags(osm_tags, required_tags)
+        assert sorted(result) == ["brand", "phone"]
+
+    def test_empty_string_counts_as_missing(self):
+        """Empty string values should count as missing."""
+        osm_tags = {"name": "", "brand": "Shell"}
+        required_tags = ["name", "brand"]
+        result = calculate_missing_tags(osm_tags, required_tags)
+        assert result == ["name"]
+
+    def test_whitespace_only_counts_as_missing(self):
+        """Whitespace-only values should count as missing."""
+        osm_tags = {"name": "   ", "brand": "Shell"}
+        required_tags = ["name", "brand"]
+        result = calculate_missing_tags(osm_tags, required_tags)
+        assert result == ["name"]
+
+    def test_none_value_counts_as_missing(self):
+        """None values should count as missing."""
+        osm_tags = {"name": None, "brand": "Shell"}
+        required_tags = ["name", "brand"]
+        result = calculate_missing_tags(osm_tags, required_tags)
+        assert result == ["name"]
+
+    def test_empty_required_tags(self):
+        """Empty required tags should return empty list."""
+        osm_tags = {"name": "Test"}
+        required_tags = []
+        result = calculate_missing_tags(osm_tags, required_tags)
+        assert result == []
+
+
+class TestGetOsmTagsFromPoi:
+    """Tests for get_osm_tags_from_poi function."""
+
+    def test_none_tags(self):
+        """POI with None tags should return empty dict."""
+        poi = MagicMock()
+        poi.tags = None
+        result = get_osm_tags_from_poi(poi)
+        assert result == {}
+
+    def test_empty_tags(self):
+        """POI with empty tags should return empty dict."""
+        poi = MagicMock()
+        poi.tags = {}
+        result = get_osm_tags_from_poi(poi)
+        assert result == {}
+
+    def test_tags_without_osm_tags_key(self):
+        """POI with tags but no osm_tags key should return empty dict."""
+        poi = MagicMock()
+        poi.tags = {"quality_score": 0.5}
+        result = get_osm_tags_from_poi(poi)
+        assert result == {}
+
+    def test_tags_with_osm_tags(self):
+        """POI with osm_tags should return them."""
+        poi = MagicMock()
+        poi.tags = {
+            "osm_tags": {"name": "Test", "brand": "Shell"},
+            "quality_score": 0.5
+        }
+        result = get_osm_tags_from_poi(poi)
+        assert result == {"name": "Test", "brand": "Shell"}
+
+
+class TestUpdatePoiQualityFields:
+    """Tests for update_poi_quality_fields function."""
+
+    def test_poi_with_all_required_tags(self):
+        """POI with all required tags should not be low quality."""
+        poi = MagicMock()
+        poi.type = "gas_station"
+        poi.tags = {"osm_tags": {"name": "Posto Shell", "brand": "Shell"}}
+        poi.missing_tags = None
+        poi.is_low_quality = False
+
+        config = {"gas_station": ["name", "brand"]}
+        result = update_poi_quality_fields(poi, config)
+
+        assert poi.missing_tags == []
+        assert poi.is_low_quality is False
+
+    def test_poi_missing_required_tags(self):
+        """POI missing required tags should be low quality."""
+        poi = MagicMock()
+        poi.type = "gas_station"
+        poi.tags = {"osm_tags": {"name": "Posto Shell"}}
+        poi.missing_tags = None
+        poi.is_low_quality = False
+
+        config = {"gas_station": ["name", "brand"]}
+        result = update_poi_quality_fields(poi, config)
+
+        assert poi.missing_tags == ["brand"]
+        assert poi.is_low_quality is True
+
+    def test_poi_type_not_in_config_uses_name_default(self):
+        """POI type not in config should default to requiring name."""
+        poi = MagicMock()
+        poi.type = "unknown_type"
+        poi.tags = {"osm_tags": {}}
+        poi.missing_tags = None
+        poi.is_low_quality = False
+
+        config = {"gas_station": ["name", "brand"]}
+        result = update_poi_quality_fields(poi, config)
+
+        assert poi.missing_tags == ["name"]
+        assert poi.is_low_quality is True
+
+    def test_returns_true_when_changed(self):
+        """Should return True when fields are changed."""
+        poi = MagicMock()
+        poi.type = "gas_station"
+        poi.tags = {"osm_tags": {"name": "Posto"}}
+        poi.missing_tags = []  # Was empty
+        poi.is_low_quality = False  # Was False
+
+        config = {"gas_station": ["name", "brand"]}
+        result = update_poi_quality_fields(poi, config)
+
+        assert result is True  # Changed to low quality
+
+    def test_returns_false_when_not_changed(self):
+        """Should return False when fields are not changed."""
+        poi = MagicMock()
+        poi.type = "gas_station"
+        poi.tags = {"osm_tags": {"name": "Posto"}}
+        poi.missing_tags = ["brand"]  # Already has correct missing
+        poi.is_low_quality = True  # Already is low quality
+
+        config = {"gas_station": ["name", "brand"]}
+        result = update_poi_quality_fields(poi, config)
+
+        assert result is False  # No change
+
+    def test_poi_with_no_tags(self):
+        """POI with no tags should have all required tags as missing."""
+        poi = MagicMock()
+        poi.type = "restaurant"
+        poi.tags = None
+        poi.missing_tags = None
+        poi.is_low_quality = False
+
+        config = {"restaurant": ["name"]}
+        result = update_poi_quality_fields(poi, config)
+
+        assert poi.missing_tags == ["name"]
+        assert poi.is_low_quality is True

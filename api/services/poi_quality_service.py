@@ -8,11 +8,15 @@ This service provides stateless methods for:
 - Extracting amenities from OSM tags
 - Formatting opening hours
 - Filtering POIs by city
+- Calculating missing required tags per POI type
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from api.models.road_models import RoadMilestone
+
+if TYPE_CHECKING:
+    from api.database.models.poi import POI
 
 
 class POIQualityService:
@@ -295,6 +299,89 @@ class POIQualityService:
             if not m.city or m.city.strip().lower() not in excluded_normalized
         ]
 
+    def calculate_missing_tags(
+        self,
+        osm_tags: Dict[str, Any],
+        required_tags: List[str]
+    ) -> List[str]:
+        """
+        Calculate which required tags are missing from the OSM tags.
+
+        Args:
+            osm_tags: Dictionary of OSM tags from the POI
+            required_tags: List of required tag names for this POI type
+
+        Returns:
+            List of tag names that are missing or empty
+        """
+        missing = []
+        for tag in required_tags:
+            value = osm_tags.get(tag)
+            # Tag is missing if not present or empty/whitespace
+            if value is None or (isinstance(value, str) and not value.strip()):
+                missing.append(tag)
+        return missing
+
+    def get_osm_tags_from_poi(self, poi: "POI") -> Dict[str, Any]:
+        """
+        Extract OSM tags from a POI's tags JSONB field.
+
+        The tags field structure is:
+        {
+            "osm_tags": { "name": "...", "brand": "...", ... },
+            "quality_score": 0.28,
+            ...
+        }
+
+        Args:
+            poi: POI database model
+
+        Returns:
+            Dictionary of OSM tags, or empty dict if not available
+        """
+        if not poi.tags:
+            return {}
+        return poi.tags.get("osm_tags", {})
+
+    def update_poi_quality_fields(
+        self,
+        poi: "POI",
+        required_tags_config: Dict[str, List[str]]
+    ) -> bool:
+        """
+        Update POI's quality fields based on required tags configuration.
+
+        Updates the following fields on the POI:
+        - missing_tags: List of required tags that are missing
+        - is_low_quality: True if any required tags are missing
+
+        Args:
+            poi: POI database model to update
+            required_tags_config: Dict mapping POI type to list of required tags
+
+        Returns:
+            True if the POI was modified, False otherwise
+        """
+        # Get required tags for this POI type (default to ["name"])
+        required_tags = required_tags_config.get(poi.type, ["name"])
+
+        # Get OSM tags from the POI
+        osm_tags = self.get_osm_tags_from_poi(poi)
+
+        # Calculate missing tags
+        missing = self.calculate_missing_tags(osm_tags, required_tags)
+
+        # Check if anything changed
+        old_missing = poi.missing_tags or []
+        old_low_quality = poi.is_low_quality
+
+        # Update POI
+        poi.missing_tags = missing
+        poi.is_low_quality = len(missing) > 0
+
+        # Return True if anything changed
+        return poi.missing_tags != old_missing or poi.is_low_quality != old_low_quality
+
 
 # Module-level instance for convenience
 _default_service = POIQualityService()
@@ -333,3 +420,22 @@ def filter_by_excluded_cities(
 ) -> List[RoadMilestone]:
     """Filter milestones by excluded cities."""
     return _default_service.filter_by_excluded_cities(milestones, excluded_cities)
+
+
+def calculate_missing_tags(
+    osm_tags: Dict[str, Any], required_tags: List[str]
+) -> List[str]:
+    """Calculate which required tags are missing."""
+    return _default_service.calculate_missing_tags(osm_tags, required_tags)
+
+
+def get_osm_tags_from_poi(poi: "POI") -> Dict[str, Any]:
+    """Extract OSM tags from a POI's tags field."""
+    return _default_service.get_osm_tags_from_poi(poi)
+
+
+def update_poi_quality_fields(
+    poi: "POI", required_tags_config: Dict[str, List[str]]
+) -> bool:
+    """Update POI's quality fields based on required tags configuration."""
+    return _default_service.update_poi_quality_fields(poi, required_tags_config)

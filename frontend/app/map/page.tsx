@@ -14,7 +14,7 @@ import { apiClient } from '@/lib/api';
 import { useRouteSimulation } from '@/hooks/useRouteSimulation';
 import { useRouteTracking } from '@/hooks/useRouteTracking';
 import { useGeolocation } from '@/hooks/useGeolocation';
-import { RouteSegment, POI, Milestone } from '@/lib/types';
+import { RouteSegment, Milestone } from '@/lib/types';
 import { ReportProblemButton } from '@/components/reports/ReportProblemButton';
 import RouteMapModal from '@/components/RouteMapModal';
 
@@ -23,7 +23,7 @@ interface RouteSearchResponse {
   destination: string;
   total_distance_km: number;
   segments: RouteSegment[];
-  pois: POI[];
+  pois: Milestone[];  // Using Milestone type since POIs come from milestones
   milestones: Milestone[];
 }
 
@@ -110,9 +110,15 @@ function MapPageContent() {
           const operation = await apiClient.getOperationStatus(operationId);
 
           // Update progress
-          if (operation.progress) {
-            setProgressMessage(operation.progress.message || 'Processando...');
-            setProgressPercent(operation.progress.percentage || 0);
+          setProgressPercent(operation.progress_percent || 0);
+          if (operation.progress_percent <= 30) {
+            setProgressMessage('Consultando OpenStreetMap...');
+          } else if (operation.progress_percent <= 60) {
+            setProgressMessage('Processando rota...');
+          } else if (operation.progress_percent <= 90) {
+            setProgressMessage('Buscando pontos de interesse...');
+          } else {
+            setProgressMessage('Finalizando...');
           }
 
           // Check if completed
@@ -125,13 +131,15 @@ function MapPageContent() {
             setProgressPercent(100);
 
             if (operation.result) {
+              // Use milestones as the source of truth for POIs
+              const milestones = operation.result.milestones || [];
               const routeData: RouteSearchResponse = {
                 origin: operation.result.origin,
                 destination: operation.result.destination,
                 total_distance_km: operation.result.total_length_km || operation.result.total_distance_km || 0,
                 segments: (operation.result.segments || []) as RouteSegment[],
-                pois: operation.result.milestones || operation.result.pois || [],
-                milestones: operation.result.milestones || []
+                pois: milestones,
+                milestones: milestones
               };
               setData(routeData);
 
@@ -266,12 +274,35 @@ function MapPageContent() {
   const downloadFile = async (format: 'geojson' | 'gpx', routeData: RouteSearchResponse) => {
     setIsExporting(true);
     try {
+      // Convert segments to ExportSegment format (ensure geometry is defined)
+      const exportSegments = (routeData.segments || [])
+        .filter(seg => seg.geometry && seg.geometry.length > 0)
+        .map(seg => ({
+          id: seg.id,
+          name: seg.name,
+          geometry: seg.geometry!,
+          length_km: seg.length_km || seg.distance_km
+        }));
+
+      // Convert POIs to ExportPOI format
+      const exportPOIs = filteredPOIs.map(poi => ({
+        id: poi.id,
+        name: poi.name,
+        type: poi.type,
+        coordinates: poi.coordinates,
+        distance_from_origin_km: poi.distance_from_origin_km,
+        city: poi.city,
+        brand: poi.brand,
+        operator: poi.operator,
+        opening_hours: poi.opening_hours
+      }));
+
       const exportData = {
         origin: routeData.origin,
         destination: routeData.destination,
         total_distance_km: routeData.total_distance_km,
-        segments: routeData.segments || [],
-        pois: filteredPOIs
+        segments: exportSegments,
+        pois: exportPOIs
       };
 
       const blob = format === 'geojson'
@@ -334,12 +365,35 @@ function MapPageContent() {
   // Open web tools function
   const openWebTool = async (tool: 'umap' | 'overpass', routeData: RouteSearchResponse) => {
     try {
+      // Convert segments to ExportSegment format
+      const exportSegments = (routeData.segments || [])
+        .filter(seg => seg.geometry && seg.geometry.length > 0)
+        .map(seg => ({
+          id: seg.id,
+          name: seg.name,
+          geometry: seg.geometry!,
+          length_km: seg.length_km || seg.distance_km
+        }));
+
+      // Convert POIs to ExportPOI format
+      const exportPOIs = (routeData.pois || []).map(poi => ({
+        id: poi.id,
+        name: poi.name,
+        type: poi.type,
+        coordinates: poi.coordinates,
+        distance_from_origin_km: poi.distance_from_origin_km,
+        city: poi.city,
+        brand: poi.brand,
+        operator: poi.operator,
+        opening_hours: poi.opening_hours
+      }));
+
       const exportData = {
         origin: routeData.origin,
         destination: routeData.destination,
         total_distance_km: routeData.total_distance_km,
-        segments: routeData.segments || [],
-        pois: routeData.pois || []
+        segments: exportSegments,
+        pois: exportPOIs
       };
 
       const urlData = await apiClient.getWebVisualizationURLs(exportData);
@@ -592,7 +646,7 @@ function MapPageContent() {
       <ReportProblemButton
         mapId={mapId || undefined}
         pois={filteredPOIs.map(poi => ({
-          id: poi.id || String(poi.osm_id || poi.here_id || Math.random()),
+          id: poi.id || String(Math.random()),
           name: poi.name || poi.type,
           type: poi.type,
           distance_from_origin_km: poi.distance_from_origin_km,

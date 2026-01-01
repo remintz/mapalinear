@@ -335,3 +335,73 @@ export interface POIDebugListResponse {
   summary: POIDebugSummary;
   has_debug_data: boolean;
 }
+
+// Admin POI types
+export interface AdminPOI {
+  id: string;
+  osm_id?: string;
+  here_id?: string;
+  name: string;
+  type: string;
+  latitude: number;
+  longitude: number;
+  city?: string;
+  quality_score?: number;
+  is_low_quality: boolean;
+  missing_tags: string[];
+  quality_issues: string[];
+  brand?: string;
+  operator?: string;
+  phone?: string;
+  website?: string;
+  opening_hours?: string;
+  cuisine?: string;
+  rating?: number;
+  rating_count?: number;
+  has_name: boolean;
+  has_phone: boolean;
+  has_website: boolean;
+  has_opening_hours: boolean;
+  has_brand: boolean;
+  has_operator: boolean;
+  created_at: string;
+}
+
+export interface AdminPOIDetail extends AdminPOI {
+  osm_tags: Record<string, unknown>;
+  here_data?: Record<string, unknown>;
+  enriched_by: string[];
+  google_maps_uri?: string;
+  is_referenced: boolean;
+  amenities: string[];
+}
+
+export interface AdminPOIListResponse {
+  pois: AdminPOI[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface AdminPOIFilters {
+  cities: string[];
+  types: string[];
+}
+
+export interface AdminPOIStats {
+  total: number;
+  low_quality: number;
+  by_type: Record<string, number>;
+  by_city: Record<string, number>;
+}
+
+export interface RecalculateQualityResponse {
+  updated: number;
+  total: number;
+  message: string;
+}
+
+export interface RequiredTagsConfig {
+  required_tags: Record<string, string[]>;
+  available_tags: string[];
+}

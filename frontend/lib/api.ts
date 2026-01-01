@@ -15,6 +15,13 @@ import {
   POIDebugListResponse,
   POIDebugData,
   POIDebugSummary,
+  AdminPOI,
+  AdminPOIDetail,
+  AdminPOIListResponse,
+  AdminPOIFilters,
+  AdminPOIStats,
+  RecalculateQualityResponse,
+  RequiredTagsConfig,
 } from './types';
 
 // Helper to wait for session with retry
@@ -550,6 +557,81 @@ class APIClient {
    */
   async getPOIDebugSummary(mapId: string): Promise<POIDebugSummary> {
     const { data } = await this.client.get<POIDebugSummary>(`/admin/maps/${mapId}/debug/summary`);
+    return data;
+  }
+
+  // Admin POIs
+
+  /**
+   * Get list of all POIs with filters (admin).
+   */
+  async getAdminPOIs(params?: {
+    name?: string;
+    city?: string;
+    poi_type?: string;
+    low_quality_only?: boolean;
+    page?: number;
+    limit?: number;
+  }): Promise<AdminPOIListResponse> {
+    const { data } = await this.client.get<AdminPOIListResponse>('/admin/pois', { params });
+    return data;
+  }
+
+  /**
+   * Get POI filter options (admin).
+   */
+  async getAdminPOIFilters(): Promise<AdminPOIFilters> {
+    const { data } = await this.client.get<AdminPOIFilters>('/admin/pois/filters');
+    return data;
+  }
+
+  /**
+   * Get POI statistics (admin).
+   */
+  async getAdminPOIStats(): Promise<AdminPOIStats> {
+    const { data } = await this.client.get<AdminPOIStats>('/admin/pois/stats');
+    return data;
+  }
+
+  /**
+   * Recalculate quality for all POIs (admin).
+   */
+  async recalculatePOIQuality(): Promise<RecalculateQualityResponse> {
+    const { data } = await this.client.post<RecalculateQualityResponse>('/admin/pois/recalculate-quality');
+    return data;
+  }
+
+  /**
+   * Get detailed POI information (admin).
+   */
+  async getAdminPOI(poiId: string): Promise<AdminPOIDetail> {
+    const { data } = await this.client.get<AdminPOIDetail>(`/admin/pois/${poiId}`);
+    return data;
+  }
+
+  // Required Tags Config (admin)
+
+  /**
+   * Get required tags configuration.
+   */
+  async getRequiredTags(): Promise<RequiredTagsConfig> {
+    const { data } = await this.client.get<RequiredTagsConfig>('/settings/required-tags');
+    return data;
+  }
+
+  /**
+   * Update required tags configuration (admin).
+   */
+  async updateRequiredTags(requiredTags: Record<string, string[]>): Promise<RequiredTagsConfig> {
+    const { data } = await this.client.put<RequiredTagsConfig>('/settings/required-tags', { required_tags: requiredTags });
+    return data;
+  }
+
+  /**
+   * Reset required tags to defaults (admin).
+   */
+  async resetRequiredTags(): Promise<RequiredTagsConfig> {
+    const { data } = await this.client.post<RequiredTagsConfig>('/settings/required-tags/reset');
     return data;
   }
 

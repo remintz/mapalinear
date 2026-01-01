@@ -1,5 +1,6 @@
 """Repository for system settings operations."""
 
+import json
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -8,6 +9,33 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.database.models.system_settings import SystemSettings
 
+
+# Default required tags per POI type
+DEFAULT_REQUIRED_TAGS = {
+    "gas_station": ["name", "brand"],
+    "restaurant": ["name"],
+    "hotel": ["name"],
+    "hospital": ["name"],
+    "toll_booth": ["name"],
+    "rest_area": ["name"],
+    "city": ["name"],
+    "town": ["name"],
+    "village": ["name"]
+}
+
+# Available tags that can be configured as required
+AVAILABLE_TAGS = [
+    "name",           # Nome do estabelecimento
+    "brand",          # Marca (Shell, Ipiranga, etc.)
+    "operator",       # Operadora
+    "phone",          # Telefone
+    "website",        # Site
+    "opening_hours",  # Horário de funcionamento
+    "cuisine",        # Tipo de cozinha (restaurantes)
+    "stars",          # Estrelas (hotéis)
+    "addr:street",    # Endereço - rua
+    "addr:city",      # Endereço - cidade
+]
 
 # Default settings with their descriptions
 DEFAULT_SETTINGS = {
@@ -22,6 +50,10 @@ DEFAULT_SETTINGS = {
     "poi_debug_enabled": {
         "value": "true",
         "description": "Habilitar coleta de dados de debug para POIs (true/false)"
+    },
+    "required_tags_by_poi_type": {
+        "value": json.dumps(DEFAULT_REQUIRED_TAGS),
+        "description": "Tags OSM obrigatórias por tipo de POI (JSON)"
     }
 }
 
@@ -122,3 +154,34 @@ class SystemSettingsRepository:
                     value=config["value"],
                     description=config["description"]
                 )
+
+    async def get_required_tags(self) -> Dict[str, List[str]]:
+        """Get the required tags configuration per POI type."""
+        value = await self.get_value("required_tags_by_poi_type")
+        if value:
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return DEFAULT_REQUIRED_TAGS
+        return DEFAULT_REQUIRED_TAGS
+
+    async def set_required_tags(
+        self,
+        required_tags: Dict[str, List[str]],
+        updated_by: Optional[str] = None
+    ) -> SystemSettings:
+        """Set the required tags configuration per POI type."""
+        return await self.set(
+            key="required_tags_by_poi_type",
+            value=json.dumps(required_tags),
+            updated_by=updated_by
+        )
+
+    async def get_required_tags_for_type(self, poi_type: str) -> List[str]:
+        """Get required tags for a specific POI type."""
+        required_tags = await self.get_required_tags()
+        return required_tags.get(poi_type, ["name"])
+
+    def get_available_tags(self) -> List[str]:
+        """Get list of available tags that can be configured."""
+        return AVAILABLE_TAGS.copy()

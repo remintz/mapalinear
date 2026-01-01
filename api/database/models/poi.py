@@ -99,6 +99,14 @@ class POI(Base):
     # POIs with is_referenced=False don't need enrichment
     is_referenced: Mapped[bool] = mapped_column(default=False, index=True)
 
+    # Quality tracking
+    quality_score: Mapped[Optional[float]] = mapped_column(nullable=True)  # 0.0 to 1.0
+    quality_issues: Mapped[list] = mapped_column(JSONB, default=list)
+    # Examples: ["abandoned", "missing_name", "missing_brand", "low_score"]
+    is_low_quality: Mapped[bool] = mapped_column(default=False, index=True)
+    missing_tags: Mapped[list] = mapped_column(JSONB, default=list)
+    # Required tags that are missing for this POI type (e.g., ["brand", "phone"])
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

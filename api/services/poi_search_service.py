@@ -182,6 +182,14 @@ class POISearchService:
                             )
                             continue
 
+                        # Skip abandoned POIs (they are still collected for persistence)
+                        provider_data = poi.provider_data or {}
+                        if provider_data.get('is_abandoned', False):
+                            logger.debug(
+                                f"Skipping abandoned POI: {poi.name} ({poi.id})"
+                            )
+                            continue
+
                         # Calculate distance from POI to search point
                         poi_distance_from_road = calculate_distance_meters(
                             poi.location.latitude,
