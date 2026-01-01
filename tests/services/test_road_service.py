@@ -664,8 +664,8 @@ class TestGenerateLinearMap:
         mock_geo_provider.calculate_route.return_value = sample_route
         mock_poi_provider.search_pois.return_value = sample_pois
 
-        # Mock the async method
-        with patch.object(road_service, '_find_milestones_from_segments', new_callable=AsyncMock) as mock_find:
+        # Mock the POI search service's find_milestones method
+        with patch.object(road_service.poi_search_service, 'find_milestones', new_callable=AsyncMock) as mock_find:
             mock_find.return_value = []
 
             result = road_service.generate_linear_map(

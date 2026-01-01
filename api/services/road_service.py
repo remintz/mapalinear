@@ -1,23 +1,37 @@
-import uuid
-from typing import List, Optional, Dict, Any, Tuple, Callable, Union
+"""
+Road Service - Main orchestrator for linear map generation.
+
+This service coordinates the generation of linear maps by delegating to
+specialized services for each step of the process:
+- RouteSegmentationService: Route processing and segmentation
+- POISearchService: POI discovery and junction calculation
+- MilestoneFactory: Milestone creation and enrichment
+- RouteStatisticsService: Route statistics and recommendations
+"""
+
 import logging
-import math
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from api.models.road_models import (
     LinearMapResponse,
     LinearRoadSegment,
     RoadMilestone,
     RoadMilestoneResponse,
-    SavedMapResponse,
-    MilestoneType,
-    Coordinates,
+    RouteStatisticsResponse,
+    POIStatistics,
+    RouteStopRecommendation,
 )
 from api.providers.base import GeoProvider, ProviderType
-from api.providers.models import GeoLocation, Route, POI, POICategory
+from api.providers.models import GeoLocation, Route, POICategory
 from api.providers.settings import get_settings
+from api.services.milestone_factory import MilestoneFactory
 from api.services.poi_debug_service import POIDebugDataCollector
+from api.services.poi_quality_service import POIQualityService
+from api.services.poi_search_service import POISearchService
+from api.services.route_segmentation_service import RouteSegmentationService
+from api.utils.async_utils import run_async_safe
+from api.utils.geo_utils import calculate_distance_meters
 
-# Usar logger centralizado
 logger = logging.getLogger(__name__)
 
 
@@ -51,22 +65,38 @@ def _is_debug_enabled_sync() -> bool:
         finally:
             conn.close()
     except Exception as e:
-        logger.warning(f"Erro ao verificar configuração de debug: {e}")
+        logger.warning(f"Error checking debug config: {e}")
         # Default to true on error
         return True
 
+
 class RoadService:
+    """
+    Main service for generating linear maps of routes.
+
+    This class acts as an orchestrator, coordinating specialized services
+    to produce complete linear map representations of road routes.
+    """
+
     def __init__(
         self,
         geo_provider: Optional[GeoProvider] = None,
-        poi_provider: Optional[GeoProvider] = None
+        poi_provider: Optional[GeoProvider] = None,
+        segmentation_service: Optional[RouteSegmentationService] = None,
+        poi_search_service: Optional[POISearchService] = None,
+        milestone_factory: Optional[MilestoneFactory] = None,
+        quality_service: Optional[POIQualityService] = None,
     ):
         """
-        Initialize RoadService with geographic data providers.
+        Initialize RoadService with geographic data providers and services.
 
         Args:
             geo_provider: Provider for routing/geocoding (always OSM if not specified)
             poi_provider: Provider for POI search (configured via POI_PROVIDER env var)
+            segmentation_service: Service for route segmentation (optional)
+            poi_search_service: Service for POI search (optional)
+            milestone_factory: Factory for milestone creation (optional)
+            quality_service: Service for POI quality (optional)
         """
         from ..providers import create_provider
 
@@ -83,149 +113,133 @@ class RoadService:
             poi_provider = create_provider(poi_provider_type)
         self.poi_provider = poi_provider
 
-        logger.info(f"RoadService initialized - Route: OSM, POI: {settings.poi_provider.upper()}")
+        # Initialize services with lazy loading
+        self._segmentation_service = segmentation_service
+        self._quality_service = quality_service
+        self._milestone_factory = milestone_factory
+        self._poi_search_service = poi_search_service
+
+        logger.info(
+            f"RoadService initialized - Route: OSM, POI: {settings.poi_provider.upper()}"
+        )
+
+    @property
+    def segmentation_service(self) -> RouteSegmentationService:
+        """Get or create the segmentation service."""
+        if self._segmentation_service is None:
+            self._segmentation_service = RouteSegmentationService()
+        return self._segmentation_service
+
+    @property
+    def quality_service(self) -> POIQualityService:
+        """Get or create the quality service."""
+        if self._quality_service is None:
+            self._quality_service = POIQualityService()
+        return self._quality_service
+
+    @property
+    def milestone_factory(self) -> MilestoneFactory:
+        """Get or create the milestone factory."""
+        if self._milestone_factory is None:
+            self._milestone_factory = MilestoneFactory(
+                geo_provider=self.geo_provider,
+                quality_service=self.quality_service,
+            )
+        return self._milestone_factory
+
+    @property
+    def poi_search_service(self) -> POISearchService:
+        """Get or create the POI search service."""
+        if self._poi_search_service is None:
+            self._poi_search_service = POISearchService(
+                geo_provider=self.geo_provider,
+                poi_provider=self.poi_provider,
+                milestone_factory=self.milestone_factory,
+                quality_service=self.quality_service,
+            )
+        return self._poi_search_service
 
     # ========================================================================
     # UTILITY METHODS
     # ========================================================================
-    
-    def _run_async_safe(self, coro):
-        """
-        Execute async coroutine safely, handling both running and non-running event loops.
-        
-        This helper allows calling async provider methods from sync contexts.
-        """
-        import asyncio
-        
-        try:
-            # Try to get the event loop for this thread
-            loop = asyncio.get_event_loop()
-            
-            # Check if the loop is running
-            if loop.is_running():
-                # If loop is already running (e.g., in async context), 
-                # we need to run in a new thread
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, coro)
-                    return future.result()
-            else:
-                # Loop exists but not running - run the coroutine in it
-                return loop.run_until_complete(coro)
-        except RuntimeError:
-            # No event loop in this thread, create and use a new one
-            return asyncio.run(coro)
-    
+
     def _extract_city_name(self, location_string: str) -> str:
         """
         Extract city name from location string.
-        
+
         Args:
             location_string: Location in format "City, State" (e.g., "Belo Horizonte, MG")
-            
+
         Returns:
             City name (e.g., "Belo Horizonte")
         """
-        return location_string.split(',')[0].strip() if ',' in location_string else location_string.strip()
-    
-    def _geocode_and_validate(self, address: str, address_type: str = "location") -> GeoLocation:
+        return (
+            location_string.split(",")[0].strip()
+            if "," in location_string
+            else location_string.strip()
+        )
+
+    def _geocode_and_validate(
+        self, address: str, address_type: str = "location"
+    ) -> GeoLocation:
         """
         Geocode an address and validate the result.
-        
+
         Args:
             address: Address string to geocode
-            address_type: Type of address for error messages ("origin", "destination", etc.)
-            
+            address_type: Type of address for error messages
+
         Returns:
             GeoLocation object
-            
+
         Raises:
             ValueError: If geocoding fails
         """
-        logger.info(f"🛣️ Geocodificando {address_type}: {address}")
-        location = self._run_async_safe(self.geo_provider.geocode(address))
-        
+        logger.info(f"Geocoding {address_type}: {address}")
+        location = run_async_safe(self.geo_provider.geocode(address))
+
         if not location:
             raise ValueError(f"Could not geocode {address_type}: {address}")
-        
-        logger.info(f"🛣️ {address_type.capitalize()}: {address} → "
-                   f"lat={location.latitude:.6f}, lon={location.longitude:.6f}")
-        
+
+        logger.info(
+            f"{address_type.capitalize()}: {address} -> "
+            f"lat={location.latitude:.6f}, lon={location.longitude:.6f}"
+        )
+
         return location
-    
+
     def _log_route_info(self, route: Route):
         """Log detailed route information."""
-        logger.info(f"🛣️ Rota calculada:")
-        logger.info(f"🛣️ - Distância total: {route.total_distance:.1f} km")
-        logger.info(f"🛣️ - Nomes das estradas: {route.road_names}")
-        logger.info(f"🛣️ - Pontos na geometria: {len(route.geometry)}")
-        
+        logger.info(f"Route calculated:")
+        logger.info(f"  - Total distance: {route.total_distance:.1f} km")
+        logger.info(f"  - Road names: {route.road_names}")
+        logger.info(f"  - Geometry points: {len(route.geometry)}")
+
         if route.geometry:
-            logger.info(f"🛣️ - Primeiro ponto: lat={route.geometry[0][0]:.6f}, "
-                       f"lon={route.geometry[0][1]:.6f}")
-            logger.info(f"🛣️ - Último ponto: lat={route.geometry[-1][0]:.6f}, "
-                       f"lon={route.geometry[-1][1]:.6f}")
-    
-    def _build_milestone_categories(
-        self,
-        include_cities: bool
-    ) -> List[POICategory]:
-        """
-        Build list of all POI categories. Always includes all POI types for comprehensive search.
-        Frontend will filter which ones to display.
+            logger.info(
+                f"  - First point: lat={route.geometry[0][0]:.6f}, "
+                f"lon={route.geometry[0][1]:.6f}"
+            )
+            logger.info(
+                f"  - Last point: lat={route.geometry[-1][0]:.6f}, "
+                f"lon={route.geometry[-1][1]:.6f}"
+            )
 
-        Returns:
-            List of POICategory enums
-        """
-        categories = []
-
-        # Always include all POI types
-        categories.extend([
-            POICategory.GAS_STATION,
-            POICategory.FUEL,
-            POICategory.RESTAURANT,
-            POICategory.FOOD,
-            POICategory.HOTEL,
-            POICategory.LODGING,
-            POICategory.CAMPING,
-            POICategory.HOSPITAL
-        ])
-
-        # Cities/services based on parameter
-        if include_cities:
-            categories.extend([POICategory.SERVICES])
-
-        return categories
-    
-    def _assign_milestones_to_segments(
-        self,
-        segments: List[LinearRoadSegment],
-        milestones: List[RoadMilestone]
-    ):
-        """
-        Assign milestones to their respective segments based on distance.
-        
-        Modifies segments in-place.
-        """
-        for segment in segments:
-            segment.milestones = [
-                milestone for milestone in milestones
-                if segment.start_distance_km <= milestone.distance_from_origin_km <= segment.end_distance_km
-            ]
-            segment.milestones.sort(key=lambda m: m.distance_from_origin_km)
-    
     def _log_milestone_statistics(self, milestones: List[RoadMilestone]):
         """Log statistics about found milestones."""
         milestones_with_city = len([m for m in milestones if m.city])
-        logger.info(f"🏙️ Milestones com cidade: {milestones_with_city}/{len(milestones)}")
-        
+        logger.info(f"Milestones with city: {milestones_with_city}/{len(milestones)}")
+
         for milestone in milestones:
             city_info = f" ({milestone.city})" if milestone.city else ""
-            logger.info(f"🎯 Milestone: {milestone.name}{city_info} "
-                       f"({milestone.type.value}) - dist={milestone.distance_from_origin_km:.1f}km")
-    
+            logger.info(
+                f"Milestone: {milestone.name}{city_info} "
+                f"({milestone.type.value}) - dist={milestone.distance_from_origin_km:.1f}km"
+            )
 
-
+    # ========================================================================
+    # MAIN PUBLIC METHODS
+    # ========================================================================
 
     def generate_linear_map(
         self,
@@ -234,58 +248,73 @@ class RoadService:
         road_id: Optional[str] = None,
         include_cities: bool = True,
         max_distance_from_road: float = 3000,
-        max_detour_distance_km: float = 5.0,  # Maximum detour distance from junction to POI
-        min_distance_from_origin_km: float = 0.0,  # Deprecated - kept for backwards compatibility
+        max_detour_distance_km: float = 5.0,
+        min_distance_from_origin_km: float = 0.0,  # Deprecated
         progress_callback: Optional[Callable[[float], None]] = None,
         segment_length_km: float = 1.0,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
     ) -> LinearMapResponse:
         """
         Generate a linear map of a route between origin and destination.
-        
+
         This method:
         1. Geocodes origin and destination
         2. Calculates the route
         3. Processes route into linear segments
         4. Finds POI milestones along the route
         5. Assigns milestones to segments
-        
+        6. Enriches with Google Places data
+        7. Optionally enriches with HERE data
+
         Args:
-            min_distance_from_origin_km: DEPRECATED - No longer used. POIs are filtered by city name instead.
-            user_id: Optional user ID to associate the map with.
-        
+            origin: Starting point address
+            destination: End point address
+            road_id: Optional road identifier
+            include_cities: Whether to include city markers
+            max_distance_from_road: Maximum POI search radius in meters
+            max_detour_distance_km: Maximum detour distance for distant POIs
+            min_distance_from_origin_km: DEPRECATED - No longer used
+            progress_callback: Callback for progress updates (0-100)
+            segment_length_km: Target length for each segment
+            user_id: Optional user ID to associate the map with
+
         Returns:
             LinearMapResponse with segments and milestones
         """
-        logger.info(f"🛣️ Iniciando geração de mapa linear: {origin} → {destination}")
-        
+        logger.info(f"Starting linear map generation: {origin} -> {destination}")
+
         # Extract origin city for POI filtering
         origin_city = self._extract_city_name(origin)
-        logger.info(f"🏙️ Cidade de origem extraída: {origin_city}")
-        
+        logger.info(f"Origin city extracted: {origin_city}")
+
         # Step 1: Geocode origin and destination
-        origin_location = self._geocode_and_validate(origin, "origem")
-        destination_location = self._geocode_and_validate(destination, "destino")
-        
+        origin_location = self._geocode_and_validate(origin, "origin")
+        destination_location = self._geocode_and_validate(destination, "destination")
+
         # Step 2: Calculate route
-        logger.info(f"🛣️ Calculando rota entre os pontos...")
-        route = self._run_async_safe(
+        logger.info("Calculating route...")
+        route = run_async_safe(
             self.geo_provider.calculate_route(origin_location, destination_location)
         )
-        
+
         if not route:
             raise ValueError(f"Could not calculate route from {origin} to {destination}")
-        
-        self._log_route_info(route)
-        
-        # Step 3: Process route into linear segments
-        linear_segments = self._process_route_into_segments(route, segment_length_km)
-        
-        # Step 4: Find milestones along the route (always search all POI types)
-        milestone_categories = self._build_milestone_categories(include_cities)
 
-        logger.info(f"🛣️ Categorias de milestone solicitadas: "
-                   f"{[cat.value for cat in milestone_categories]}")
+        self._log_route_info(route)
+
+        # Step 3: Process route into linear segments
+        linear_segments = self.segmentation_service.process_route_into_segments(
+            route, segment_length_km
+        )
+
+        # Step 4: Find milestones along the route
+        milestone_categories = self.milestone_factory.build_milestone_categories(
+            include_cities
+        )
+
+        logger.info(
+            f"Milestone categories requested: {[cat.value for cat in milestone_categories]}"
+        )
 
         # Check if debug is enabled and create collector
         debug_collector: Optional[POIDebugDataCollector] = None
@@ -293,32 +322,35 @@ class RoadService:
             if _is_debug_enabled_sync():
                 debug_collector = POIDebugDataCollector()
                 debug_collector.set_main_route_geometry(route.geometry)
-                logger.info("🐛 Debug de POIs habilitado - coletando dados de cálculo")
+                logger.info("POI debug enabled - collecting calculation data")
         except Exception as e:
-            logger.warning(f"⚠️ Erro ao verificar configuração de debug: {e}")
+            logger.warning(f"Error checking debug config: {e}")
 
-        all_milestones = self._run_async_safe(self._find_milestones_from_segments(
-            linear_segments,
-            milestone_categories,
-            max_distance_from_road,
-            max_detour_distance_km=max_detour_distance_km,
-            exclude_cities=[origin_city],
-            progress_callback=progress_callback,
-            main_route=route,
-            debug_collector=debug_collector,
-        ))
-        
+        all_milestones = run_async_safe(
+            self.poi_search_service.find_milestones(
+                segments=linear_segments,
+                categories=milestone_categories,
+                max_distance_from_road=max_distance_from_road,
+                max_detour_distance_km=max_detour_distance_km,
+                exclude_cities=[origin_city],
+                progress_callback=progress_callback,
+                main_route=route,
+                debug_collector=debug_collector,
+            )
+        )
+
         # Step 5: Sort and assign milestones to segments
         all_milestones.sort(key=lambda m: m.distance_from_origin_km)
-        self._assign_milestones_to_segments(linear_segments, all_milestones)
+        self.milestone_factory.assign_to_segments(linear_segments, all_milestones)
 
-        # Step 6: Enrich restaurants and hotels with Google Places ratings
+        # Step 6: Enrich with Google Places ratings
         try:
             from .google_places_service import enrich_milestones_sync
+
             all_milestones = enrich_milestones_sync(all_milestones)
-            logger.info("✅ Milestones enriquecidos com dados do Google Places")
+            logger.info("Milestones enriched with Google Places data")
         except Exception as e:
-            logger.warning(f"⚠️ Erro ao enriquecer milestones com Google Places: {e}")
+            logger.warning(f"Error enriching with Google Places: {e}")
 
         # Create response
         linear_map = LinearMapResponse(
@@ -327,19 +359,20 @@ class RoadService:
             total_length_km=route.total_distance,
             segments=linear_segments,
             milestones=all_milestones,
-            road_id=road_id or f"route_{hash(origin + destination)}"
+            road_id=road_id or f"route_{hash(origin + destination)}",
         )
-        
-        # Log final statistics
-        logger.info(f"🛣️ Mapa linear concluído: {len(linear_segments)} segmentos, "
-                   f"{len(all_milestones)} milestones")
-        self._log_milestone_statistics(all_milestones)
 
-        # Note: Cache is automatically persisted to PostgreSQL, no manual save needed
+        # Log final statistics
+        logger.info(
+            f"Linear map complete: {len(linear_segments)} segments, "
+            f"{len(all_milestones)} milestones"
+        )
+        self._log_milestone_statistics(all_milestones)
 
         # Save linear map to database
         try:
             from .map_storage_service_db import save_map_sync
+
             map_id = save_map_sync(
                 linear_map,
                 user_id=user_id,
@@ -347,7 +380,7 @@ class RoadService:
             )
             linear_map.id = map_id
         except Exception as e:
-            logger.error(f"Erro ao salvar mapa linear no banco: {e}")
+            logger.error(f"Error saving linear map: {e}")
             map_id = None
 
         # Step 7: HERE enrichment (only when POI_PROVIDER=osm and HERE_ENRICHMENT_ENABLED=true)
@@ -368,8 +401,6 @@ class RoadService:
                 )
 
                 async def _enrich():
-                    # Create standalone engine to avoid event loop conflicts
-                    # when running in background threads
                     database_url = (
                         f"postgresql+asyncpg://{settings.postgres_user}:{settings.postgres_password}"
                         f"@{settings.postgres_host}:{settings.postgres_port}/{settings.postgres_database}"
@@ -392,318 +423,292 @@ class RoadService:
                                 results = await enrich_map_pois_with_here(
                                     session=session,
                                     map_id=map_id,
-                                    poi_types=["gas_station", "restaurant", "hotel", "hospital", "pharmacy"]
+                                    poi_types=[
+                                        "gas_station",
+                                        "restaurant",
+                                        "hotel",
+                                        "hospital",
+                                        "pharmacy",
+                                    ],
                                 )
                                 await session.commit()
                                 matched = len([r for r in results if r.matched])
-                                logger.info(f"✅ HERE enrichment: {matched}/{len(results)} POIs enriquecidos")
+                                logger.info(
+                                    f"HERE enrichment: {matched}/{len(results)} POIs enriched"
+                                )
                             except Exception:
                                 await session.rollback()
                                 raise
                     finally:
                         await engine.dispose()
 
-                # Run async enrichment in a new event loop
                 asyncio.run(_enrich())
             except Exception as e:
-                logger.warning(f"⚠️ Erro ao enriquecer POIs com HERE: {e}")
+                logger.warning(f"Error enriching with HERE: {e}")
 
         return linear_map
 
-    def _process_route_into_segments(self, route: Route, segment_length_km: float) -> List[LinearRoadSegment]:
+    def get_road_milestones(
+        self,
+        road_id: str,
+        origin: Optional[str] = None,
+        destination: Optional[str] = None,
+        milestone_type: Optional[str] = None,
+    ) -> List[RoadMilestoneResponse]:
         """
-        Process a unified Route object into linear road segments.
+        Get milestones along a road.
+
+        In a real implementation, this would query the database for milestones.
+        For now, returns an empty list since we're not caching anymore.
+
+        Args:
+            road_id: Road identifier
+            origin: Optional starting point filter
+            destination: Optional end point filter
+            milestone_type: Optional type filter
+
+        Returns:
+            List of RoadMilestoneResponse objects
         """
-        linear_segments = []
-        total_distance = route.total_distance
-        
-        # Create segments based on the specified segment length
-        current_distance = 0.0
-        segment_id = 1
-        
-        while current_distance < total_distance:
-            start_distance = current_distance
-            end_distance = min(current_distance + segment_length_km, total_distance)
-            
-            # Calculate start and end coordinates by interpolating along the route geometry
-            start_coord = self._interpolate_coordinate_at_distance(route.geometry, start_distance, total_distance)
-            end_coord = self._interpolate_coordinate_at_distance(route.geometry, end_distance, total_distance)
-            
-            # Get primary road name from route
-            road_name = route.road_names[0] if route.road_names else "Unnamed Road"
-            
-            segment = LinearRoadSegment(
-                id=f"segment_{segment_id}",
-                name=road_name,
-                start_distance_km=start_distance,
-                end_distance_km=end_distance,
-                length_km=end_distance - start_distance,
-                start_coordinates=Coordinates(latitude=start_coord[0], longitude=start_coord[1]),
-                end_coordinates=Coordinates(latitude=end_coord[0], longitude=end_coord[1]),
-                milestones=[]
-            )
-            
-            linear_segments.append(segment)
-            current_distance = end_distance
-            segment_id += 1
-        
-        logger.info(f"Created {len(linear_segments)} linear segments from route")
-        return linear_segments
-    
-    def _interpolate_coordinate_at_distance(self, geometry: List[Tuple[float, float]], 
-                                          target_distance_km: float, total_distance_km: float) -> Tuple[float, float]:
+        return []
+
+    def get_route_statistics(
+        self,
+        origin: str,
+        destination: str,
+        max_distance_from_road: float = 1000,
+    ) -> RouteStatisticsResponse:
         """
-        Interpolate a coordinate at a specific distance along the route geometry.
+        Generate detailed statistics for a route.
+
+        Always searches for all POI types for comprehensive statistics.
+
+        Args:
+            origin: Starting point
+            destination: End point
+            max_distance_from_road: Maximum POI search distance
+
+        Returns:
+            RouteStatisticsResponse with complete statistics
         """
-        if not geometry:
-            return (0.0, 0.0)
-        
-        if target_distance_km <= 0:
-            return geometry[0]
-        
-        if target_distance_km >= total_distance_km:
-            return geometry[-1]
-        
-        # Calculate the ratio along the route
-        ratio = target_distance_km / total_distance_km
-        
-        # Find the appropriate segment in the geometry
-        total_points = len(geometry)
-        target_index = ratio * (total_points - 1)
-        
-        # Get the two points to interpolate between
-        index_before = int(target_index)
-        index_after = min(index_before + 1, total_points - 1)
-        
-        if index_before == index_after:
-            return geometry[index_before]
-        
-        # Interpolate between the two points
-        point_before = geometry[index_before]
-        point_after = geometry[index_after]
-        local_ratio = target_index - index_before
-        
-        lat = point_before[0] + (point_after[0] - point_before[0]) * local_ratio
-        lon = point_before[1] + (point_after[1] - point_before[1]) * local_ratio
-        
-        return (lat, lon)
+        from api.services.route_statistics_service import RouteStatisticsService
+
+        stats_service = RouteStatisticsService(self)
+        return stats_service.get_statistics(origin, destination, max_distance_from_road)
 
     # ========================================================================
-    # POI/MILESTONE HELPER METHODS
+    # ASYNC PUBLIC METHODS
     # ========================================================================
-    
-    def _extract_search_points_from_segments(
-        self,
-        segments: List[LinearRoadSegment]
-    ) -> List[Tuple[Tuple[float, float], float]]:
+
+    async def geocode_location_async(
+        self, address: str
+    ) -> Optional[Tuple[float, float]]:
         """
-        Extract search points from segment start/end coordinates.
-        
+        Geocode a location using the configured provider.
+
+        Args:
+            address: Address string to geocode
+
         Returns:
-            List of tuples: ((lat, lon), distance_from_origin)
+            Tuple of (latitude, longitude) or None if not found
         """
-        search_points = []
-        
-        for segment in segments:
-            # Add segment start point
-            if segment.start_coordinates:
-                search_points.append((
-                    (segment.start_coordinates.latitude, segment.start_coordinates.longitude),
-                    segment.start_distance_km
-                ))
-            
-            # Add segment end point (only for last segment to avoid duplicates)
-            if segment.end_coordinates and segment == segments[-1]:
-                search_points.append((
-                    (segment.end_coordinates.latitude, segment.end_coordinates.longitude),
-                    segment.end_distance_km
-                ))
-        
-        logger.info(f"🔍 Gerados {len(search_points)} pontos de busca a partir dos segmentos")
-        return search_points
-    
+        try:
+            location = await self.geo_provider.geocode(address)
+            if location:
+                return (location.latitude, location.longitude)
+            return None
+        except Exception as e:
+            logger.error(f"Error geocoding '{address}': {e}")
+            return None
+
+    async def search_pois_async(
+        self, location: Tuple[float, float], radius: float, categories: List[str]
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for POIs using the configured provider.
+
+        Args:
+            location: (latitude, longitude) tuple
+            radius: Search radius in meters
+            categories: List of POI categories to search for
+
+        Returns:
+            List of POI dictionaries
+        """
+        try:
+            # Convert location to GeoLocation
+            geo_location = GeoLocation(latitude=location[0], longitude=location[1])
+
+            # Convert category strings to POICategory enums
+            poi_categories = []
+            for category in categories:
+                try:
+                    poi_categories.append(POICategory(category))
+                except ValueError:
+                    logger.warning(f"Unknown POI category: {category}")
+                    continue
+
+            if not poi_categories:
+                return []
+
+            # Search using the provider
+            pois = await self.poi_provider.search_pois(
+                location=geo_location,
+                radius=radius,
+                categories=poi_categories,
+            )
+
+            # Convert POIs to dictionaries
+            result = []
+            for poi in pois:
+                result.append(
+                    {
+                        "id": poi.id,
+                        "name": poi.name,
+                        "lat": poi.location.latitude,
+                        "lon": poi.location.longitude,
+                        "category": poi.category.value,
+                        "amenities": poi.amenities,
+                        "rating": poi.rating,
+                        "is_open": poi.is_open,
+                        "phone": poi.phone,
+                        "website": poi.website,
+                        "tags": poi.provider_data.get("tags", poi.provider_data),
+                    }
+                )
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error searching POIs: {e}")
+            return []
+
+    # ========================================================================
+    # BACKWARD COMPATIBILITY METHODS
+    # ========================================================================
+    # These methods delegate to the new services but maintain backward compatibility
+    # for any code that might be calling them directly.
+
+    def _calculate_distance_meters(
+        self, lat1: float, lon1: float, lat2: float, lon2: float
+    ) -> float:
+        """Calculate distance between two points using Haversine formula."""
+        return calculate_distance_meters(lat1, lon1, lat2, lon2)
+
+    def _interpolate_coordinate_at_distance(
+        self,
+        geometry: List[Tuple[float, float]],
+        target_distance_km: float,
+        total_distance_km: float,
+    ) -> Tuple[float, float]:
+        """Interpolate a coordinate at a specific distance along the route."""
+        from api.utils.geo_utils import interpolate_coordinate_at_distance
+
+        return interpolate_coordinate_at_distance(
+            geometry, target_distance_km, total_distance_km
+        )
+
+    def _process_route_into_segments(
+        self, route: Route, segment_length_km: float
+    ) -> List[LinearRoadSegment]:
+        """Process a route into linear segments."""
+        return self.segmentation_service.process_route_into_segments(
+            route, segment_length_km
+        )
+
+    def _extract_search_points_from_segments(
+        self, segments: List[LinearRoadSegment]
+    ) -> List[Tuple[Tuple[float, float], float]]:
+        """Extract search points from segments."""
+        return self.segmentation_service.extract_search_points_from_segments(segments)
+
+    def _build_milestone_categories(self, include_cities: bool) -> List[POICategory]:
+        """Build list of POI categories for milestone search."""
+        return self.milestone_factory.build_milestone_categories(include_cities)
+
+    def _assign_milestones_to_segments(
+        self, segments: List[LinearRoadSegment], milestones: List[RoadMilestone]
+    ):
+        """Assign milestones to segments."""
+        self.milestone_factory.assign_to_segments(segments, milestones)
+
+    def _poi_category_to_milestone_type(self, category: POICategory):
+        """Convert POI category to milestone type."""
+        return self.milestone_factory.get_milestone_type(category)
+
     def _create_milestone_from_poi(
         self,
-        poi: POI,
+        poi,
         distance_from_origin: float,
         route_point: Tuple[float, float],
-        junction_info: Optional[Tuple[float, Tuple[float, float], float, str]] = None
+        junction_info=None,
     ) -> RoadMilestone:
-        """
-        Create a RoadMilestone from a POI object.
-
-        Args:
-            poi: POI object from provider
-            distance_from_origin: Distance from route origin in km
-            route_point: (lat, lon) of the route point near this POI
-            junction_info: Optional tuple of (junction_distance_km, junction_coords, access_route_distance_km, side) for distant POIs
-
-        Returns:
-            RoadMilestone object
-        """
-        # Determine milestone type - check if it's a place (city/town/village) first
-        milestone_type = None
-        if poi.provider_data and 'osm_tags' in poi.provider_data:
-            osm_tags = poi.provider_data['osm_tags']
-            place_type = osm_tags.get('place', '')
-            if place_type == 'city':
-                milestone_type = MilestoneType.CITY
-            elif place_type == 'town':
-                milestone_type = MilestoneType.TOWN
-            elif place_type == 'village':
-                milestone_type = MilestoneType.VILLAGE
-
-        # If not a place, use category mapping
-        if not milestone_type:
-            milestone_type = self._poi_category_to_milestone_type(poi.category)
-
-        # Calculate distance from POI to route point
-        distance_from_road = self._calculate_distance_meters(
-            poi.location.latitude, poi.location.longitude,
-            route_point[0], route_point[1]
+        """Create a milestone from a POI."""
+        return self.milestone_factory.create_from_poi(
+            poi, distance_from_origin, route_point, junction_info
         )
 
-        # Extract city from POI tags (quick, no API call)
-        city = None
-        if poi.provider_data:
-            # For cities and towns, the city field is the place name itself
-            if milestone_type in [MilestoneType.CITY, MilestoneType.TOWN]:
-                city = poi.name  # The place name is the city name
-            # For villages, city should be the municipality name (from tags or reverse geocoding)
-            elif milestone_type == MilestoneType.VILLAGE:
-                # Try to extract municipality from OSM tags
-                osm_tags = poi.provider_data.get('osm_tags', {})
-                city = (osm_tags.get('addr:city') or
-                       osm_tags.get('is_in:city') or
-                       osm_tags.get('is_in') or
-                       poi.provider_data.get('addr:city') or
-                       poi.provider_data.get('address:city') or
-                       poi.provider_data.get('addr:municipality'))
-                # If no city found in tags, reverse geocoding will fill it later
-            else:
-                # For other POIs (gas stations, restaurants, etc), try to extract city from address tags
-                city = (poi.provider_data.get('addr:city') or
-                       poi.provider_data.get('address:city') or
-                       poi.provider_data.get('addr:municipality'))
-            # City extracted from OSM tags (no logging needed)
-        
-        # Extract quality_score from provider_data
-        quality_score = None
-        if poi.provider_data:
-            quality_score = poi.provider_data.get('quality_score')
+    def _is_poi_abandoned(self, tags: Dict[str, Any]) -> bool:
+        """Check if a POI is abandoned."""
+        return self.quality_service.is_poi_abandoned(tags)
 
-        # Process junction information for distant POIs
-        requires_detour = distance_from_road > 500  # POIs > 500m require detour
-        junction_distance_km = None
-        junction_coordinates = None
-        access_route_distance_m = distance_from_road  # Default to straight-line distance
-        poi_side = "center"  # Default side
+    def _calculate_poi_quality_score(self, tags: Dict[str, Any]) -> float:
+        """Calculate quality score for a POI."""
+        return self.quality_service.calculate_quality_score(tags)
 
-        if junction_info:
-            junction_distance_km, junction_coords, access_route_distance_km, side = junction_info
+    def _meets_quality_threshold(
+        self, tags: Dict[str, Any], quality_score: float
+    ) -> bool:
+        """Check if POI meets quality threshold."""
+        return self.quality_service.meets_quality_threshold(tags, quality_score)
 
-            # If distance from junction to POI is < 0.1km, treat as roadside POI
-            if access_route_distance_km < 0.1:
-                requires_detour = False
-                junction_distance_km = None
-                junction_coordinates = None
-            else:
-                junction_coordinates = Coordinates(
-                    latitude=junction_coords[0],
-                    longitude=junction_coords[1]
-                )
-                # Use access route distance instead of straight-line distance
-                access_route_distance_m = access_route_distance_km * 1000
-                poi_side = side  # Use calculated side (left or right)
+    def _extract_amenities(self, tags: Dict[str, Any]) -> List[str]:
+        """Extract amenities from POI tags."""
+        return self.quality_service.extract_amenities(tags)
 
-        return RoadMilestone(
-            id=poi.id,
-            name=poi.name,
-            type=milestone_type,
-            coordinates=Coordinates(
-                latitude=poi.location.latitude,
-                longitude=poi.location.longitude
-            ),
-            distance_from_origin_km=distance_from_origin,
-            distance_from_road_meters=access_route_distance_m,
-            side=poi_side,
-            tags=poi.provider_data,
-            city=city,
-            operator=poi.subcategory,
-            brand=poi.subcategory,
-            opening_hours=self._format_opening_hours(poi.opening_hours),
-            phone=poi.phone,
-            website=poi.website,
-            amenities=poi.amenities,
-            quality_score=quality_score,
-            # New fields for junction information
-            junction_distance_km=junction_distance_km,
-            junction_coordinates=junction_coordinates,
-            requires_detour=requires_detour
-        )
-    
-    async def _enrich_milestones_with_cities(self, milestones: List[RoadMilestone]):
-        """
-        Enrich milestones with city information via reverse geocoding.
-        
-        Only geocodes milestones that don't already have city information.
-        Modifies milestones in-place.
-        """
-        milestones_without_city = [m for m in milestones if not m.city]
-        logger.info(f"🌍 Fazendo reverse geocoding para obter cidades...")
-        logger.info(f"🌍 {len(milestones_without_city)} POIs precisam de reverse geocoding")
-        
-        for milestone in milestones_without_city:
-            try:
-                reverse_loc = await self.geo_provider.reverse_geocode(
-                    milestone.coordinates.latitude,
-                    milestone.coordinates.longitude,
-                    poi_name=milestone.name
-                )
-                if reverse_loc and reverse_loc.city:
-                    milestone.city = reverse_loc.city
-            except Exception:
-                pass  # Reverse geocoding failure is not critical
-        
-        cities_found = len([m for m in milestones if m.city])
-        logger.info(f"🌍 Reverse geocoding concluído: "
-                   f"{cities_found}/{len(milestones)} POIs com cidade identificada")
-    
+    def _format_opening_hours(
+        self, opening_hours: Optional[Dict[str, str]]
+    ) -> Optional[str]:
+        """Format opening hours to string."""
+        return self.quality_service.format_opening_hours(opening_hours)
+
     def _filter_excluded_cities(
-        self,
-        milestones: List[RoadMilestone],
-        exclude_cities_filtered: List[str]
+        self, milestones: List[RoadMilestone], exclude_cities: List[str]
     ) -> List[RoadMilestone]:
-        """
-        Filter out milestones in excluded cities.
-        
-        Args:
-            milestones: List of milestones to filter
-            exclude_cities_filtered: List of normalized city names to exclude
-            
-        Returns:
-            Filtered list of milestones
-        """
-        if not exclude_cities_filtered:
-            return milestones
-        
-        milestones_before_filter = len(milestones)
-        
-        # Filter
-        filtered_milestones = [
-            m for m in milestones
-            if not m.city or m.city.strip().lower() not in exclude_cities_filtered
-        ]
-        
-        filtered_count = milestones_before_filter - len(filtered_milestones)
-        if filtered_count > 0:
-            logger.info(f"🚫 Removidos {filtered_count} POIs da cidade de origem: "
-                       f"{exclude_cities_filtered}")
-        else:
-            logger.warning(f"⚠️ Nenhum POI foi filtrado. "
-                          f"Cidade de origem '{exclude_cities_filtered}' não encontrada nos POIs")
-        
-        return filtered_milestones
+        """Filter milestones by excluded cities."""
+        return self.quality_service.filter_by_excluded_cities(milestones, exclude_cities)
+
+    def _determine_poi_side(
+        self,
+        main_route_geometry: List[Tuple[float, float]],
+        junction_point: Tuple[float, float],
+        poi_location: Tuple[float, float],
+        return_debug: bool = False,
+    ):
+        """Determine POI side relative to road."""
+        return self.poi_search_service.determine_poi_side(
+            main_route_geometry, junction_point, poi_location, return_debug
+        )
+
+    async def _enrich_milestones_with_cities(
+        self, milestones: List[RoadMilestone]
+    ) -> None:
+        """Enrich milestones with city information."""
+        await self.milestone_factory.enrich_with_cities(milestones)
+
+    def _run_async_safe(self, coro):
+        """Execute async coroutine safely."""
+        return run_async_safe(coro)
+
+    def _calculate_distance_along_route(
+        self,
+        geometry: List[Tuple[float, float]],
+        target_point: Tuple[float, float],
+    ) -> float:
+        """Calculate distance along route to target point."""
+        from api.utils.geo_utils import calculate_distance_along_route
+
+        return calculate_distance_along_route(geometry, target_point)
 
     async def _find_milestones_from_segments(
         self,
@@ -716,1772 +721,14 @@ class RoadService:
         main_route: Optional[Route] = None,
         debug_collector: Optional[POIDebugDataCollector] = None,
     ) -> List[RoadMilestone]:
-        """
-        Find POI milestones along the route using segment start/end points.
-
-        This method:
-        1. Extracts search points from segments
-        2. Searches for POIs around each point
-        3. Converts POIs to milestones
-        4. For distant POIs (>500m), calculates junction point
-        5. Filters POIs with detour distance > max_detour_distance_km
-        6. Enriches with city information
-        7. Filters excluded cities
-
-        Args:
-            max_detour_distance_km: Maximum allowed detour distance from junction to POI in km.
-                POIs requiring detour greater than this will be excluded. Default: 5.0 km
-            debug_collector: Optional collector for POI calculation debug data.
-
-        Returns:
-            List of RoadMilestone objects
-        """
-        logger.info(f"🔍 Iniciando busca de milestones usando {len(segments)} segmentos")
-        logger.info(f"🔍 Categorias: {[cat.value for cat in categories]}")
-        logger.info(f"🔍 Parâmetros: max_distance={max_distance_from_road}m, max_detour={max_detour_distance_km}km")
-        
-        # Normalize excluded cities
-        exclude_cities_filtered = [city.strip().lower() for city in (exclude_cities or []) if city]
-        if exclude_cities_filtered:
-            logger.info(f"🚫 Cidades a excluir: {exclude_cities_filtered}")
-        
-        # Extract search points from segments
-        search_points = self._extract_search_points_from_segments(segments)
-        total_points = len(search_points)
-
-        # Statistics
-        milestones = []
-        total_errors = 0
-        total_requests = 0
-        consecutive_errors = 0
-        pois_abandoned_no_junction = 0
-        pois_abandoned_detour_too_long = 0
-        junction_recalculations = 0
-
-        # Track POIs that have been ADDED as milestones - these are final, ignore always
-        milestone_poi_ids: set = set()
-
-        # Track best junction info for distant POIs (>500m from road)
-        # Key: POI ID, Value: (junction_info, distance_from_origin, search_point, poi_object)
-        # We keep recalculating and store only the best (shortest detour)
-        best_junction_for_poi: Dict[str, Tuple[Any, float, Tuple[float, float], POI]] = {}
-
-        # Track distant POIs that were processed (to count those without any junction)
-        distant_pois_processed: set = set()
-
-        # OPTIMIZATION: Track lookback points and recalculation attempts per POI
-        # Key: POI ID, Value: (lookback_lat, lookback_lon) - the lookback point used for best junction
-        junction_lookback_for_poi: Dict[str, Tuple[float, float]] = {}
-        # Key: POI ID, Value: number of consecutive recalculations without improvement
-        recalc_attempts_without_improvement: Dict[str, int] = {}
-        # Statistics for optimization
-        skipped_similar_lookback = 0
-        skipped_past_junction = 0
-        skipped_max_attempts = 0
-
-        # Collect all unique POIs for database persistence
-        all_unique_pois_dict: Dict[str, POI] = {}  # Key: POI ID, Value: POI object
-
-        # Store junction debug data when debug_collector is present
-        # Key: POI ID, Value: debug data dict from _calculate_junction_for_distant_poi
-        junction_debug_data: Dict[str, Dict[str, Any]] = {}
-
-        for i, (point, distance_from_origin) in enumerate(search_points):
-            # Update progress based on points processed
-            # Progress goes from 10% to 90% during POI search (leaving 10% for enrichment and filtering)
-            if progress_callback:
-                progress = round(10.0 + (i / total_points) * 80.0)
-                progress_callback(progress)
-            total_requests += 1
-            
-            try:
-                # Search for POIs around this point
-                pois = await self.poi_provider.search_pois(
-                    location=GeoLocation(latitude=point[0], longitude=point[1]),
-                    radius=max_distance_from_road,
-                    categories=categories,
-                    limit=20
-                )
-                
-                logger.info(f"📍 Ponto {i}: {len(pois)} POIs encontrados")
-                consecutive_errors = 0  # Reset on success
-                
-                # Convert POIs to milestones
-                converted_count = 0
-                duplicates_count = 0
-                abandoned_count = 0
-                
-                for j, poi in enumerate(pois):
-                    try:
-                        # Skip POIs already added as milestones - these are final
-                        if poi.id in milestone_poi_ids:
-                            duplicates_count += 1
-                            continue
-
-                        # Collect POI for later persistence (only once)
-                        if poi.id not in all_unique_pois_dict:
-                            all_unique_pois_dict[poi.id] = poi
-
-                        # Validate POI category
-                        if not isinstance(poi.category, POICategory):
-                            logger.error(f"🔍 POI {j}: categoria inválida! "
-                                       f"Valor: {poi.category}, tipo: {type(poi.category)}")
-                            continue
-
-                        # Calculate distance from POI to search point
-                        poi_distance_from_road = self._calculate_distance_meters(
-                            poi.location.latitude, poi.location.longitude,
-                            point[0], point[1]
-                        )
-
-                        # For nearby POIs (<500m), add directly as milestone
-                        if poi_distance_from_road <= 500 or not main_route:
-                            milestone = self._create_milestone_from_poi(
-                                poi,
-                                distance_from_origin,
-                                point,
-                                None  # No junction needed for nearby POIs
-                            )
-                            milestones.append(milestone)
-                            converted_count += 1
-                            milestone_poi_ids.add(poi.id)
-                            continue
-
-                        # For distant POIs (>500m), calculate junction and keep the best
-                        distant_pois_processed.add(poi.id)
-
-                        # Check if we already have a junction for this POI
-                        is_recalculation = poi.id in best_junction_for_poi
-
-                        # OPTIMIZATION: Skip recalculation if criteria are met
-                        if is_recalculation:
-                            prev_junction_info, prev_dist, _, _ = best_junction_for_poi[poi.id]
-                            prev_junction_km, _, _, _ = prev_junction_info
-
-                            # Calculate what the lookback search point would be for this recalculation
-                            settings = get_settings()
-                            lookback_count = settings.lookback_milestones_count
-                            lookback_index = i - lookback_count
-
-                            if lookback_index >= 0:
-                                new_lookback, _ = search_points[lookback_index]
-                            elif i > 0:
-                                new_lookback, _ = search_points[0]
-                            else:
-                                # Fallback to interpolation (shouldn't happen normally)
-                                poi_distance_km = poi_distance_from_road / 1000.0
-                                lookback_km = min(20.0, max(5.0, poi_distance_km * 2))
-                                lookback_distance_km = max(0, distance_from_origin - lookback_km)
-                                new_lookback = self._interpolate_coordinate_at_distance(
-                                    main_route.geometry,
-                                    lookback_distance_km,
-                                    main_route.total_distance
-                                )
-
-                            # Skip 1: If lookback point is very similar to previous (within 500m)
-                            if poi.id in junction_lookback_for_poi:
-                                prev_lookback = junction_lookback_for_poi[poi.id]
-                                lookback_distance_m = self._calculate_distance_meters(
-                                    new_lookback[0], new_lookback[1],
-                                    prev_lookback[0], prev_lookback[1]
-                                )
-                                if lookback_distance_m < 500:
-                                    skipped_similar_lookback += 1
-                                    continue
-
-                            # Skip 2: If search point is well past current junction (>2km)
-                            # and we're moving away from it
-                            if distance_from_origin > prev_junction_km + 2.0:
-                                skipped_past_junction += 1
-                                continue
-
-                            # Skip 3: If we've tried 3 times without improvement
-                            attempts = recalc_attempts_without_improvement.get(poi.id, 0)
-                            if attempts >= 3:
-                                skipped_max_attempts += 1
-                                continue
-
-                            junction_recalculations += 1
-
-                        # Call with return_debug=True when debug_collector is present
-                        # Pass search_points and current index so lookback uses a real road coordinate
-                        junction_result = await self._calculate_junction_for_distant_poi(
-                            poi=poi,
-                            search_point=point,
-                            search_point_distance_km=distance_from_origin,
-                            main_route=main_route,
-                            all_search_points=search_points,
-                            current_search_point_index=i,
-                            return_debug=debug_collector is not None
-                        )
-
-                        if not junction_result:
-                            # No junction found from this search point, will try from next points
-                            continue
-
-                        # Handle return value based on whether debug was requested
-                        current_debug_data: Optional[Dict[str, Any]] = None
-                        if debug_collector is not None:
-                            junction_info, current_debug_data = junction_result
-                        else:
-                            junction_info = junction_result
-
-                        # Get detour distance from junction info
-                        _, _, access_route_distance_km, _ = junction_info
-
-                        # Calculate lookback point for tracking (if not already calculated)
-                        if not is_recalculation:
-                            settings = get_settings()
-                            lookback_count = settings.lookback_milestones_count
-                            lookback_index = i - lookback_count
-
-                            if lookback_index >= 0:
-                                new_lookback, _ = search_points[lookback_index]
-                            elif i > 0:
-                                new_lookback, _ = search_points[0]
-                            else:
-                                # Fallback to interpolation
-                                poi_distance_km = poi_distance_from_road / 1000.0
-                                lookback_km = min(20.0, max(5.0, poi_distance_km * 2))
-                                lookback_distance_km = max(0, distance_from_origin - lookback_km)
-                                new_lookback = self._interpolate_coordinate_at_distance(
-                                    main_route.geometry,
-                                    lookback_distance_km,
-                                    main_route.total_distance
-                                )
-
-                        # Check if this is better than previous best
-                        if poi.id in best_junction_for_poi:
-                            prev_junction_info, _, _, _ = best_junction_for_poi[poi.id]
-                            _, _, prev_detour, _ = prev_junction_info
-                            if access_route_distance_km < prev_detour:
-                                best_junction_for_poi[poi.id] = (junction_info, distance_from_origin, point, poi)
-                                junction_lookback_for_poi[poi.id] = new_lookback
-                                recalc_attempts_without_improvement[poi.id] = 0  # Reset on improvement
-                                # Store debug data for best junction
-                                if current_debug_data:
-                                    junction_debug_data[poi.id] = current_debug_data
-                            else:
-                                # No improvement - increment attempt counter
-                                recalc_attempts_without_improvement[poi.id] = recalc_attempts_without_improvement.get(poi.id, 0) + 1
-                        else:
-                            # First junction found for this POI
-                            best_junction_for_poi[poi.id] = (junction_info, distance_from_origin, point, poi)
-                            junction_lookback_for_poi[poi.id] = new_lookback
-                            # Store debug data for first junction
-                            if current_debug_data:
-                                junction_debug_data[poi.id] = current_debug_data
-                        
-                    except Exception as e:
-                        logger.error(f"🔍 Erro convertendo POI {j}: {e}")
-                        logger.error(f"🔍 POI detalhes: nome={getattr(poi, 'name', 'N/A')}, "
-                                   f"categoria={getattr(poi, 'category', 'N/A')}")
-                        import traceback
-                        logger.error(f"🔍 Traceback: {traceback.format_exc()}")
-                        continue
-
-                
-            except Exception as e:
-                total_errors += 1
-                consecutive_errors += 1
-                logger.error(f"🔍 Erro buscando POIs no ponto {i}: {e}")
-                
-                # Fail fast criteria
-                if consecutive_errors >= 5:
-                    logger.error(f"Too many consecutive POI search failures ({consecutive_errors}). "
-                               f"All endpoints may be down.")
-                    raise RuntimeError(
-                        f"POI search failed: {consecutive_errors} consecutive failures. "
-                        f"All Overpass endpoints may be unavailable. Last error: {e}"
-                    )
-                
-                if total_requests >= 5:
-                    error_rate = total_errors / total_requests
-                    if error_rate > 0.9:
-                        logger.error(f"POI search failure rate too high ({error_rate:.1%}). "
-                                   f"Systemic issue detected.")
-                        raise RuntimeError(
-                            f"POI search failed: {error_rate:.1%} of requests failed. "
-                            f"Systemic issue detected. Last error: {e}"
-                        )
-                
-                continue
-        
-        # Log final statistics
-        if total_requests > 0:
-            error_rate = total_errors / total_requests
-            if error_rate > 0:
-                logger.warning(f"POI search completed with {error_rate:.1%} error rate "
-                             f"({total_errors}/{total_requests} failed)")
-            if error_rate > 0.5:
-                logger.warning(f"High error rate detected. Consider checking Overpass API status.")
-
-        # Count POIs that never found any junction
-        pois_abandoned_no_junction = len(distant_pois_processed) - len(best_junction_for_poi)
-
-        # Process distant POIs - create milestones for those with valid junctions
-        logger.info(f"🔄 Processando {len(best_junction_for_poi)} POIs distantes com junctions calculadas "
-                   f"(de {len(distant_pois_processed)} processados)")
-        if junction_recalculations > 0:
-            logger.info(f"🔄 Recálculos de junction: {junction_recalculations}")
-
-        # Log optimization statistics
-        total_skipped = skipped_similar_lookback + skipped_past_junction + skipped_max_attempts
-        if total_skipped > 0:
-            logger.info(f"⚡ Otimização: {total_skipped} recálculos evitados "
-                       f"(lookback similar: {skipped_similar_lookback}, "
-                       f"passou do junction: {skipped_past_junction}, "
-                       f"max tentativas: {skipped_max_attempts})")
-
-        distant_pois_added = 0
-        distant_pois_skipped_already_added = 0
-        for poi_id, (junction_info, dist_from_origin, search_pt, poi) in best_junction_for_poi.items():
-            # Skip if this POI was already added as a nearby milestone
-            if poi_id in milestone_poi_ids:
-                distant_pois_skipped_already_added += 1
-                continue
-
-            junction_distance_km, _, access_route_distance_km, _ = junction_info
-
-            if access_route_distance_km <= max_detour_distance_km:
-                distant_pois_added += 1
-                # Junction is within acceptable detour distance - create milestone
-                # Use junction_distance_km as the POI's position along the route (where driver exits)
-                milestone = self._create_milestone_from_poi(
-                    poi,
-                    junction_distance_km,
-                    search_pt,
-                    junction_info
-                )
-                milestones.append(milestone)
-                milestone_poi_ids.add(poi_id)
-            else:
-                # Best junction still exceeds max detour
-                pois_abandoned_detour_too_long += 1
-
-        logger.info(f"🎯 RESULTADO FINAL: {len(milestones)} milestones encontrados ao longo da rota")
-        logger.info(f"📊 POIs únicos encontrados: {len(all_unique_pois_dict)}")
-        logger.info(f"📊 POIs distantes analisados: {len(best_junction_for_poi)}")
-        logger.info(f"📊 POIs distantes ADICIONADOS: {distant_pois_added}")
-        if distant_pois_skipped_already_added > 0:
-            logger.info(f"📊 POIs distantes já eram milestones próximos: {distant_pois_skipped_already_added}")
-
-        if pois_abandoned_no_junction > 0:
-            logger.info(f"🚫 POIs sem entroncamento encontrado: {pois_abandoned_no_junction}")
-        if pois_abandoned_detour_too_long > 0:
-            logger.info(f"🚫 POIs abandonados por desvio muito longo: {pois_abandoned_detour_too_long}")
-
-        # Persist all unique POIs to database
-        all_unique_pois = list(all_unique_pois_dict.values())
-        if all_unique_pois:
-            try:
-                await self._persist_pois_to_database(all_unique_pois, milestone_poi_ids)
-            except Exception as e:
-                logger.warning(f"⚠️ Erro ao persistir POIs no banco: {e}")
-                # Don't fail the whole operation if persistence fails
-
-        # Update progress - POI search completed (90%)
-        if progress_callback:
-            progress_callback(90)
-
-        # Enrich milestones with cities (reverse geocoding)
-        await self._enrich_milestones_with_cities(milestones)
-
-        # Update progress - enrichment completed (95%)
-        if progress_callback:
-            progress_callback(95)
-        
-        # Filter out POIs in excluded cities
-        milestones = self._filter_excluded_cities(milestones, exclude_cities_filtered)
-
-        # Collect debug data for all milestones if debug is enabled
-        if debug_collector and main_route:
-            await self._collect_milestone_debug_data(
-                milestones, main_route, debug_collector, junction_debug_data
-            )
-
-        # Log final results
-        self._log_milestone_statistics(milestones)
-
-        return milestones
-
-    async def _collect_milestone_debug_data(
-        self,
-        milestones: List[RoadMilestone],
-        main_route: Route,
-        debug_collector: POIDebugDataCollector,
-        junction_debug_data: Optional[Dict[str, Dict[str, Any]]] = None,
-    ) -> None:
-        """
-        Collect debug data for all milestones.
-
-        This collects:
-        - POI basic info (name, type, coordinates)
-        - Side calculation details (vectors, cross product)
-        - Junction information for distant POIs
-        - Access route geometry (from junction_debug_data)
-
-        Args:
-            milestones: List of milestones to collect debug for
-            main_route: The main route for side calculation
-            debug_collector: The collector to store debug data
-            junction_debug_data: Pre-calculated junction debug data keyed by POI ID
-        """
-        logger.info(f"🐛 Coletando dados de debug para {len(milestones)} milestones")
-        junction_debug_data = junction_debug_data or {}
-
-        for milestone in milestones:
-            try:
-                # Get POI coordinates
-                poi_lat = milestone.coordinates.latitude
-                poi_lon = milestone.coordinates.longitude
-
-                # Check if we have pre-calculated junction debug data for this POI
-                poi_junction_debug = junction_debug_data.get(milestone.id, {})
-
-                # Get access route geometry from junction debug data
-                access_route_geometry = poi_junction_debug.get("access_route_geometry")
-                access_route_distance_km = poi_junction_debug.get("access_route_distance_km")
-                lookback_data = poi_junction_debug.get("lookback_data")
-                junction_calculation = poi_junction_debug.get("junction_calculation")
-
-                # Use side_calculation from junction debug if available (more accurate)
-                # Otherwise calculate based on closest point
-                side_calculation = poi_junction_debug.get("side_calculation")
-
-                if not side_calculation:
-                    # Find the closest point on the route for side calculation
-                    closest_idx = 0
-                    min_distance = float('inf')
-                    for i, (pt_lat, pt_lon) in enumerate(main_route.geometry):
-                        dist = ((pt_lat - poi_lat) ** 2 + (pt_lon - poi_lon) ** 2) ** 0.5
-                        if dist < min_distance:
-                            min_distance = dist
-                            closest_idx = i
-
-                    # Get route point for side calculation
-                    route_point = main_route.geometry[closest_idx]
-
-                    # Calculate side with debug info
-                    try:
-                        result = self._determine_poi_side(
-                            main_route.geometry,
-                            route_point,
-                            (poi_lat, poi_lon),
-                            return_debug=True
-                        )
-                        if isinstance(result, tuple):
-                            _, side_calculation = result
-                    except Exception as e:
-                        logger.debug(f"Erro ao calcular lado para debug: {e}")
-
-                # Get junction coordinates if available
-                junction_lat = None
-                junction_lon = None
-                if milestone.junction_coordinates:
-                    junction_lat = milestone.junction_coordinates.latitude
-                    junction_lon = milestone.junction_coordinates.longitude
-
-                # Collect debug data
-                debug_collector.collect_poi_data(
-                    poi_id=milestone.id,
-                    poi_name=milestone.name or "Sem nome",
-                    poi_type=milestone.type.value if milestone.type else "unknown",
-                    poi_lat=poi_lat,
-                    poi_lon=poi_lon,
-                    distance_from_road_m=milestone.distance_from_road_meters or 0,
-                    final_side=milestone.side or "center",
-                    requires_detour=milestone.requires_detour or False,
-                    junction_lat=junction_lat,
-                    junction_lon=junction_lon,
-                    junction_distance_km=milestone.junction_distance_km,
-                    access_route_geometry=access_route_geometry,
-                    access_route_distance_km=access_route_distance_km,
-                    side_calculation=side_calculation,
-                    lookback_data=lookback_data,
-                    junction_calculation=junction_calculation,
-                )
-
-            except Exception as e:
-                logger.warning(f"⚠️ Erro ao coletar debug para POI {milestone.id}: {e}")
-                continue
-
-        logger.info(f"🐛 Debug coletado para {len(debug_collector.get_all_data())} POIs")
-
-    def _poi_category_to_milestone_type(self, category: POICategory) -> MilestoneType:
-        """
-        Convert POI category to milestone type.
-        """
-        mapping = {
-            POICategory.GAS_STATION: MilestoneType.GAS_STATION,
-            POICategory.FUEL: MilestoneType.GAS_STATION,
-            POICategory.RESTAURANT: MilestoneType.RESTAURANT,
-            POICategory.FOOD: MilestoneType.RESTAURANT,
-            POICategory.HOTEL: MilestoneType.HOTEL,
-            POICategory.LODGING: MilestoneType.HOTEL,
-            POICategory.CAMPING: MilestoneType.CAMPING,
-            POICategory.HOSPITAL: MilestoneType.HOSPITAL,
-            POICategory.SERVICES: MilestoneType.OTHER,
-            POICategory.PARKING: MilestoneType.OTHER,
-        }
-        return mapping.get(category, MilestoneType.OTHER)
-    
-    def _format_opening_hours(self, opening_hours: Optional[Dict[str, str]]) -> Optional[str]:
-        """
-        Format opening hours dict to string.
-        """
-        if not opening_hours:
-            return None
-        
-        # Simple format: "Mon-Fri: 8:00-18:00, Sat: 9:00-17:00"
-        formatted = []
-        for day, hours in opening_hours.items():
-            formatted.append(f"{day}: {hours}")
-        
-        return ", ".join(formatted)
-    
-    
-    def get_road_milestones(
-        self, 
-        road_id: str, 
-        origin: Optional[str] = None, 
-        destination: Optional[str] = None, 
-        milestone_type: Optional[str] = None
-    ) -> List[RoadMilestoneResponse]:
-        """
-        Obtém marcos importantes ao longo de uma estrada.
-        """
-        # In a real implementation, this would query the database for milestones
-        # For now, we'll return an empty list since we're not caching anymore
-        return []
-    
-    def _is_poi_abandoned(self, tags: Dict[str, Any]) -> bool:
-        """
-        Verifica se um POI está abandonado ou fora de uso.
-        
-        Args:
-            tags: Tags do provider geográfico
-            
-        Returns:
-            True se o POI deve ser excluído por estar abandonado
-        """
-        abandonment_indicators = [
-            'abandoned', 'disused', 'demolished', 'razed', 'removed', 
-            'ruins', 'former', 'closed', 'destroyed'
-        ]
-        
-        # Verifica tags diretas de abandono
-        for indicator in abandonment_indicators:
-            if tags.get(indicator) in ['yes', 'true', '1']:
-                return True
-            # Verifica prefixos (ex: abandoned:amenity=fuel)
-            for key in tags.keys():
-                if key.startswith(f"{indicator}:"):
-                    return True
-        
-        # Verifica status específicos
-        if tags.get('opening_hours') in ['closed', 'no']:
-            return True
-            
-        return False
-    
-    def _calculate_poi_quality_score(self, tags: Dict[str, Any]) -> float:
-        """
-        Calcula um score de qualidade para um POI baseado na completude dos dados.
-        
-        Args:
-            tags: Tags do provider geográfico
-            
-        Returns:
-            Score de 0.0 a 1.0, onde 1.0 é melhor qualidade
-        """
-        score = 0.0
-        max_score = 7.0  # Número de critérios de qualidade
-        
-        # Critério 1: Tem nome
-        if tags.get('name'):
-            score += 1.0
-        
-        # Critério 2: Tem operator ou brand
-        if tags.get('operator') or tags.get('brand'):
-            score += 1.0
-        
-        # Critério 3: Tem telefone
-        if tags.get('phone') or tags.get('contact:phone'):
-            score += 1.0
-        
-        # Critério 4: Tem horário de funcionamento
-        if tags.get('opening_hours'):
-            score += 1.0
-        
-        # Critério 5: Tem website
-        if tags.get('website') or tags.get('contact:website'):
-            score += 1.0
-        
-        # Critério 6: Para restaurantes, tem tipo de culinária
-        if tags.get('amenity') == 'restaurant' and tags.get('cuisine'):
-            score += 1.0
-        elif tags.get('amenity') != 'restaurant':
-            score += 1.0  # Não penalizar não-restaurantes
-            
-        # Critério 7: Tem endereço estruturado
-        if any(tags.get(f'addr:{field}') for field in ['street', 'housenumber', 'city']):
-            score += 1.0
-        
-        return score / max_score
-    
-    def _meets_quality_threshold(self, tags: Dict[str, Any], quality_score: float) -> bool:
-        """
-        Verifica se um POI atende ao threshold mínimo de qualidade.
-        
-        Args:
-            tags: Tags do provider geográfico
-            quality_score: Score de qualidade calculado
-            
-        Returns:
-            True se o POI deve ser incluído
-        """
-        amenity = tags.get('amenity')
-        barrier = tags.get('barrier')
-        
-        # Para postos de gasolina, exigir nome OU brand OU operator
-        if amenity == 'fuel':
-            if not (tags.get('name') or tags.get('brand') or tags.get('operator')):
-                return False
-            return quality_score >= 0.3  # Threshold mais baixo para postos
-        
-        # Para estabelecimentos de alimentação, exigir nome
-        food_amenities = ['restaurant', 'fast_food', 'cafe', 'bar', 'pub', 'food_court', 'ice_cream']
-        food_shops = ['bakery']
-        
-        if amenity in food_amenities or tags.get('shop') in food_shops:
-            if not tags.get('name'):
-                return False
-            return quality_score >= 0.4  # Threshold médio para estabelecimentos de alimentação
-        
-        # Para pedágios, sempre incluir (mesmo sem nome)
-        if barrier == 'toll_booth':
-            return True
-        
-        # Para outros tipos, threshold padrão
-        return quality_score >= 0.3
-    
-    def _extract_amenities(self, tags: Dict[str, Any]) -> List[str]:
-        """
-        Extrai lista de comodidades/amenidades de um POI baseado nas tags do provider.
-        
-        Args:
-            tags: Tags do provider geográfico
-            
-        Returns:
-            Lista de amenidades encontradas
-        """
-        amenities = []
-        
-        # Mapeamento de tags do provider para amenidades legíveis
-        amenity_mappings = {
-            # Conectividade
-            'internet_access': {'wifi', 'internet'},
-            'wifi': {'wifi'},
-            
-            # Estacionamento
-            'parking': {'estacionamento'},
-            'parking:fee': {'estacionamento pago'},
-            
-            # Acessibilidade
-            'wheelchair': {'acessível'},
-            
-            # Pagamento
-            'payment:cash': {'dinheiro'},
-            'payment:cards': {'cartão'},
-            'payment:contactless': {'contactless'},
-            'payment:credit_cards': {'cartão de crédito'},
-            'payment:debit_cards': {'cartão de débito'},
-            
-            # Combustível específico
-            'fuel:diesel': {'diesel'},
-            'fuel:octane_91': {'gasolina comum'},
-            'fuel:octane_95': {'gasolina aditivada'},
-            'fuel:lpg': {'GNV'},
-            'fuel:ethanol': {'etanol'},
-            
-            # Serviços
-            'toilets': {'banheiro'},
-            'shower': {'chuveiro'},
-            'restaurant': {'restaurante'},
-            'cafe': {'café'},
-            'shop': {'loja'},
-            'atm': {'caixa eletrônico'},
-            'car_wash': {'lava-jato'},
-            'compressed_air': {'calibragem'},
-            'vacuum_cleaner': {'aspirador'},
-            
-            # Outros
-            'outdoor_seating': {'área externa'},
-            'air_conditioning': {'ar condicionado'},
-            'takeaway': {'delivery'},
-            'delivery': {'delivery'},
-            'drive_through': {'drive-thru'},
-        }
-        
-        # Verifica cada tag e adiciona as amenidades correspondentes
-        for tag_key, tag_value in tags.items():
-            # Normaliza o valor da tag
-            if isinstance(tag_value, str):
-                tag_value = tag_value.lower()
-            
-            # Verifica se a tag indica presença da amenidade
-            if tag_value in ['yes', 'true', '1', 'available']:
-                if tag_key in amenity_mappings:
-                    amenities.extend(amenity_mappings[tag_key])
-                elif tag_key.startswith('payment:') and tag_key in amenity_mappings:
-                    amenities.extend(amenity_mappings[tag_key])
-        
-        # Amenidades especiais baseadas no tipo
-        amenity_type = tags.get('amenity')
-        if amenity_type == 'fuel':
-            # Para postos, assumir algumas amenidades básicas se não especificadas
-            if not any('banheiro' in a for a in amenities) and tags.get('toilets') != 'no':
-                amenities.append('banheiro')
-        
-        # Amenidades baseadas em horário
-        opening_hours = tags.get('opening_hours', '')
-        if '24/7' in opening_hours or 'Mo-Su 00:00-24:00' in opening_hours:
-            amenities.append('24h')
-        
-        # Remove duplicatas e ordena
-        amenities = sorted(list(set(amenities)))
-        
-        return amenities
-    
-    def get_route_statistics(
-        self,
-        origin: str,
-        destination: str,
-        max_distance_from_road: float = 1000
-    ) -> 'RouteStatisticsResponse':
-        """
-        Gera estatísticas detalhadas de uma rota.
-        Sempre busca todos os tipos de POI para estatísticas completas.
-
-        Args:
-            origin: Ponto de origem
-            destination: Ponto de destino
-            max_distance_from_road: Distância máxima da estrada para considerar POIs
-
-        Returns:
-            Estatísticas completas da rota
-        """
-        from api.models.road_models import (
-            RouteStatisticsResponse, POIStatistics, RouteStopRecommendation
+        """Find milestones along the route (delegates to poi_search_service)."""
+        return await self.poi_search_service.find_milestones(
+            segments=segments,
+            categories=categories,
+            max_distance_from_road=max_distance_from_road,
+            max_detour_distance_km=max_detour_distance_km,
+            exclude_cities=exclude_cities,
+            progress_callback=progress_callback,
+            main_route=main_route,
+            debug_collector=debug_collector,
         )
-
-        # Gerar mapa linear para obter dados (sempre busca todos os POI)
-        linear_map = self.generate_linear_map(
-            origin=origin,
-            destination=destination,
-            include_cities=True,
-            max_distance_from_road=max_distance_from_road
-        )
-        
-        # Calcular estatísticas por tipo de POI
-        poi_stats = []
-        all_milestones = []
-        
-        # Coletar todos os milestones de todos os segmentos
-        for segment in linear_map.segments:
-            all_milestones.extend(segment.milestones)
-        
-        # Agrupar por tipo
-        poi_types = {}
-        for milestone in all_milestones:
-            if milestone.type.value not in poi_types:
-                poi_types[milestone.type.value] = []
-            poi_types[milestone.type.value].append(milestone)
-        
-        # Calcular estatísticas para cada tipo
-        for poi_type, milestones in poi_types.items():
-            if poi_type == "city":  # Pular cidades nas estatísticas
-                continue
-                
-            if len(milestones) > 1:
-                # Calcular distância média entre POIs
-                distances = []
-                sorted_milestones = sorted(milestones, key=lambda m: m.distance_from_origin_km)
-                for i in range(1, len(sorted_milestones)):
-                    distance = sorted_milestones[i].distance_from_origin_km - sorted_milestones[i-1].distance_from_origin_km
-                    distances.append(distance)
-                
-                avg_distance = sum(distances) / len(distances) if distances else 0
-            else:
-                avg_distance = linear_map.total_length_km
-            
-            # Calcular densidade por 100km
-            density = (len(milestones) / linear_map.total_length_km) * 100 if linear_map.total_length_km > 0 else 0
-            
-            poi_stats.append(POIStatistics(
-                type=poi_type,
-                total_count=len(milestones),
-                average_distance_km=avg_distance,
-                density_per_100km=density
-            ))
-        
-        # Gerar recomendações de paradas
-        recommendations = self._generate_stop_recommendations(all_milestones, linear_map.total_length_km)
-        
-        # Calcular tempo estimado (assumindo 80 km/h de média)
-        estimated_time = linear_map.total_length_km / 80.0
-        
-        # Métricas de qualidade dos dados
-        quality_metrics = self._calculate_quality_metrics(all_milestones)
-        
-        return RouteStatisticsResponse(
-            route_info={
-                "origin": origin,
-                "destination": destination,
-                "road_refs": [seg.ref for seg in linear_map.segments if seg.ref],
-                "segment_count": len(linear_map.segments)
-            },
-            total_length_km=linear_map.total_length_km,
-            estimated_travel_time_hours=estimated_time,
-            poi_statistics=poi_stats,
-            recommendations=recommendations,
-            quality_metrics=quality_metrics
-        )
-    
-    def _generate_stop_recommendations(
-        self, 
-        milestones: List['RoadMilestone'], 
-        total_length_km: float
-    ) -> List['RouteStopRecommendation']:
-        """
-        Gera recomendações de paradas estratégicas baseadas nos POIs disponíveis.
-        """
-        from api.models.road_models import RouteStopRecommendation
-        
-        recommendations = []
-        
-        # Filtrar apenas POIs úteis para paradas
-        useful_milestones = [m for m in milestones if m.type.value in ['gas_station', 'restaurant']]
-        useful_milestones.sort(key=lambda m: m.distance_from_origin_km)
-        
-        # Recomendações baseadas em distância (a cada 200km aproximadamente)
-        last_recommended_km = 0
-        for milestone in useful_milestones:
-            distance_from_last = milestone.distance_from_origin_km - last_recommended_km
-            
-            # Se passou mais de 150km desde a última recomendação, considerar esta parada
-            if distance_from_last >= 150:
-                services = []
-                reason = ""
-                duration = 15  # minutos padrão
-                
-                if milestone.type.value == 'gas_station':
-                    services.append("Combustível")
-                    reason = "Reabastecimento recomendado"
-                    duration = 10
-                    
-                if milestone.type.value == 'restaurant':
-                    services.append("Alimentação")
-                    reason = "Parada para refeição"
-                    duration = 30
-                
-                # Verificar se há outros POIs próximos (até 5km)
-                nearby_pois = [
-                    m for m in useful_milestones 
-                    if abs(m.distance_from_origin_km - milestone.distance_from_origin_km) <= 5
-                    and m != milestone
-                ]
-                
-                for nearby in nearby_pois:
-                    if nearby.type.value == 'gas_station' and "Combustível" not in services:
-                        services.append("Combustível")
-                    elif nearby.type.value == 'restaurant' and "Alimentação" not in services:
-                        services.append("Alimentação")
-                
-                if len(services) > 1:
-                    reason = "Parada estratégica - múltiplos serviços"
-                    duration = 20
-                
-                # Adicionar amenidades do POI principal
-                if milestone.amenities:
-                    services.extend(milestone.amenities[:3])  # Limitar a 3 amenidades extras
-                
-                recommendations.append(RouteStopRecommendation(
-                    distance_km=milestone.distance_from_origin_km,
-                    reason=reason,
-                    available_services=list(set(services)),  # Remove duplicatas
-                    recommended_duration_minutes=duration
-                ))
-                
-                last_recommended_km = milestone.distance_from_origin_km
-        
-        return recommendations[:5]  # Limitar a 5 recomendações
-    
-    def _calculate_quality_metrics(self, milestones: List['RoadMilestone']) -> Dict[str, Any]:
-        """
-        Calcula métricas de qualidade dos dados dos POIs.
-        """
-        if not milestones:
-            return {"overall_quality": 0.0, "data_completeness": 0.0}
-        
-        total_quality = sum(m.quality_score or 0 for m in milestones)
-        average_quality = total_quality / len(milestones)
-        
-        # Calcular completude dos dados
-        fields_to_check = ['phone', 'opening_hours', 'website', 'operator', 'brand']
-        completeness_scores = []
-        
-        for milestone in milestones:
-            filled_fields = sum(1 for field in fields_to_check if getattr(milestone, field, None))
-            completeness = filled_fields / len(fields_to_check)
-            completeness_scores.append(completeness)
-        
-        average_completeness = sum(completeness_scores) / len(completeness_scores)
-        
-        return {
-            "overall_quality": round(average_quality, 2),
-            "data_completeness": round(average_completeness, 2),
-            "total_pois_analyzed": len(milestones),
-            "pois_with_phone": len([m for m in milestones if m.phone]),
-            "pois_with_hours": len([m for m in milestones if m.opening_hours]),
-            "pois_with_website": len([m for m in milestones if m.website])
-        }
-
-    async def geocode_location_async(self, address: str) -> Optional[Tuple[float, float]]:
-        """
-        Geocode a location using the configured provider.
-        
-        Args:
-            address: Address string to geocode
-            
-        Returns:
-            Tuple of (latitude, longitude) or None if not found
-        """
-        try:
-            location = await self.geo_provider.geocode(address)
-            if location:
-                return (location.latitude, location.longitude)
-            return None
-        except Exception as e:
-            logger.error(f"Error geocoding '{address}': {e}")
-            return None
-    
-    async def search_pois_async(
-        self, 
-        location: Tuple[float, float], 
-        radius: float, 
-        categories: List[str]
-    ) -> List[Dict[str, Any]]:
-        """
-        Search for POIs using the configured provider.
-        
-        Args:
-            location: (latitude, longitude) tuple
-            radius: Search radius in meters
-            categories: List of POI categories to search for
-            
-        Returns:
-            List of POI dictionaries
-        """
-        try:
-            from ..providers.models import GeoLocation, POICategory
-            
-            # Convert location to GeoLocation
-            geo_location = GeoLocation(latitude=location[0], longitude=location[1])
-            
-            # Convert category strings to POICategory enums
-            poi_categories = []
-            for category in categories:
-                try:
-                    poi_categories.append(POICategory(category))
-                except ValueError:
-                    # Skip unknown categories
-                    logger.warning(f"Unknown POI category: {category}")
-                    continue
-            
-            if not poi_categories:
-                return []
-            
-            # Search using the provider
-            pois = await self.poi_provider.search_pois(
-                location=geo_location,
-                radius=radius,
-                categories=poi_categories
-            )
-            
-            # Convert POIs back to dictionaries for compatibility
-            result = []
-            for poi in pois:
-                result.append({
-                    'id': poi.id,
-                    'name': poi.name,
-                    'lat': poi.location.latitude,
-                    'lon': poi.location.longitude,
-                    'category': poi.category.value,
-                    'amenities': poi.amenities,
-                    'rating': poi.rating,
-                    'is_open': poi.is_open,
-                    'phone': poi.phone,
-                    'website': poi.website,
-                    'tags': poi.provider_data.get('tags', poi.provider_data)
-                })
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error searching POIs: {e}")
-            return []
-    
-    def _calculate_distance_meters(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-        """
-        Calculate the distance between two points using Haversine formula.
-        
-        Args:
-            lat1, lon1: First point coordinates
-            lat2, lon2: Second point coordinates
-            
-        Returns:
-            Distance in meters
-        """
-        # Convert to radians
-        lat1_rad = math.radians(lat1)
-        lon1_rad = math.radians(lon1)
-        lat2_rad = math.radians(lat2)
-        lon2_rad = math.radians(lon2)
-        
-        # Haversine formula
-        dlat = lat2_rad - lat1_rad
-        dlon = lon2_rad - lon1_rad
-        
-        a = (math.sin(dlat/2) * math.sin(dlat/2) + 
-             math.cos(lat1_rad) * math.cos(lat2_rad) * 
-             math.sin(dlon/2) * math.sin(dlon/2))
-        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-        
-        # Earth radius in meters
-        R = 6371000  
-        distance = R * c
-        
-        return distance
-
-    def _calculate_distance_along_route(
-        self, 
-        geometry: List[Tuple[float, float]], 
-        target_point: Tuple[float, float]
-    ) -> float:
-        """
-        Calculate the distance along a route geometry to reach a target point.
-        
-        Args:
-            geometry: Route geometry as list of (lat, lon) tuples
-            target_point: Target point (lat, lon)
-            
-        Returns:
-            Distance in kilometers from start of geometry to target point
-        """
-        if not geometry:
-            return 0.0
-        
-        # Find the segment in geometry closest to target point
-        min_distance = float('inf')
-        closest_segment_idx = 0
-        
-        for i in range(len(geometry) - 1):
-            # Calculate distance from target to this segment
-            seg_start = geometry[i]
-            seg_end = geometry[i + 1]
-            
-            # Distance to segment midpoint (simplified)
-            midpoint = ((seg_start[0] + seg_end[0]) / 2, (seg_start[1] + seg_end[1]) / 2)
-            dist = self._calculate_distance_meters(
-                target_point[0], target_point[1],
-                midpoint[0], midpoint[1]
-            )
-            
-            if dist < min_distance:
-                min_distance = dist
-                closest_segment_idx = i
-        
-        # Calculate cumulative distance up to the closest segment
-        cumulative_distance = 0.0
-        for i in range(closest_segment_idx):
-            cumulative_distance += self._calculate_distance_meters(
-                geometry[i][0], geometry[i][1],
-                geometry[i + 1][0], geometry[i + 1][1]
-            )
-        
-        # Convert to km
-        return cumulative_distance / 1000.0
-
-    def _calculate_distance_from_point_to_end(
-        self,
-        geometry: List[Tuple[float, float]],
-        start_point: Tuple[float, float]
-    ) -> float:
-        """
-        Calculate the distance from a point along a route to the end of the route.
-        
-        This is useful for calculating the remaining distance from an intermediate point
-        (like a junction) to the end of the route (like a POI).
-        
-        Args:
-            geometry: Route geometry as list of (lat, lon) tuples
-            start_point: Starting point (lat, lon) along the route
-            
-        Returns:
-            Distance in kilometers from start_point to end of geometry
-        """
-        if not geometry or len(geometry) < 2:
-            return 0.0
-        
-        # Find the segment in geometry closest to start point
-        min_distance = float('inf')
-        closest_segment_idx = 0
-        projection_point = start_point
-        
-        for i in range(len(geometry) - 1):
-            seg_start = geometry[i]
-            seg_end = geometry[i + 1]
-            
-            # Calculate projection of start_point onto this segment
-            # For simplicity, we'll use the midpoint approach like in the original method
-            midpoint = ((seg_start[0] + seg_end[0]) / 2, (seg_start[1] + seg_end[1]) / 2)
-            dist = self._calculate_distance_meters(
-                start_point[0], start_point[1],
-                midpoint[0], midpoint[1]
-            )
-            
-            if dist < min_distance:
-                min_distance = dist
-                closest_segment_idx = i
-                # Use the end of this segment as the projection point
-                projection_point = seg_end
-        
-        # Calculate distance from projection point to end of geometry
-        cumulative_distance = 0.0
-        
-        # Start from the segment after the closest one
-        for i in range(closest_segment_idx + 1, len(geometry) - 1):
-            cumulative_distance += self._calculate_distance_meters(
-                geometry[i][0], geometry[i][1],
-                geometry[i + 1][0], geometry[i + 1][1]
-            )
-        
-        # Also add the distance from the start_point to the projection_point
-        cumulative_distance += self._calculate_distance_meters(
-            start_point[0], start_point[1],
-            projection_point[0], projection_point[1]
-        )
-        
-        # Convert to km
-        return cumulative_distance / 1000.0
-
-    def _determine_poi_side(
-        self,
-        main_route_geometry: List[Tuple[float, float]],
-        junction_point: Tuple[float, float],
-        poi_location: Tuple[float, float],
-        return_debug: bool = False
-    ) -> Union[str, Tuple[str, Dict[str, Any]]]:
-        """
-        Determine if POI is on the left or right side of the road.
-
-        Uses cross product to determine the side relative to the road direction.
-
-        Args:
-            main_route_geometry: Main route geometry as list of (lat, lon) tuples
-            junction_point: Junction coordinates (lat, lon)
-            poi_location: POI coordinates (lat, lon)
-            return_debug: If True, also return debug calculation info
-
-        Returns:
-            'left' or 'right' (or tuple with debug info if return_debug=True)
-        """
-        # Find the segment in main route closest to junction point
-        min_distance = float('inf')
-        segment_idx = 0
-
-        for i in range(len(main_route_geometry) - 1):
-            seg_start = main_route_geometry[i]
-            seg_end = main_route_geometry[i + 1]
-            midpoint = ((seg_start[0] + seg_end[0]) / 2, (seg_start[1] + seg_end[1]) / 2)
-
-            dist = self._calculate_distance_meters(
-                junction_point[0], junction_point[1],
-                midpoint[0], midpoint[1]
-            )
-
-            if dist < min_distance:
-                min_distance = dist
-                segment_idx = i
-
-        # Get the road direction vector at junction
-        seg_start = main_route_geometry[segment_idx]
-        seg_end = main_route_geometry[segment_idx + 1]
-
-        # Vector from segment start to end (road direction)
-        road_vector = (seg_end[1] - seg_start[1], seg_end[0] - seg_start[0])  # (dx, dy)
-
-        # Vector from junction to POI
-        poi_vector = (poi_location[1] - junction_point[1], poi_location[0] - junction_point[0])  # (dx, dy)
-
-        # Cross product in 2D: road_vector x poi_vector
-        # If positive: POI is to the left (counter-clockwise)
-        # If negative: POI is to the right (clockwise)
-        cross_product = road_vector[0] * poi_vector[1] - road_vector[1] * poi_vector[0]
-
-        side = 'left' if cross_product > 0 else 'right'
-
-        if return_debug:
-            debug_info = {
-                "road_vector": {"dx": road_vector[0], "dy": road_vector[1]},
-                "poi_vector": {"dx": poi_vector[0], "dy": poi_vector[1]},
-                "cross_product": cross_product,
-                "resulting_side": side,
-                "segment_start": {"lat": seg_start[0], "lon": seg_start[1]},
-                "segment_end": {"lat": seg_end[0], "lon": seg_end[1]},
-                "segment_idx": segment_idx
-            }
-            return (side, debug_info)
-
-        return side
-
-    def _determine_side_from_access_route(
-        self,
-        main_route_geometry: List[Tuple[float, float]],
-        junction_point: Tuple[float, float],
-        access_route_geometry: List[Tuple[float, float]],
-        poi_location: Optional[Tuple[float, float]] = None,
-        return_debug: bool = False
-    ) -> Union[str, Tuple[str, Dict[str, Any]]]:
-        """
-        Determine if driver needs to turn left or right based on access route direction.
-
-        This method looks at the initial direction of the access route from the junction
-        point, which represents the actual turn the driver needs to make.
-
-        When the access route is nearly parallel to the main route (e.g., service roads),
-        the method falls back to using the POI location directly for more reliable results.
-
-        Args:
-            main_route_geometry: Main route geometry as list of (lat, lon) tuples
-            junction_point: Junction coordinates (lat, lon)
-            access_route_geometry: Access route geometry from lookback to POI
-            poi_location: Optional POI location (lat, lon) for fallback calculation
-            return_debug: If True, also return debug calculation info
-
-        Returns:
-            'left' or 'right' (or tuple with debug info if return_debug=True)
-        """
-        # Find the segment in main route closest to junction point
-        min_distance = float('inf')
-        segment_idx = 0
-
-        for i in range(len(main_route_geometry) - 1):
-            seg_start = main_route_geometry[i]
-            seg_end = main_route_geometry[i + 1]
-            midpoint = ((seg_start[0] + seg_end[0]) / 2, (seg_start[1] + seg_end[1]) / 2)
-
-            dist = self._calculate_distance_meters(
-                junction_point[0], junction_point[1],
-                midpoint[0], midpoint[1]
-            )
-
-            if dist < min_distance:
-                min_distance = dist
-                segment_idx = i
-
-        # Get the road direction vector at junction
-        seg_start = main_route_geometry[segment_idx]
-        seg_end = main_route_geometry[segment_idx + 1]
-
-        # Vector from segment start to end (road direction)
-        road_vector = (seg_end[1] - seg_start[1], seg_end[0] - seg_start[0])  # (dx, dy)
-
-        # Find the point in access route closest to junction
-        min_dist_to_junction = float('inf')
-        junction_idx_on_access = 0
-
-        for i, point in enumerate(access_route_geometry):
-            dist = self._calculate_distance_meters(
-                junction_point[0], junction_point[1],
-                point[0], point[1]
-            )
-            if dist < min_dist_to_junction:
-                min_dist_to_junction = dist
-                junction_idx_on_access = i
-
-        # Get the direction of access route AFTER the junction (towards POI)
-        # Look at the next few points to get a stable direction
-        # The access route goes from lookback -> junction -> POI
-        # So we want points AFTER the junction index
-        access_direction_point_idx = min(
-            junction_idx_on_access + 5,  # Look 5 points ahead
-            len(access_route_geometry) - 1
-        )
-
-        # If junction is very close to end, just use the last point
-        if access_direction_point_idx <= junction_idx_on_access:
-            access_direction_point_idx = len(access_route_geometry) - 1
-
-        access_start = access_route_geometry[junction_idx_on_access]
-        access_direction_point = access_route_geometry[access_direction_point_idx]
-
-        # Vector in the direction the driver turns (from junction towards POI)
-        access_vector = (
-            access_direction_point[1] - access_start[1],  # dx (lon)
-            access_direction_point[0] - access_start[0]   # dy (lat)
-        )
-
-        # Cross product: road_vector x access_vector
-        # If positive: turning left
-        # If negative: turning right
-        cross_product = road_vector[0] * access_vector[1] - road_vector[1] * access_vector[0]
-
-        # Calculate normalized cross product (sin of angle between vectors)
-        # This helps detect when vectors are nearly parallel
-        road_magnitude = math.sqrt(road_vector[0]**2 + road_vector[1]**2)
-        access_magnitude = math.sqrt(access_vector[0]**2 + access_vector[1]**2)
-
-        used_fallback = False
-        fallback_reason = None
-        original_cross_product = cross_product
-        original_access_vector = access_vector
-
-        # Threshold: sin(5.7°) ≈ 0.1 - if vectors are within ~6° of parallel, use fallback
-        PARALLEL_THRESHOLD = 0.1
-
-        if road_magnitude > 0 and access_magnitude > 0:
-            normalized_cross = abs(cross_product) / (road_magnitude * access_magnitude)
-
-            # If vectors are nearly parallel and we have POI location, use POI as direction
-            if normalized_cross < PARALLEL_THRESHOLD and poi_location is not None:
-                used_fallback = True
-                fallback_reason = f"vectors_nearly_parallel (normalized={normalized_cross:.6f}, threshold={PARALLEL_THRESHOLD})"
-
-                # Use POI location directly instead of access route direction
-                poi_vector = (
-                    poi_location[1] - junction_point[1],  # dx (lon)
-                    poi_location[0] - junction_point[0]   # dy (lat)
-                )
-                access_vector = poi_vector
-                cross_product = road_vector[0] * poi_vector[1] - road_vector[1] * poi_vector[0]
-
-        side = 'left' if cross_product > 0 else 'right'
-
-        if return_debug:
-            debug_info = {
-                "road_vector": {"dx": road_vector[0], "dy": road_vector[1]},
-                "access_vector": {"dx": access_vector[0], "dy": access_vector[1]},
-                "cross_product": cross_product,
-                "resulting_side": side,
-                "segment_start": {"lat": seg_start[0], "lon": seg_start[1]},
-                "segment_end": {"lat": seg_end[0], "lon": seg_end[1]},
-                "segment_idx": segment_idx,
-                "junction_idx_on_access": junction_idx_on_access,
-                "access_direction_point_idx": access_direction_point_idx,
-                "access_start": {"lat": access_start[0], "lon": access_start[1]},
-                "access_direction_point": {"lat": access_direction_point[0], "lon": access_direction_point[1]},
-                "method": "access_route_direction",
-                "used_fallback": used_fallback,
-                "fallback_reason": fallback_reason,
-                "road_magnitude": road_magnitude,
-                "access_magnitude": access_magnitude,
-                "normalized_cross_product": abs(original_cross_product) / (road_magnitude * access_magnitude) if road_magnitude > 0 and access_magnitude > 0 else None,
-            }
-            if used_fallback:
-                debug_info["original_access_vector"] = {"dx": original_access_vector[0], "dy": original_access_vector[1]}
-                debug_info["original_cross_product"] = original_cross_product
-                debug_info["poi_location_used"] = {"lat": poi_location[0], "lon": poi_location[1]} if poi_location else None
-            return (side, debug_info)
-
-        return side
-
-    def _find_route_intersection(
-        self,
-        main_route_geometry: List[Tuple[float, float]],
-        access_route_geometry: List[Tuple[float, float]],
-        tolerance_meters: float = 100.0
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Find the divergence point where access route first leaves the main route.
-
-        This method finds the END of the FIRST continuous segment where the
-        access route follows the main route. This is the true exit/divergence
-        point where the driver needs to turn off.
-
-        The access route typically:
-        1. Starts at the lookback point (on main route)
-        2. Follows the main route for some distance
-        3. Diverges from the main route to reach the POI
-        4. May cross or approach main route again (via interchanges, roundabouts)
-
-        We want point at the end of step 2 - the first divergence point.
-        We ignore any subsequent approaches to the main route (step 4).
-
-        Args:
-            main_route_geometry: Main route geometry [(lat, lon), ...]
-            access_route_geometry: Access route to POI [(lat, lon), ...]
-            tolerance_meters: Maximum distance to consider as "on the main route"
-
-        Returns:
-            Dict with:
-                - exit_point_on_access: The exit point on the access route geometry
-                - corresponding_point_on_main: The closest point on main route to exit
-                - distance_along_access_km: Distance from start of access route to exit point
-                - exit_point_index: Index of exit point in access route
-            Or None if no intersection found
-        """
-        if not main_route_geometry or not access_route_geometry:
-            return None
-
-        # Strategy: Find the END of the FIRST continuous segment where access
-        # route is within tolerance of main route.
-        #
-        # This handles cases where the route goes through interchanges/roundabouts
-        # and might approach the main route again later - we ignore those.
-
-        # Log first few points distance to main route for debugging
-        logger.debug(f"🔍 _find_route_intersection: tolerance={tolerance_meters}m, "
-                    f"access_points={len(access_route_geometry)}, main_points={len(main_route_geometry)}")
-
-        # Track the first continuous segment within tolerance
-        first_segment_start = None
-        first_segment_end = None
-        first_segment_end_on_main = None
-        first_segment_end_index = 0
-        first_segment_end_distance_m = 0.0
-        first_segment_end_distance_to_main = 0.0
-
-        # Track cumulative distance along access route
-        cumulative_distance_m = 0.0
-
-        # Track if we're currently in a "following" segment
-        in_following_segment = False
-        segment_ended = False
-
-        # Check each point in access route
-        for i, access_point in enumerate(access_route_geometry):
-            # Calculate distance from previous point (for cumulative tracking)
-            if i > 0:
-                prev_point = access_route_geometry[i - 1]
-                segment_distance = self._calculate_distance_meters(
-                    prev_point[0], prev_point[1],
-                    access_point[0], access_point[1]
-                )
-                cumulative_distance_m += segment_distance
-
-            # If we already found the first segment and it ended, stop looking
-            if segment_ended:
-                break
-
-            # Find the closest point on main route to this access point
-            closest_distance = float('inf')
-            closest_main_point = None
-
-            for main_point in main_route_geometry:
-                distance = self._calculate_distance_meters(
-                    access_point[0], access_point[1],
-                    main_point[0], main_point[1]
-                )
-
-                if distance < closest_distance:
-                    closest_distance = distance
-                    closest_main_point = main_point
-
-            # Check if this point is within tolerance
-            is_within_tolerance = closest_distance < tolerance_meters and closest_main_point is not None
-
-            # Log first 5 points and any state transitions
-            if i < 5:
-                logger.debug(f"🔍   Point {i}: dist_to_main={closest_distance:.1f}m, within_tol={is_within_tolerance}")
-
-            if is_within_tolerance:
-                if not in_following_segment:
-                    # Starting a new following segment
-                    in_following_segment = True
-                    first_segment_start = i
-                    logger.debug(f"🔍   SEGMENT START at point {i}, dist={closest_distance:.1f}m")
-
-                # Update the end of current segment (it keeps extending while within tolerance)
-                first_segment_end = access_point
-                first_segment_end_on_main = closest_main_point
-                first_segment_end_index = i
-                first_segment_end_distance_m = cumulative_distance_m
-                first_segment_end_distance_to_main = closest_distance
-            else:
-                if in_following_segment:
-                    # We were in a following segment and now we've left it
-                    # This is the first divergence - mark segment as ended
-                    segment_ended = True
-                    logger.debug(f"🔍   SEGMENT END at point {first_segment_end_index}, "
-                                f"diverged at point {i}, dist={closest_distance:.1f}m")
-
-        # Return the end of the first following segment
-        if first_segment_end_on_main and first_segment_end:
-            logger.debug(f"🔍   RESULT: segment {first_segment_start}->{first_segment_end_index}, "
-                        f"dist_along_access={first_segment_end_distance_m/1000:.2f}km")
-            return {
-                "exit_point_on_access": first_segment_end,
-                "corresponding_point_on_main": first_segment_end_on_main,
-                "distance_along_access_km": first_segment_end_distance_m / 1000.0,
-                "exit_point_index": first_segment_end_index,
-                "intersection_distance_m": first_segment_end_distance_to_main
-            }
-
-        logger.debug(f"🔍   RESULT: No segment found within tolerance")
-        return None
-
-    async def _calculate_junction_for_distant_poi(
-        self,
-        poi: POI,
-        search_point: Tuple[float, float],
-        search_point_distance_km: float,
-        main_route: Route,
-        all_search_points: List[Tuple[Tuple[float, float], float]],
-        current_search_point_index: int,
-        return_debug: bool = False
-    ) -> Optional[Union[
-        Tuple[float, Tuple[float, float], float, str],
-        Tuple[Tuple[float, Tuple[float, float], float, str], Dict[str, Any]]
-    ]]:
-        """
-        Calculate the junction/exit point for a distant POI.
-
-        For POIs that are far from the road (>500m), this calculates where
-        the driver needs to exit the main route to reach the POI.
-
-        Uses a search point N positions back as the lookback point.
-        Search points are at regular intervals (~1km) along the route,
-        ensuring we use coordinates that are on the actual road.
-
-        Args:
-            poi: The POI object
-            search_point: The search point on main route closest to POI (lat, lon)
-            search_point_distance_km: Distance of search point from origin
-            main_route: The complete main route object with geometry
-            all_search_points: List of all search points [(point, distance), ...]
-            current_search_point_index: Index of current search point in the list
-            return_debug: If True, also return debug data
-
-        Returns:
-            Tuple of (junction_distance_km, junction_coordinates, access_route_distance_km, side) or None if not found
-            where side is 'left' or 'right'.
-            If return_debug=True, returns (junction_info, debug_data) tuple instead.
-        """
-        debug_data: Dict[str, Any] = {}
-        settings = get_settings()
-
-        # Calculate distance from POI to search point
-        poi_distance_from_road_m = self._calculate_distance_meters(
-            poi.location.latitude, poi.location.longitude,
-            search_point[0], search_point[1]
-        )
-
-        # Find lookback point using a search point N positions back
-        # Search points are at ~1km intervals, so N points back ≈ N km back
-        lookback_count = settings.lookback_milestones_count  # Reusing the same setting
-
-        lookback_point: Tuple[float, float]
-        lookback_distance_km: float
-        lookback_method: str
-
-        # Calculate the index of the lookback search point
-        lookback_index = current_search_point_index - lookback_count
-
-        if lookback_index >= 0:
-            # Use the search point N positions back
-            lookback_point, lookback_distance_km = all_search_points[lookback_index]
-            lookback_method = "search_point"
-            logger.debug(f"🔍 Usando search point {lookback_index} como lookback "
-                        f"(km {lookback_distance_km:.1f}, {lookback_count} pontos atrás)")
-        elif current_search_point_index > 0:
-            # Not enough search points back, use the first one
-            lookback_point, lookback_distance_km = all_search_points[0]
-            lookback_method = "search_point_first"
-            logger.debug(f"🔍 Poucos search points ({current_search_point_index}), usando primeiro "
-                        f"(km {lookback_distance_km:.1f})")
-        else:
-            # We're at the first search point, use interpolation as fallback
-            poi_distance_km = poi_distance_from_road_m / 1000.0
-            lookback_km = min(20.0, max(5.0, poi_distance_km * 2))
-            lookback_distance_km = max(0, search_point_distance_km - lookback_km)
-            lookback_point = self._interpolate_coordinate_at_distance(
-                main_route.geometry,
-                lookback_distance_km,
-                main_route.total_distance
-            )
-            lookback_method = "interpolated"
-            logger.debug(f"🔍 Primeiro search point, usando interpolação (km {lookback_distance_km:.1f})")
-
-        # Capture lookback data for debug
-        if return_debug:
-            debug_data["lookback_data"] = {
-                "poi_distance_from_road_m": poi_distance_from_road_m,
-                "lookback_distance_km": lookback_distance_km,
-                "lookback_point": {"lat": lookback_point[0], "lon": lookback_point[1]},
-                "search_point": {"lat": search_point[0], "lon": search_point[1]},
-                "search_point_distance_km": search_point_distance_km,
-                "lookback_method": lookback_method,
-                "lookback_index": lookback_index if lookback_index >= 0 else 0,
-                "current_search_point_index": current_search_point_index,
-                "lookback_count_setting": lookback_count
-            }
-
-        try:
-            # Calculate route from lookback point to POI
-            access_route = await self.geo_provider.calculate_route(
-                GeoLocation(latitude=lookback_point[0], longitude=lookback_point[1]),
-                GeoLocation(latitude=poi.location.latitude, longitude=poi.location.longitude)
-            )
-
-            if not access_route or not access_route.geometry:
-                return None
-
-            # Capture access route geometry for debug (sample if too large)
-            if return_debug:
-                # Sample every Nth point to keep geometry manageable
-                geometry = access_route.geometry
-                if len(geometry) > 100:
-                    step = len(geometry) // 100
-                    sampled = geometry[::step]
-                    # Always include last point
-                    if geometry[-1] not in sampled:
-                        sampled.append(geometry[-1])
-                    debug_data["access_route_geometry"] = [[p[0], p[1]] for p in sampled]
-                else:
-                    debug_data["access_route_geometry"] = [[p[0], p[1]] for p in geometry]
-
-            # Find intersection between access route and main route
-            # Use larger tolerance (300m) to avoid excluding POIs that have valid access routes
-            # but where the closest point on the access route is slightly far from the main route
-            logger.debug(f"🔍 POI: {poi.name} - buscando interseção")
-            intersection = self._find_route_intersection(
-                main_route.geometry,
-                access_route.geometry,
-                tolerance_meters=50.0  # Reduced to 50m to detect exits more precisely
-            )
-
-            if intersection:
-                # Extract data from intersection result
-                exit_point_on_access = intersection["exit_point_on_access"]
-                corresponding_point_on_main = intersection["corresponding_point_on_main"]
-                distance_along_access_km = intersection["distance_along_access_km"]
-                exit_point_index = intersection["exit_point_index"]
-
-                # Calculate junction_distance_km along the MAIN ROUTE to the junction point
-                # This gives the actual km marker where the driver exits
-                junction_distance_km = self._calculate_distance_along_route(
-                    main_route.geometry,
-                    corresponding_point_on_main
-                )
-
-                # Use the corresponding point on main route as junction coordinates
-                # This ensures J marker appears on the blue line (main route)
-                junction_coords = corresponding_point_on_main
-
-                # Calculate distance from exit point to POI along access route
-                # Sum distances from exit point to end of access route
-                access_route_distance_km = 0.0
-                for i in range(exit_point_index, len(access_route.geometry) - 1):
-                    access_route_distance_km += self._calculate_distance_meters(
-                        access_route.geometry[i][0], access_route.geometry[i][1],
-                        access_route.geometry[i + 1][0], access_route.geometry[i + 1][1]
-                    ) / 1000.0
-
-                # Determine which side the driver needs to turn based on access route direction
-                # Use the corresponding point on main route for road direction calculation
-                # but use the access route geometry for turn direction
-                poi_loc = (poi.location.latitude, poi.location.longitude)
-                if return_debug:
-                    side, side_debug = self._determine_side_from_access_route(
-                        main_route.geometry,
-                        corresponding_point_on_main,  # Use main route point for road direction
-                        access_route.geometry,
-                        poi_location=poi_loc,
-                        return_debug=True
-                    )
-                    debug_data["side_calculation"] = side_debug
-                    debug_data["access_route_distance_km"] = access_route_distance_km
-                    debug_data["junction_calculation"] = {
-                        "method": "first_segment_end",
-                        "junction_distance_km": junction_distance_km,
-                        "distance_along_access_to_crossing_km": distance_along_access_km,
-                        "exit_point_index": exit_point_index,
-                        "total_access_points": len(access_route.geometry),
-                        "crossing_point_on_access": {"lat": exit_point_on_access[0], "lon": exit_point_on_access[1]},
-                        "corresponding_point_on_main": {"lat": corresponding_point_on_main[0], "lon": corresponding_point_on_main[1]},
-                        "intersection_distance_m": intersection.get("intersection_distance_m", 0),
-                        "access_route_total_km": access_route.total_distance if access_route.total_distance else None,
-                    }
-                else:
-                    side = self._determine_side_from_access_route(
-                        main_route.geometry,
-                        corresponding_point_on_main,
-                        access_route.geometry,
-                        poi_location=poi_loc
-                    )
-
-                junction_info = (junction_distance_km, junction_coords, access_route_distance_km, side)
-
-                if return_debug:
-                    return (junction_info, debug_data)
-                return junction_info
-            else:
-                return None
-
-        except Exception as e:
-            logger.error(f"❌ Erro calculando entroncamento para {poi.name}: {e}")
-            return None
-
-    async def _persist_pois_to_database(
-        self,
-        pois: List[POI],
-        referenced_poi_ids: set
-    ) -> None:
-        """
-        Persist POIs to the database.
-
-        Creates database records for all POIs found during map generation.
-        POIs that are used in milestones are marked as is_referenced=True.
-
-        Args:
-            pois: List of POIs from geographic provider
-            referenced_poi_ids: Set of POI IDs that are used in milestones
-        """
-        from sqlalchemy.ext.asyncio import (
-            AsyncSession,
-            async_sessionmaker,
-            create_async_engine,
-        )
-        from .poi_persistence_service import persist_pois_batch
-
-        settings = get_settings()
-
-        # Create standalone engine to avoid event loop conflicts
-        database_url = (
-            f"postgresql+asyncpg://{settings.postgres_user}:{settings.postgres_password}"
-            f"@{settings.postgres_host}:{settings.postgres_port}/{settings.postgres_database}"
-        )
-        engine = create_async_engine(
-            database_url,
-            pool_size=1,
-            max_overflow=0,
-            pool_pre_ping=True,
-        )
-        session_maker = async_sessionmaker(
-            engine,
-            class_=AsyncSession,
-            expire_on_commit=False,
-        )
-
-        try:
-            async with session_maker() as session:
-                await persist_pois_batch(
-                    session=session,
-                    pois=pois,
-                    referenced_poi_ids=referenced_poi_ids
-                )
-        finally:
-            await engine.dispose()
