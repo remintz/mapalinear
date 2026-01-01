@@ -864,3 +864,124 @@ def delete_map_sync(map_id: str) -> bool:
 
     # Run in a new event loop
     return asyncio.run(_delete())
+
+
+async def replace_map_data_async(
+    original_map_id: str,
+    temp_map_id: str,
+    session: AsyncSession
+) -> bool:
+    """
+    Replace the data of an original map with data from a temporary map.
+
+    This is used for map regeneration to:
+    1. Keep the original map ID (preserving user associations)
+    2. Update the map with fresh data from the regenerated temporary map
+    3. Delete the temporary map
+
+    Args:
+        original_map_id: ID of the original map to update
+        temp_map_id: ID of the temporary map with new data
+        session: Database session
+
+    Returns:
+        True if successful, False otherwise
+    """
+    from sqlalchemy import update, delete
+    from api.database.models.poi_debug_data import POIDebugData
+
+    try:
+        original_uuid = UUID(original_map_id)
+        temp_uuid = UUID(temp_map_id)
+
+        storage = MapStorageServiceDB(session)
+
+        # 1. Load the temporary map to get its data
+        temp_map = await storage.map_repo.get_by_id(temp_uuid)
+        if not temp_map:
+            logger.error(f"Temporary map {temp_map_id} not found")
+            return False
+
+        original_map = await storage.map_repo.get_by_id(original_uuid)
+        if not original_map:
+            logger.error(f"Original map {original_map_id} not found")
+            return False
+
+        # 2. Delete old data from original map (MapPOI and POIDebugData)
+        # The cascade should handle POIDebugData but let's be explicit
+        from api.database.repositories.poi_debug_data import POIDebugDataRepository
+        debug_repo = POIDebugDataRepository(session)
+
+        deleted_debug = await debug_repo.delete_by_map(original_uuid)
+        logger.info(f"Deleted {deleted_debug} debug entries from original map")
+
+        deleted_pois = await storage.map_poi_repo.delete_all_for_map(original_uuid)
+        logger.info(f"Deleted {deleted_pois} MapPOI entries from original map")
+
+        # 3. Update original map metadata with temp map data
+        original_map.total_length_km = temp_map.total_length_km
+        original_map.segments = temp_map.segments
+        original_map.metadata_ = temp_map.metadata_
+        original_map.updated_at = datetime.now()
+        await session.flush()
+        logger.info(f"Updated original map metadata")
+
+        # 4. Move MapPOI entries from temp to original (update map_id)
+        await session.execute(
+            update(MapPOI)
+            .where(MapPOI.map_id == temp_uuid)
+            .values(map_id=original_uuid)
+        )
+        logger.info(f"Moved MapPOI entries from temp to original")
+
+        # 5. Move POIDebugData entries from temp to original (update map_id)
+        await session.execute(
+            update(POIDebugData)
+            .where(POIDebugData.map_id == temp_uuid)
+            .values(map_id=original_uuid)
+        )
+        logger.info(f"Moved POIDebugData entries from temp to original")
+
+        # 6. Delete the temporary map (now empty of POIs)
+        await storage.map_repo.delete_by_id(temp_uuid)
+        logger.info(f"Deleted temporary map {temp_map_id}")
+
+        logger.info(f"Successfully replaced map data: {original_map_id}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Error replacing map data: {e}")
+        raise
+
+
+def replace_map_data_sync(original_map_id: str, temp_map_id: str) -> bool:
+    """
+    Sync wrapper for replacing map data.
+    Use this from sync contexts (like background tasks).
+
+    Args:
+        original_map_id: ID of the original map to update
+        temp_map_id: ID of the temporary map with new data
+
+    Returns:
+        True if successful, False otherwise
+    """
+    import asyncio
+
+    async def _replace():
+        engine, session_maker = _create_standalone_session()
+        try:
+            async with session_maker() as session:
+                try:
+                    result = await replace_map_data_async(
+                        original_map_id, temp_map_id, session
+                    )
+                    await session.commit()
+                    return result
+                except Exception:
+                    await session.rollback()
+                    raise
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(_replace())

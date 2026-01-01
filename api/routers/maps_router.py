@@ -362,8 +362,11 @@ async def regenerate_map(
     """
     Regenerate a saved map (admin only).
 
-    This endpoint loads the existing map metadata, creates a new async operation
-    to regenerate the map with fresh data, and deletes the old map.
+    This endpoint regenerates a map while preserving user associations:
+    1. Creates a temporary map with fresh data
+    2. Users continue accessing the original map during regeneration
+    3. On success, atomically replaces original map data with new data
+    4. On failure, deletes temporary map and keeps original intact
 
     Args:
         map_id: ID of the map to regenerate
@@ -392,12 +395,14 @@ async def regenerate_map(
 
         # Define the function to execute in background
         def process_regeneration(progress_callback=None):
+            temp_map_id = None
             try:
                 logger.info(
                     f"Starting regeneration for map {map_id}: {origin} -> {destination}"
                 )
 
-                # Generate new map (this will save it to DB via save_map_sync)
+                # Generate new temporary map (this will save it to DB via save_map_sync)
+                # The original map remains accessible to users during this process
                 linear_map = road_service.generate_linear_map(
                     origin=origin,
                     destination=destination,
@@ -405,15 +410,22 @@ async def regenerate_map(
                     progress_callback=progress_callback,
                     user_id=user_id,
                 )
+                temp_map_id = linear_map.id
+                logger.info(f"Temporary map created: {temp_map_id}")
 
-                # Delete old map using sync wrapper
-                from ..services.map_storage_service_db import delete_map_sync
+                # Replace original map data with temporary map data
+                # This preserves the original map ID and user associations
+                from ..services.map_storage_service_db import replace_map_data_sync
 
-                delete_map_sync(map_id)
-                logger.info(f"Old map {map_id} deleted")
+                success = replace_map_data_sync(map_id, temp_map_id)
+                if not success:
+                    raise Exception("Failed to replace map data")
 
-                # Result will be the new map
+                logger.info(f"Map {map_id} successfully regenerated")
+
+                # Result uses original map_id (unchanged for users)
                 result = {
+                    "map_id": map_id,  # Original ID preserved
                     "origin": linear_map.origin,
                     "destination": linear_map.destination,
                     "total_length_km": linear_map.total_length_km,
@@ -429,6 +441,14 @@ async def regenerate_map(
 
             except Exception as e:
                 logger.error(f"Error regenerating map: {e}")
+                # Clean up temporary map if it was created
+                if temp_map_id:
+                    try:
+                        from ..services.map_storage_service_db import delete_map_sync
+                        delete_map_sync(temp_map_id)
+                        logger.info(f"Cleaned up temporary map {temp_map_id}")
+                    except Exception as cleanup_error:
+                        logger.warning(f"Failed to cleanup temp map: {cleanup_error}")
                 AsyncService.fail_operation(operation.operation_id, str(e))
                 raise
 
