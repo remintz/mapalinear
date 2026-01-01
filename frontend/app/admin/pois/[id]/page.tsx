@@ -19,6 +19,7 @@ import {
   ExternalLink,
   Building,
   Map,
+  Edit3,
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiClient } from "@/lib/api";
@@ -57,6 +58,28 @@ const POI_TYPE_ICONS: Record<string, string> = {
   town: "🏘️",
   village: "🏡",
 };
+
+/**
+ * Generate OSM edit URL from osm_id.
+ * Supports formats: "node/123456", "way/123456", or just "123456" (assumes node)
+ */
+function getOsmEditUrl(osmId: string): string | null {
+  if (!osmId) return null;
+
+  // Check if it has type prefix (node/way/relation)
+  if (osmId.includes("/")) {
+    const [osmType, osmNumericId] = osmId.split("/", 2);
+    if (!["node", "way", "relation"].includes(osmType)) return null;
+    return `https://www.openstreetmap.org/edit?${osmType}=${osmNumericId}`;
+  }
+
+  // If it's just a number, assume it's a node (most POIs are nodes)
+  if (/^\d+$/.test(osmId)) {
+    return `https://www.openstreetmap.org/edit?node=${osmId}`;
+  }
+
+  return null;
+}
 
 export default function POIDetailPage() {
   const { data: session, status } = useSession();
@@ -341,9 +364,23 @@ export default function POIDetailPage() {
                   <dd className="text-gray-900 font-mono text-xs">{poi.id}</dd>
                 </div>
                 {poi.osm_id && (
-                  <div className="flex justify-between">
+                  <div className="flex justify-between items-center">
                     <dt className="text-gray-500">OSM ID</dt>
-                    <dd className="text-gray-900 font-mono text-xs">{poi.osm_id}</dd>
+                    <dd className="text-gray-900 font-mono text-xs flex items-center gap-2">
+                      {poi.osm_id}
+                      {getOsmEditUrl(poi.osm_id) && (
+                        <a
+                          href={getOsmEditUrl(poi.osm_id)!}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
+                          title="Editar este POI no OpenStreetMap"
+                        >
+                          <Edit3 className="h-3 w-3" />
+                          Editar no OSM
+                        </a>
+                      )}
+                    </dd>
                   </div>
                 )}
                 {poi.here_id && (
