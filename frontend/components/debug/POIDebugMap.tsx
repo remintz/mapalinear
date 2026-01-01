@@ -56,29 +56,6 @@ const createJunctionIcon = () => {
   });
 };
 
-// Create lookback marker icon
-const createLookbackIcon = () => {
-  return L.divIcon({
-    html: `<div style="
-      background-color: #8b5cf6;
-      color: white;
-      border: 3px solid white;
-      border-radius: 50%;
-      width: 24px;
-      height: 24px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: bold;
-      font-size: 10px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.35);
-    ">L</div>`,
-    className: '',
-    iconSize: [24, 24],
-    iconAnchor: [12, 12],
-  });
-};
-
 // Component to fit bounds
 function FitBounds({ positions }: { positions: [number, number][] }) {
   const map = useMap();
@@ -96,7 +73,6 @@ function FitBounds({ positions }: { positions: [number, number][] }) {
 export default function POIDebugMap({ debugData }: POIDebugMapProps) {
   const poiIcon = useMemo(() => createPOIIcon(), []);
   const junctionIcon = useMemo(() => createJunctionIcon(), []);
-  const lookbackIcon = useMemo(() => createLookbackIcon(), []);
 
   // Collect all positions for bounds
   const allPositions = useMemo((): [number, number][] => {
@@ -122,11 +98,6 @@ export default function POIDebugMap({ debugData }: POIDebugMapProps) {
       debugData.access_route_geometry.forEach(p => {
         positions.push([p[0], p[1]]);
       });
-    }
-
-    // Lookback point
-    if (debugData.lookback_data?.lookback_point) {
-      positions.push([debugData.lookback_data.lookback_point.lat, debugData.lookback_data.lookback_point.lon]);
     }
 
     return positions;
@@ -182,22 +153,6 @@ export default function POIDebugMap({ debugData }: POIDebugMapProps) {
           </Polyline>
         )}
 
-        {/* Lookback marker */}
-        {debugData.lookback_data?.lookback_point && (
-          <Marker
-            position={[debugData.lookback_data.lookback_point.lat, debugData.lookback_data.lookback_point.lon]}
-            icon={lookbackIcon}
-          >
-            <Popup>
-              <div className="text-sm">
-                <p className="font-bold text-purple-600">Ponto de Lookback</p>
-                <p>Distancia: {debugData.lookback_data.lookback_distance_km?.toFixed(2)} km da origem</p>
-                <p className="text-xs text-gray-500">Inicio da busca de rota de acesso</p>
-              </div>
-            </Popup>
-          </Marker>
-        )}
-
         {/* Junction marker */}
         {debugData.junction_lat && debugData.junction_lon && (
           <Marker
@@ -242,10 +197,6 @@ export default function POIDebugMap({ debugData }: POIDebugMapProps) {
           <div className="flex items-center gap-2">
             <div className="w-4 h-1 bg-green-500 rounded" style={{backgroundImage: 'repeating-linear-gradient(90deg, #22c55e 0, #22c55e 3px, transparent 3px, transparent 6px)'}}></div>
             <span>Rota de Acesso</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 bg-purple-500 rounded-full text-white text-[8px] flex items-center justify-center font-bold">L</div>
-            <span>Lookback</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-4 h-4 bg-amber-500 rounded-full text-white text-[8px] flex items-center justify-center font-bold">J</div>
