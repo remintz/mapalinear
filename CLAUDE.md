@@ -167,7 +167,7 @@ make db-shell      # Open PostgreSQL interactive shell
 make install    # Install dependencies
 make run        # Start all services with mprocs
 make format     # Format code (black + isort)
-make test       # Run tests
+make test       # Run tests with coverage check (min 52%)
 ```
 
 ### Code Quality Tools
@@ -183,8 +183,11 @@ poetry run isort .
 # Type checking with mypy
 poetry run mypy .
 
-# Run tests (when available)
-poetry run pytest
+# Run tests with coverage (minimum 52% required)
+poetry run python -m pytest --cov=api --cov-fail-under=52
+
+# Run specific test file
+poetry run python -m pytest tests/services/test_road_service.py -v
 ```
 
 #### Frontend (TypeScript/React)
@@ -447,10 +450,19 @@ The map generation process consists of multiple steps, each with configurable da
 
 **Important:** These are SYSTEM-LEVEL configurations (environment variables). In the future, user-level preferences will be added that affect only map VISUALIZATION, not data fetching.
 
-**Services involved:**
-- `api/services/road_service.py`: Main map generation orchestrator
+**Services involved (modular architecture):**
+- `api/services/road_service.py`: Main map generation orchestrator (~400 lines)
+- `api/services/poi_search_service.py`: POI search and junction calculation (~400 lines)
+- `api/services/poi_quality_service.py`: POI quality assessment and filtering (~100 lines)
+- `api/services/route_segmentation_service.py`: Route segmentation (~40 lines)
+- `api/services/route_statistics_service.py`: Route statistics and recommendations (~80 lines)
+- `api/services/milestone_factory.py`: Milestone creation from POIs (~90 lines)
 - `api/services/google_places_service.py`: Google Places enrichment
 - `api/services/here_enrichment_service.py`: HERE Maps enrichment
+
+**Utility modules:**
+- `api/utils/geo_utils.py`: Pure geographic calculations (Haversine, interpolation)
+- `api/utils/async_utils.py`: Async execution utilities
 
 **Database model:**
 - `api/database/models/poi.py`: POI model supports multi-provider data
@@ -535,6 +547,37 @@ When working with geographic data:
 - os testes automáticos devem sempre passar 100%
 - se um teste automático está falhando descubra a causa raiz. O objetivo não é simplesmente passar nos testes mas assegurar que o sistema está funcionando conforme desejado
 - só faça commit se eu pedir
+- Cobertura mínima de testes: 52% (enforced via `make test`)
+
+### Test Structure
+```
+tests/
+  services/
+    test_road_service.py              # Integration tests for map generation
+    test_poi_search_service.py        # POI search and side determination
+    test_poi_quality_service.py       # Quality scoring and filtering
+    test_route_segmentation_service.py # Route segmentation
+    test_route_statistics_service.py  # Statistics and recommendations
+    test_milestone_factory.py         # Milestone creation
+  utils/
+    test_geo_utils.py                 # Geographic calculations (Haversine, etc.)
+    test_async_utils.py               # Async utilities
+  providers/
+    test_osm_provider.py              # OSM provider tests
+    test_cache.py                     # Cache system tests
+```
+
+**Running tests:**
+```bash
+# All tests with coverage
+make test
+
+# Specific test file
+poetry run python -m pytest tests/services/test_poi_search_service.py -v
+
+# Specific test class
+poetry run python -m pytest tests/services/test_poi_quality_service.py::TestIsPOIAbandoned -v
+```
 
 ## Common Pitfalls & Solutions
 
