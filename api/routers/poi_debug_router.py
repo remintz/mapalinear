@@ -72,6 +72,19 @@ class RecalculationAttempt(BaseModel):
     reason: Optional[str] = Field(None, description="Reason for skipping or failure")
 
 
+class JunctionCalculationDetail(BaseModel):
+    """Details of how the junction point was calculated."""
+    method: Optional[str] = Field(None, description="Method used: 'first_segment_end', etc.")
+    junction_distance_km: Optional[float] = Field(None, description="Distance from origin to junction")
+    distance_along_access_to_crossing_km: Optional[float] = Field(None, description="Distance along access route to crossing point")
+    exit_point_index: Optional[int] = Field(None, description="Index of exit point in access route")
+    total_access_points: Optional[int] = Field(None, description="Total number of points in access route")
+    crossing_point_on_access: Optional[Dict[str, float]] = Field(None, description="Crossing point on access route {lat, lon}")
+    corresponding_point_on_main: Optional[Dict[str, float]] = Field(None, description="Corresponding point on main route {lat, lon}")
+    intersection_distance_m: Optional[float] = Field(None, description="Distance between crossing points in meters")
+    access_route_total_km: Optional[float] = Field(None, description="Total access route distance in km")
+
+
 class POIDebugDataResponse(BaseModel):
     """Complete debug data for a POI."""
     id: str = Field(..., description="Debug data ID")
@@ -88,6 +101,7 @@ class POIDebugDataResponse(BaseModel):
     access_route_distance_km: Optional[float] = Field(None, description="Access route distance in km")
     side_calculation: Optional[SideCalculationDetail] = Field(None, description="Side calculation details")
     lookback_data: Optional[LookbackDetail] = Field(None, description="Lookback calculation details")
+    junction_calculation: Optional[JunctionCalculationDetail] = Field(None, description="Junction calculation details")
     recalculation_history: Optional[List[RecalculationAttempt]] = Field(None, description="Recalculation attempts")
     final_side: str = Field(..., description="Final determined side (left/right/center)")
     requires_detour: bool = Field(..., description="Whether this POI requires a detour")
@@ -191,6 +205,7 @@ async def get_map_debug_data(
                 access_route_distance_km=entry.access_route_distance_km,
                 side_calculation=SideCalculationDetail(**entry.side_calculation) if entry.side_calculation else None,
                 lookback_data=LookbackDetail(**entry.lookback_data) if entry.lookback_data else None,
+                junction_calculation=JunctionCalculationDetail(**entry.junction_calculation) if entry.junction_calculation else None,
                 recalculation_history=[RecalculationAttempt(**r) for r in entry.recalculation_history] if entry.recalculation_history else None,
                 final_side=entry.final_side,
                 requires_detour=entry.requires_detour,
@@ -256,6 +271,7 @@ async def get_map_debug_data(
             access_route_distance_km=None,
             side_calculation=None,  # Not available without full debug
             lookback_data=None,
+            junction_calculation=None,  # Not available without full debug
             recalculation_history=None,
             final_side=side,
             requires_detour=map_poi.requires_detour,
@@ -320,6 +336,7 @@ async def get_poi_debug_detail(
         access_route_distance_km=entry.access_route_distance_km,
         side_calculation=SideCalculationDetail(**entry.side_calculation) if entry.side_calculation else None,
         lookback_data=LookbackDetail(**entry.lookback_data) if entry.lookback_data else None,
+        junction_calculation=JunctionCalculationDetail(**entry.junction_calculation) if entry.junction_calculation else None,
         recalculation_history=[RecalculationAttempt(**r) for r in entry.recalculation_history] if entry.recalculation_history else None,
         final_side=entry.final_side,
         requires_detour=entry.requires_detour,

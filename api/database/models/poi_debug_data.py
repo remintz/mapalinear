@@ -111,6 +111,23 @@ class POIDebugData(Base):
         JSONB, nullable=True
     )
 
+    # Junction calculation details
+    # Structure:
+    # {
+    #     "method": "first_segment_end" | etc,
+    #     "junction_distance_km": float,
+    #     "distance_along_access_to_crossing_km": float,
+    #     "exit_point_index": int,
+    #     "total_access_points": int,
+    #     "crossing_point_on_access": {"lat": float, "lon": float},
+    #     "corresponding_point_on_main": {"lat": float, "lon": float},
+    #     "intersection_distance_m": float,
+    #     "access_route_total_km": float
+    # }
+    junction_calculation: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+
     # Recalculation attempts (for debugging optimization)
     # List of:
     # {

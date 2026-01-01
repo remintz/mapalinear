@@ -60,6 +60,7 @@ class POIDebugDataCollector:
         access_route_distance_km: Optional[float] = None,
         side_calculation: Optional[Dict[str, Any]] = None,
         lookback_data: Optional[Dict[str, Any]] = None,
+        junction_calculation: Optional[Dict[str, Any]] = None,
         recalculation_history: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
         """
@@ -113,6 +114,7 @@ class POIDebugDataCollector:
             "access_route_distance_km": access_route_distance_km,
             "side_calculation": side_calculation,
             "lookback_data": lookback_data,
+            "junction_calculation": junction_calculation,
             "recalculation_history": recalculation_history,
         }
 
@@ -288,6 +290,7 @@ class POIDebugService:
                 access_route_distance_km=data.get("access_route_distance_km"),
                 side_calculation=data.get("side_calculation"),
                 lookback_data=data.get("lookback_data"),
+                junction_calculation=data.get("junction_calculation"),
                 recalculation_history=data.get("recalculation_history"),
                 final_side=data["final_side"],
                 requires_detour=data.get("requires_detour", False),

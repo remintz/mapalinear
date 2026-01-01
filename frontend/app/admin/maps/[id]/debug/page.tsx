@@ -425,6 +425,84 @@ export default function POIDebugPage() {
                   </div>
                 )}
 
+                {/* Junction Calculation */}
+                {selectedPOI.junction_calculation && (
+                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+                    <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                      <Route className="w-5 h-5 text-amber-600" />
+                      Calculo da Juncao
+                      {selectedPOI.junction_calculation.method && (
+                        <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded">
+                          {selectedPOI.junction_calculation.method}
+                        </span>
+                      )}
+                    </h3>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                      {selectedPOI.junction_calculation.exit_point_index != null && (
+                        <div>
+                          <div className="text-sm text-gray-500">Ponto de Saida</div>
+                          <div className="font-medium text-gray-900">
+                            {selectedPOI.junction_calculation.exit_point_index}
+                            {selectedPOI.junction_calculation.total_access_points && (
+                              <span className="text-gray-500 text-sm">
+                                {' / '}{selectedPOI.junction_calculation.total_access_points} pontos
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      {selectedPOI.junction_calculation.junction_distance_km != null && (
+                        <div>
+                          <div className="text-sm text-gray-500">Dist. Juncao (origem)</div>
+                          <div className="font-medium text-gray-900">
+                            {selectedPOI.junction_calculation.junction_distance_km.toFixed(2)} km
+                          </div>
+                        </div>
+                      )}
+                      {selectedPOI.junction_calculation.distance_along_access_to_crossing_km != null && (
+                        <div>
+                          <div className="text-sm text-gray-500">Dist. ao longo do acesso</div>
+                          <div className="font-medium text-gray-900">
+                            {selectedPOI.junction_calculation.distance_along_access_to_crossing_km.toFixed(3)} km
+                          </div>
+                        </div>
+                      )}
+                      {selectedPOI.junction_calculation.access_route_total_km != null && (
+                        <div>
+                          <div className="text-sm text-gray-500">Rota de Acesso Total</div>
+                          <div className="font-medium text-gray-900">
+                            {selectedPOI.junction_calculation.access_route_total_km.toFixed(2)} km
+                          </div>
+                        </div>
+                      )}
+                      {selectedPOI.junction_calculation.intersection_distance_m != null && (
+                        <div>
+                          <div className="text-sm text-gray-500">Dist. Intersecao</div>
+                          <div className="font-medium text-gray-900">
+                            {selectedPOI.junction_calculation.intersection_distance_m.toFixed(1)} m
+                          </div>
+                        </div>
+                      )}
+                      {selectedPOI.junction_calculation.crossing_point_on_access && (
+                        <div>
+                          <div className="text-sm text-gray-500">Ponto Cruzamento (acesso)</div>
+                          <div className="font-mono text-sm text-gray-900">
+                            {selectedPOI.junction_calculation.crossing_point_on_access.lat.toFixed(6)}, {selectedPOI.junction_calculation.crossing_point_on_access.lon.toFixed(6)}
+                          </div>
+                        </div>
+                      )}
+                      {selectedPOI.junction_calculation.corresponding_point_on_main && (
+                        <div>
+                          <div className="text-sm text-gray-500">Ponto Correspondente (principal)</div>
+                          <div className="font-mono text-sm text-gray-900">
+                            {selectedPOI.junction_calculation.corresponding_point_on_main.lat.toFixed(6)}, {selectedPOI.junction_calculation.corresponding_point_on_main.lon.toFixed(6)}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {/* Lookback Data */}
                 {selectedPOI.lookback_data && (
                   <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">

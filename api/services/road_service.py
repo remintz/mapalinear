@@ -1142,6 +1142,7 @@ class RoadService:
                 access_route_geometry = poi_junction_debug.get("access_route_geometry")
                 access_route_distance_km = poi_junction_debug.get("access_route_distance_km")
                 lookback_data = poi_junction_debug.get("lookback_data")
+                junction_calculation = poi_junction_debug.get("junction_calculation")
 
                 # Use side_calculation from junction debug if available (more accurate)
                 # Otherwise calculate based on closest point
@@ -1197,6 +1198,7 @@ class RoadService:
                     access_route_distance_km=access_route_distance_km,
                     side_calculation=side_calculation,
                     lookback_data=lookback_data,
+                    junction_calculation=junction_calculation,
                 )
 
             except Exception as e:
@@ -2059,11 +2061,20 @@ class RoadService:
         tolerance_meters: float = 100.0
     ) -> Optional[Dict[str, Any]]:
         """
-        Find the divergence point where access route leaves the main route.
+        Find the divergence point where access route first leaves the main route.
 
-        This method finds the LAST point on the access route that is close to
-        the main route before the routes diverge. This represents the true
-        junction/exit point where the driver leaves the main road.
+        This method finds the END of the FIRST continuous segment where the
+        access route follows the main route. This is the true exit/divergence
+        point where the driver needs to turn off.
+
+        The access route typically:
+        1. Starts at the lookback point (on main route)
+        2. Follows the main route for some distance
+        3. Diverges from the main route to reach the POI
+        4. May cross or approach main route again (via interchanges, roundabouts)
+
+        We want point at the end of step 2 - the first divergence point.
+        We ignore any subsequent approaches to the main route (step 4).
 
         Args:
             main_route_geometry: Main route geometry [(lat, lon), ...]
@@ -2081,24 +2092,30 @@ class RoadService:
         if not main_route_geometry or not access_route_geometry:
             return None
 
-        # Strategy: Find the LAST point on the access route that is within tolerance
-        # of the main route. This is the divergence/exit point.
+        # Strategy: Find the END of the FIRST continuous segment where access
+        # route is within tolerance of main route.
         #
-        # The access route typically:
-        # 1. Starts at the lookback point (on main route)
-        # 2. Follows the main route for some distance
-        # 3. Diverges from the main route to reach the POI
-        #
-        # We want to find point (3) - the last point before diverging.
+        # This handles cases where the route goes through interchanges/roundabouts
+        # and might approach the main route again later - we ignore those.
 
-        last_intersection_point = None
-        last_intersection_on_main = None
-        last_intersection_index = 0
-        last_intersection_distance_m = 0.0
-        last_intersection_distance_to_main = 0.0
+        # Log first few points distance to main route for debugging
+        logger.debug(f"🔍 _find_route_intersection: tolerance={tolerance_meters}m, "
+                    f"access_points={len(access_route_geometry)}, main_points={len(main_route_geometry)}")
+
+        # Track the first continuous segment within tolerance
+        first_segment_start = None
+        first_segment_end = None
+        first_segment_end_on_main = None
+        first_segment_end_index = 0
+        first_segment_end_distance_m = 0.0
+        first_segment_end_distance_to_main = 0.0
 
         # Track cumulative distance along access route
         cumulative_distance_m = 0.0
+
+        # Track if we're currently in a "following" segment
+        in_following_segment = False
+        segment_ended = False
 
         # Check each point in access route
         for i, access_point in enumerate(access_route_geometry):
@@ -2110,6 +2127,10 @@ class RoadService:
                     access_point[0], access_point[1]
                 )
                 cumulative_distance_m += segment_distance
+
+            # If we already found the first segment and it ended, stop looking
+            if segment_ended:
+                break
 
             # Find the closest point on main route to this access point
             closest_distance = float('inf')
@@ -2125,25 +2146,47 @@ class RoadService:
                     closest_distance = distance
                     closest_main_point = main_point
 
-            # If this point is within tolerance, it's a candidate for the last intersection
-            # We keep updating as we go, so the last one found is the divergence point
-            if closest_distance < tolerance_meters and closest_main_point:
-                last_intersection_point = access_point
-                last_intersection_on_main = closest_main_point
-                last_intersection_index = i
-                last_intersection_distance_m = cumulative_distance_m
-                last_intersection_distance_to_main = closest_distance
+            # Check if this point is within tolerance
+            is_within_tolerance = closest_distance < tolerance_meters and closest_main_point is not None
 
-        # Return the last intersection point (divergence point)
-        if last_intersection_on_main and last_intersection_point:
+            # Log first 5 points and any state transitions
+            if i < 5:
+                logger.debug(f"🔍   Point {i}: dist_to_main={closest_distance:.1f}m, within_tol={is_within_tolerance}")
+
+            if is_within_tolerance:
+                if not in_following_segment:
+                    # Starting a new following segment
+                    in_following_segment = True
+                    first_segment_start = i
+                    logger.debug(f"🔍   SEGMENT START at point {i}, dist={closest_distance:.1f}m")
+
+                # Update the end of current segment (it keeps extending while within tolerance)
+                first_segment_end = access_point
+                first_segment_end_on_main = closest_main_point
+                first_segment_end_index = i
+                first_segment_end_distance_m = cumulative_distance_m
+                first_segment_end_distance_to_main = closest_distance
+            else:
+                if in_following_segment:
+                    # We were in a following segment and now we've left it
+                    # This is the first divergence - mark segment as ended
+                    segment_ended = True
+                    logger.debug(f"🔍   SEGMENT END at point {first_segment_end_index}, "
+                                f"diverged at point {i}, dist={closest_distance:.1f}m")
+
+        # Return the end of the first following segment
+        if first_segment_end_on_main and first_segment_end:
+            logger.debug(f"🔍   RESULT: segment {first_segment_start}->{first_segment_end_index}, "
+                        f"dist_along_access={first_segment_end_distance_m/1000:.2f}km")
             return {
-                "exit_point_on_access": last_intersection_point,
-                "corresponding_point_on_main": last_intersection_on_main,
-                "distance_along_access_km": last_intersection_distance_m / 1000.0,
-                "exit_point_index": last_intersection_index,
-                "intersection_distance_m": last_intersection_distance_to_main
+                "exit_point_on_access": first_segment_end,
+                "corresponding_point_on_main": first_segment_end_on_main,
+                "distance_along_access_km": first_segment_end_distance_m / 1000.0,
+                "exit_point_index": first_segment_end_index,
+                "intersection_distance_m": first_segment_end_distance_to_main
             }
 
+        logger.debug(f"🔍   RESULT: No segment found within tolerance")
         return None
 
     async def _calculate_junction_for_distant_poi(
@@ -2269,10 +2312,11 @@ class RoadService:
             # Find intersection between access route and main route
             # Use larger tolerance (300m) to avoid excluding POIs that have valid access routes
             # but where the closest point on the access route is slightly far from the main route
+            logger.debug(f"🔍 POI: {poi.name} - buscando interseção")
             intersection = self._find_route_intersection(
                 main_route.geometry,
                 access_route.geometry,
-                tolerance_meters=300.0  # Allow 300m tolerance
+                tolerance_meters=50.0  # Reduced to 50m to detect exits more precisely
             )
 
             if intersection:
@@ -2315,13 +2359,15 @@ class RoadService:
                     debug_data["side_calculation"] = side_debug
                     debug_data["access_route_distance_km"] = access_route_distance_km
                     debug_data["junction_calculation"] = {
-                        "method": "closest_crossing_point",
+                        "method": "first_segment_end",
                         "junction_distance_km": junction_distance_km,
                         "distance_along_access_to_crossing_km": distance_along_access_km,
                         "exit_point_index": exit_point_index,
+                        "total_access_points": len(access_route.geometry),
                         "crossing_point_on_access": {"lat": exit_point_on_access[0], "lon": exit_point_on_access[1]},
                         "corresponding_point_on_main": {"lat": corresponding_point_on_main[0], "lon": corresponding_point_on_main[1]},
                         "intersection_distance_m": intersection.get("intersection_distance_m", 0),
+                        "access_route_total_km": access_route.total_distance if access_route.total_distance else None,
                     }
                 else:
                     side = self._determine_side_from_access_route(

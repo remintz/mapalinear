@@ -286,6 +286,18 @@ export interface RecalculationAttempt {
   reason?: string;
 }
 
+export interface JunctionCalculationDetail {
+  method?: string;  // 'first_segment_end', etc.
+  junction_distance_km?: number;
+  distance_along_access_to_crossing_km?: number;
+  exit_point_index?: number;
+  total_access_points?: number;
+  crossing_point_on_access?: { lat: number; lon: number };
+  corresponding_point_on_main?: { lat: number; lon: number };
+  intersection_distance_m?: number;
+  access_route_total_km?: number;
+}
+
 export interface POIDebugData {
   id: string;
   map_poi_id: string;
@@ -301,6 +313,7 @@ export interface POIDebugData {
   access_route_distance_km?: number;
   side_calculation?: SideCalculationDetail;
   lookback_data?: LookbackDetail;
+  junction_calculation?: JunctionCalculationDetail;
   recalculation_history?: RecalculationAttempt[];
   final_side: 'left' | 'right' | 'center';
   requires_detour: boolean;
