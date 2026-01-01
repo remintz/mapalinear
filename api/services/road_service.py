@@ -1041,14 +1041,15 @@ class RoadService:
                 distant_pois_skipped_already_added += 1
                 continue
 
-            _, _, access_route_distance_km, _ = junction_info
+            junction_distance_km, _, access_route_distance_km, _ = junction_info
 
             if access_route_distance_km <= max_detour_distance_km:
                 distant_pois_added += 1
                 # Junction is within acceptable detour distance - create milestone
+                # Use junction_distance_km as the POI's position along the route (where driver exits)
                 milestone = self._create_milestone_from_poi(
                     poi,
-                    dist_from_origin,
+                    junction_distance_km,
                     search_pt,
                     junction_info
                 )

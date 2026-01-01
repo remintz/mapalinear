@@ -2,7 +2,7 @@
 
 import { useSession } from 'next-auth/react';
 import { useRouter, useParams } from 'next/navigation';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import {
@@ -48,9 +48,12 @@ export default function POIDebugPage() {
       const data = await apiClient.getPOIDebugData(mapId);
       setDebugData(data);
 
-      // Select first POI if available
+      // Select first POI by distance if available
       if (data.pois.length > 0) {
-        setSelectedPOI(data.pois[0]);
+        const sorted = [...data.pois].sort((a, b) => {
+          return a.distance_from_origin_km - b.distance_from_origin_km;
+        });
+        setSelectedPOI(sorted[0]);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro desconhecido');
@@ -101,6 +104,14 @@ export default function POIDebugPage() {
       </span>
     );
   };
+
+  // Sort POIs by distance from origin
+  const sortedPOIs = useMemo(() => {
+    if (!debugData?.pois) return [];
+    return [...debugData.pois].sort((a, b) => {
+      return a.distance_from_origin_km - b.distance_from_origin_km;
+    });
+  }, [debugData?.pois]);
 
   if (status === 'loading' || loading) {
     return (
@@ -197,20 +208,20 @@ export default function POIDebugPage() {
         </div>
 
         {/* Main Content */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:items-start">
           {/* POI List */}
-          <div className="lg:col-span-1 bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-            <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
+          <div className="lg:col-span-1 bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden flex flex-col lg:max-h-[calc(100vh-280px)]">
+            <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex-shrink-0">
               <h2 className="font-semibold text-gray-900">Lista de POIs</h2>
             </div>
-            <div className="max-h-[600px] overflow-y-auto">
-              {debugData.pois.length === 0 ? (
+            <div className="overflow-y-auto flex-1">
+              {sortedPOIs.length === 0 ? (
                 <div className="p-4 text-gray-500 text-center">
                   Nenhum POI encontrado
                 </div>
               ) : (
                 <ul className="divide-y divide-gray-200">
-                  {debugData.pois.map((poi) => (
+                  {sortedPOIs.map((poi) => (
                     <li key={poi.id}>
                       <button
                         onClick={() => setSelectedPOI(poi)}
@@ -218,14 +229,17 @@ export default function POIDebugPage() {
                           selectedPOI?.id === poi.id ? 'bg-blue-50 border-l-4 border-blue-600' : ''
                         }`}
                       >
+                        <div className="flex-shrink-0 w-14 text-right">
+                          <span className="text-sm font-medium text-gray-600">
+                            {poi.distance_from_origin_km.toFixed(1)} km
+                          </span>
+                        </div>
                         <div className="flex-1 min-w-0">
                           <div className="font-medium text-gray-900 truncate">
                             {poi.poi_name}
                           </div>
                           <div className="text-sm text-gray-500 flex items-center gap-2 mt-1">
                             <span className="capitalize">{poi.poi_type.replace(/_/g, ' ')}</span>
-                            <span className="text-gray-300">|</span>
-                            <span>{poi.distance_from_road_m.toFixed(0)}m</span>
                           </div>
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">

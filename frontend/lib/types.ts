@@ -305,6 +305,7 @@ export interface POIDebugData {
   poi_type: string;
   poi_lat: number;
   poi_lon: number;
+  distance_from_origin_km: number;
   main_route_segment?: number[][];
   junction_lat?: number;
   junction_lon?: number;

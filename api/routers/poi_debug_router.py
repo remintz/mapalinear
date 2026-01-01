@@ -93,6 +93,7 @@ class POIDebugDataResponse(BaseModel):
     poi_type: str = Field(..., description="POI type (gas_station, restaurant, etc.)")
     poi_lat: float = Field(..., description="POI latitude")
     poi_lon: float = Field(..., description="POI longitude")
+    distance_from_origin_km: float = Field(..., description="Distance from origin along the route")
     main_route_segment: Optional[List[List[float]]] = Field(None, description="Route segment near POI [[lat, lon], ...]")
     junction_lat: Optional[float] = Field(None, description="Junction point latitude")
     junction_lon: Optional[float] = Field(None, description="Junction point longitude")
@@ -188,8 +189,14 @@ async def get_map_debug_data(
         # Full debug data available
         summary = await debug_repo.get_summary_by_map(uuid)
 
+        # Get MapPOI data to include distance_from_origin_km
+        map_poi_repo = MapPOIRepository(db)
+        map_pois = await map_poi_repo.get_pois_for_map(uuid)
+        map_poi_distances = {str(mp.id): mp.distance_from_origin_km for mp in map_pois}
+
         pois = []
         for entry in debug_entries:
+            distance_from_origin = map_poi_distances.get(str(entry.map_poi_id), 0.0)
             pois.append(POIDebugDataResponse(
                 id=str(entry.id),
                 map_poi_id=str(entry.map_poi_id),
@@ -197,6 +204,7 @@ async def get_map_debug_data(
                 poi_type=entry.poi_type,
                 poi_lat=entry.poi_lat,
                 poi_lon=entry.poi_lon,
+                distance_from_origin_km=distance_from_origin,
                 main_route_segment=entry.main_route_segment,
                 junction_lat=entry.junction_lat,
                 junction_lon=entry.junction_lon,
@@ -263,6 +271,7 @@ async def get_map_debug_data(
             poi_type=poi.type or "unknown",
             poi_lat=poi.latitude,
             poi_lon=poi.longitude,
+            distance_from_origin_km=map_poi.distance_from_origin_km,
             main_route_segment=None,  # Not available without full debug
             junction_lat=map_poi.junction_lat,
             junction_lon=map_poi.junction_lon,
