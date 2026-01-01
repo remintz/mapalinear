@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   CheckCircle,
   RefreshCw,
+  Bug,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -31,6 +32,7 @@ export default function AdminSettingsPage() {
   const [settings, setSettings] = useState<SystemSettings>({
     poi_search_radius_km: "5",
     duplicate_map_tolerance_km: "10",
+    poi_debug_enabled: "true",
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -97,6 +99,13 @@ export default function AdminSettingsPage() {
     setSettings((prev) => ({
       ...prev,
       duplicate_map_tolerance_km: numericValue,
+    }));
+  };
+
+  const handleDebugToggle = () => {
+    setSettings((prev) => ({
+      ...prev,
+      poi_debug_enabled: prev.poi_debug_enabled === "true" ? "false" : "true",
     }));
   };
 
@@ -268,6 +277,45 @@ export default function AdminSettingsPage() {
               <div className="flex justify-between text-xs text-gray-400">
                 <span>1 km</span>
                 <span>50 km</span>
+              </div>
+            </div>
+
+            {/* POI Debug Toggle */}
+            <div className="space-y-3 pt-4 border-t border-gray-200">
+              <div className="flex items-center justify-between">
+                <div className="flex-1">
+                  <span className="flex items-center gap-2 text-sm font-medium text-gray-900">
+                    <Bug className="w-4 h-4 text-amber-600" />
+                    Coleta de dados de debug para POIs
+                  </span>
+                  <span className="text-sm text-gray-500 mt-1 block">
+                    Quando habilitado, o sistema armazena informações detalhadas sobre como cada POI foi calculado
+                    (vetores de direção, cross product, rotas de acesso, pontos de junção). Útil para diagnosticar
+                    problemas de posicionamento de POIs.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleDebugToggle}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 ${
+                    settings.poi_debug_enabled === "true" ? "bg-amber-600" : "bg-gray-200"
+                  }`}
+                  role="switch"
+                  aria-checked={settings.poi_debug_enabled === "true"}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      settings.poi_debug_enabled === "true" ? "translate-x-5" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+              <div className="text-xs text-gray-400">
+                {settings.poi_debug_enabled === "true" ? (
+                  <span className="text-amber-600">Debug habilitado - dados serão coletados ao gerar novos mapas</span>
+                ) : (
+                  <span>Debug desabilitado - nenhum dado de debug será coletado</span>
+                )}
               </div>
             </div>
           </div>

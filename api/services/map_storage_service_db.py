@@ -15,7 +15,7 @@ Maps are now global/shared - multiple users can have the same map in their colle
 
 import logging
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +26,7 @@ from api.database.models.poi import POI
 from api.database.models.user_map import UserMap
 from api.database.repositories import MapPOIRepository, MapRepository, POIRepository
 from api.database.repositories.user_map import UserMapRepository
+from api.services.poi_debug_service import POIDebugDataCollector, POIDebugService
 from api.models.road_models import (
     Coordinates,
     LinearMapResponse,
@@ -55,7 +56,10 @@ class MapStorageServiceDB:
         self.user_map_repo = UserMapRepository(session)
 
     async def save_map(
-        self, linear_map: LinearMapResponse, user_id: Optional[UUID] = None
+        self,
+        linear_map: LinearMapResponse,
+        user_id: Optional[UUID] = None,
+        debug_collector: Optional[POIDebugDataCollector] = None,
     ) -> str:
         """
         Save a linear map to database and associate with user if provided.
@@ -63,6 +67,7 @@ class MapStorageServiceDB:
         Args:
             linear_map: The linear map to save
             user_id: Optional user ID to associate the map with (creator)
+            debug_collector: Optional debug data collector with POI debug info
 
         Returns:
             The ID of the saved map
@@ -104,6 +109,8 @@ class MapStorageServiceDB:
             # Process milestones as POIs
             # Track POI IDs already added to this map to avoid duplicates
             added_poi_ids: set = set()
+            # Mapping from milestone ID to MapPOI ID (for debug data)
+            milestone_to_map_poi: Dict[str, UUID] = {}
 
             for milestone in linear_map.milestones:
                 # Get or create POI
@@ -152,6 +159,25 @@ class MapStorageServiceDB:
                     quality_score=milestone.quality_score,
                 )
                 await self.map_poi_repo.create(map_poi)
+
+                # Track mapping for debug data
+                if milestone.id:
+                    milestone_to_map_poi[milestone.id] = map_poi.id
+
+            # Persist debug data if collector provided
+            if debug_collector and milestone_to_map_poi:
+                try:
+                    debug_service = POIDebugService(self.session)
+                    count = await debug_service.persist_debug_data(
+                        map_id=map_id,
+                        poi_id_to_map_poi_id=milestone_to_map_poi,
+                        collector=debug_collector,
+                    )
+                    if count > 0:
+                        logger.info(f"Persistidos {count} registros de debug para mapa {map_id}")
+                except Exception as e:
+                    logger.warning(f"Erro ao persistir dados de debug: {e}")
+                    # Don't fail the map save if debug persistence fails
 
             logger.info(
                 f"Mapa linear salvo no banco: {linear_map.origin} -> {linear_map.destination} (ID: {map_id})"
@@ -763,7 +789,11 @@ def _create_standalone_session():
     return engine, session_maker
 
 
-def save_map_sync(linear_map: LinearMapResponse, user_id: Optional[str] = None) -> str:
+def save_map_sync(
+    linear_map: LinearMapResponse,
+    user_id: Optional[str] = None,
+    debug_collector: Optional[POIDebugDataCollector] = None,
+) -> str:
     """
     Sync wrapper for saving a map to the database.
     Use this from sync contexts (like RoadService.generate_linear_map).
@@ -771,6 +801,7 @@ def save_map_sync(linear_map: LinearMapResponse, user_id: Optional[str] = None) 
     Args:
         linear_map: The linear map to save
         user_id: Optional user ID to associate the map with (as creator)
+        debug_collector: Optional debug data collector with POI debug info
 
     Returns:
         The ID of the saved map
@@ -786,7 +817,11 @@ def save_map_sync(linear_map: LinearMapResponse, user_id: Optional[str] = None) 
                     storage = MapStorageServiceDB(session)
                     # Convert string user_id to UUID if provided
                     uuid_user_id = PyUUID(user_id) if user_id else None
-                    result = await storage.save_map(linear_map, user_id=uuid_user_id)
+                    result = await storage.save_map(
+                        linear_map,
+                        user_id=uuid_user_id,
+                        debug_collector=debug_collector,
+                    )
                     await session.commit()
                     return result
                 except Exception:

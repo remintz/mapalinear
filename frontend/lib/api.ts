@@ -12,6 +12,9 @@ import {
   StopImpersonationResponse,
   AdminMapListResponse,
   AdminMapDetail,
+  POIDebugListResponse,
+  POIDebugData,
+  POIDebugSummary,
 } from './types';
 
 // Helper to wait for session with retry
@@ -526,6 +529,30 @@ class APIClient {
     return data;
   }
 
+  /**
+   * Get POI debug data for a map (admin).
+   */
+  async getPOIDebugData(mapId: string): Promise<POIDebugListResponse> {
+    const { data } = await this.client.get<POIDebugListResponse>(`/admin/maps/${mapId}/debug`);
+    return data;
+  }
+
+  /**
+   * Get detailed debug data for a specific POI (admin).
+   */
+  async getPOIDebugDetail(mapId: string, debugId: string): Promise<POIDebugData> {
+    const { data } = await this.client.get<POIDebugData>(`/admin/maps/${mapId}/debug/${debugId}`);
+    return data;
+  }
+
+  /**
+   * Get POI debug summary for a map (admin).
+   */
+  async getPOIDebugSummary(mapId: string): Promise<POIDebugSummary> {
+    const { data } = await this.client.get<POIDebugSummary>(`/admin/maps/${mapId}/debug/summary`);
+    return data;
+  }
+
   // Debug functions
 
   /**
@@ -619,6 +646,7 @@ export interface ProblemReportListResponse {
 export interface SystemSettings {
   poi_search_radius_km: string;
   duplicate_map_tolerance_km: string;
+  poi_debug_enabled?: string;
 }
 
 // Types for database maintenance

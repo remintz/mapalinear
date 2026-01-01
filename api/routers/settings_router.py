@@ -154,6 +154,13 @@ async def update_setting(
                 detail="A tolerância deve ser um número inteiro"
             )
 
+    if key == "poi_debug_enabled":
+        if request.value.lower() not in ("true", "false"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="O valor deve ser 'true' ou 'false'"
+            )
+
     setting = await repo.set(
         key=key,
         value=request.value,
@@ -219,6 +226,13 @@ async def update_settings(
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="A tolerância deve ser um número inteiro"
+                )
+
+        if key == "poi_debug_enabled":
+            if value.lower() not in ("true", "false"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="O valor deve ser 'true' ou 'false'"
                 )
 
         await repo.set(key=key, value=value, updated_by=admin_user.email)

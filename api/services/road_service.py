@@ -1,5 +1,5 @@
 import uuid
-from typing import List, Optional, Dict, Any, Tuple, Callable
+from typing import List, Optional, Dict, Any, Tuple, Callable, Union
 import logging
 import math
 
@@ -15,9 +15,45 @@ from api.models.road_models import (
 from api.providers.base import GeoProvider, ProviderType
 from api.providers.models import GeoLocation, Route, POI, POICategory
 from api.providers.settings import get_settings
+from api.services.poi_debug_service import POIDebugDataCollector
 
 # Usar logger centralizado
 logger = logging.getLogger(__name__)
+
+
+def _is_debug_enabled_sync() -> bool:
+    """
+    Check if POI debug is enabled (sync version for use in generate_linear_map).
+    Uses synchronous psycopg2 to avoid event loop conflicts.
+    """
+    import psycopg2
+
+    settings = get_settings()
+
+    try:
+        conn = psycopg2.connect(
+            host=settings.postgres_host,
+            port=settings.postgres_port,
+            database=settings.postgres_database,
+            user=settings.postgres_user,
+            password=settings.postgres_password,
+        )
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT value FROM system_settings WHERE key = 'poi_debug_enabled'"
+                )
+                row = cur.fetchone()
+                if row:
+                    return row[0].lower() == "true"
+                # Default to true if setting doesn't exist
+                return True
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning(f"Erro ao verificar configuração de debug: {e}")
+        # Default to true on error
+        return True
 
 class RoadService:
     def __init__(
@@ -247,9 +283,19 @@ class RoadService:
         
         # Step 4: Find milestones along the route (always search all POI types)
         milestone_categories = self._build_milestone_categories(include_cities)
-        
+
         logger.info(f"🛣️ Categorias de milestone solicitadas: "
                    f"{[cat.value for cat in milestone_categories]}")
+
+        # Check if debug is enabled and create collector
+        debug_collector: Optional[POIDebugDataCollector] = None
+        try:
+            if _is_debug_enabled_sync():
+                debug_collector = POIDebugDataCollector()
+                debug_collector.set_main_route_geometry(route.geometry)
+                logger.info("🐛 Debug de POIs habilitado - coletando dados de cálculo")
+        except Exception as e:
+            logger.warning(f"⚠️ Erro ao verificar configuração de debug: {e}")
 
         all_milestones = self._run_async_safe(self._find_milestones_from_segments(
             linear_segments,
@@ -258,7 +304,8 @@ class RoadService:
             max_detour_distance_km=max_detour_distance_km,
             exclude_cities=[origin_city],
             progress_callback=progress_callback,
-            main_route=route
+            main_route=route,
+            debug_collector=debug_collector,
         ))
         
         # Step 5: Sort and assign milestones to segments
@@ -293,7 +340,11 @@ class RoadService:
         # Save linear map to database
         try:
             from .map_storage_service_db import save_map_sync
-            map_id = save_map_sync(linear_map, user_id=user_id)
+            map_id = save_map_sync(
+                linear_map,
+                user_id=user_id,
+                debug_collector=debug_collector,
+            )
             linear_map.id = map_id
         except Exception as e:
             logger.error(f"Erro ao salvar mapa linear no banco: {e}")
@@ -662,7 +713,8 @@ class RoadService:
         max_detour_distance_km: float = 5.0,
         exclude_cities: Optional[List[Optional[str]]] = None,
         progress_callback: Optional[Callable[[float], None]] = None,
-        main_route: Optional[Route] = None
+        main_route: Optional[Route] = None,
+        debug_collector: Optional[POIDebugDataCollector] = None,
     ) -> List[RoadMilestone]:
         """
         Find POI milestones along the route using segment start/end points.
@@ -679,6 +731,7 @@ class RoadService:
         Args:
             max_detour_distance_km: Maximum allowed detour distance from junction to POI in km.
                 POIs requiring detour greater than this will be excluded. Default: 5.0 km
+            debug_collector: Optional collector for POI calculation debug data.
 
         Returns:
             List of RoadMilestone objects
@@ -728,6 +781,10 @@ class RoadService:
 
         # Collect all unique POIs for database persistence
         all_unique_pois_dict: Dict[str, POI] = {}  # Key: POI ID, Value: POI object
+
+        # Store junction debug data when debug_collector is present
+        # Key: POI ID, Value: debug data dict from _calculate_junction_for_distant_poi
+        junction_debug_data: Dict[str, Dict[str, Any]] = {}
 
         for i, (point, distance_from_origin) in enumerate(search_points):
             # Update progress based on points processed
@@ -836,16 +893,25 @@ class RoadService:
 
                             junction_recalculations += 1
 
-                        junction_info = await self._calculate_junction_for_distant_poi(
+                        # Call with return_debug=True when debug_collector is present
+                        junction_result = await self._calculate_junction_for_distant_poi(
                             poi=poi,
                             search_point=point,
                             search_point_distance_km=distance_from_origin,
-                            main_route=main_route
+                            main_route=main_route,
+                            return_debug=debug_collector is not None
                         )
 
-                        if not junction_info:
+                        if not junction_result:
                             # No junction found from this search point, will try from next points
                             continue
+
+                        # Handle return value based on whether debug was requested
+                        current_debug_data: Optional[Dict[str, Any]] = None
+                        if debug_collector is not None:
+                            junction_info, current_debug_data = junction_result
+                        else:
+                            junction_info = junction_result
 
                         # Get detour distance from junction info
                         _, _, access_route_distance_km, _ = junction_info
@@ -869,6 +935,9 @@ class RoadService:
                                 best_junction_for_poi[poi.id] = (junction_info, distance_from_origin, point, poi)
                                 junction_lookback_for_poi[poi.id] = new_lookback
                                 recalc_attempts_without_improvement[poi.id] = 0  # Reset on improvement
+                                # Store debug data for best junction
+                                if current_debug_data:
+                                    junction_debug_data[poi.id] = current_debug_data
                             else:
                                 # No improvement - increment attempt counter
                                 recalc_attempts_without_improvement[poi.id] = recalc_attempts_without_improvement.get(poi.id, 0) + 1
@@ -876,6 +945,9 @@ class RoadService:
                             # First junction found for this POI
                             best_junction_for_poi[poi.id] = (junction_info, distance_from_origin, point, poi)
                             junction_lookback_for_poi[poi.id] = new_lookback
+                            # Store debug data for first junction
+                            if current_debug_data:
+                                junction_debug_data[poi.id] = current_debug_data
                         
                     except Exception as e:
                         logger.error(f"🔍 Erro convertendo POI {j}: {e}")
@@ -990,11 +1062,118 @@ class RoadService:
         
         # Filter out POIs in excluded cities
         milestones = self._filter_excluded_cities(milestones, exclude_cities_filtered)
-        
+
+        # Collect debug data for all milestones if debug is enabled
+        if debug_collector and main_route:
+            await self._collect_milestone_debug_data(
+                milestones, main_route, debug_collector, junction_debug_data
+            )
+
         # Log final results
         self._log_milestone_statistics(milestones)
-        
+
         return milestones
+
+    async def _collect_milestone_debug_data(
+        self,
+        milestones: List[RoadMilestone],
+        main_route: Route,
+        debug_collector: POIDebugDataCollector,
+        junction_debug_data: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> None:
+        """
+        Collect debug data for all milestones.
+
+        This collects:
+        - POI basic info (name, type, coordinates)
+        - Side calculation details (vectors, cross product)
+        - Junction information for distant POIs
+        - Access route geometry (from junction_debug_data)
+
+        Args:
+            milestones: List of milestones to collect debug for
+            main_route: The main route for side calculation
+            debug_collector: The collector to store debug data
+            junction_debug_data: Pre-calculated junction debug data keyed by POI ID
+        """
+        logger.info(f"🐛 Coletando dados de debug para {len(milestones)} milestones")
+        junction_debug_data = junction_debug_data or {}
+
+        for milestone in milestones:
+            try:
+                # Get POI coordinates
+                poi_lat = milestone.coordinates.latitude
+                poi_lon = milestone.coordinates.longitude
+
+                # Check if we have pre-calculated junction debug data for this POI
+                poi_junction_debug = junction_debug_data.get(milestone.id, {})
+
+                # Get access route geometry from junction debug data
+                access_route_geometry = poi_junction_debug.get("access_route_geometry")
+                access_route_distance_km = poi_junction_debug.get("access_route_distance_km")
+                lookback_data = poi_junction_debug.get("lookback_data")
+
+                # Use side_calculation from junction debug if available (more accurate)
+                # Otherwise calculate based on closest point
+                side_calculation = poi_junction_debug.get("side_calculation")
+
+                if not side_calculation:
+                    # Find the closest point on the route for side calculation
+                    closest_idx = 0
+                    min_distance = float('inf')
+                    for i, (pt_lat, pt_lon) in enumerate(main_route.geometry):
+                        dist = ((pt_lat - poi_lat) ** 2 + (pt_lon - poi_lon) ** 2) ** 0.5
+                        if dist < min_distance:
+                            min_distance = dist
+                            closest_idx = i
+
+                    # Get route point for side calculation
+                    route_point = main_route.geometry[closest_idx]
+
+                    # Calculate side with debug info
+                    try:
+                        result = self._determine_poi_side(
+                            main_route.geometry,
+                            route_point,
+                            (poi_lat, poi_lon),
+                            return_debug=True
+                        )
+                        if isinstance(result, tuple):
+                            _, side_calculation = result
+                    except Exception as e:
+                        logger.debug(f"Erro ao calcular lado para debug: {e}")
+
+                # Get junction coordinates if available
+                junction_lat = None
+                junction_lon = None
+                if milestone.junction_coordinates:
+                    junction_lat = milestone.junction_coordinates.latitude
+                    junction_lon = milestone.junction_coordinates.longitude
+
+                # Collect debug data
+                debug_collector.collect_poi_data(
+                    poi_id=milestone.id,
+                    poi_name=milestone.name or "Sem nome",
+                    poi_type=milestone.type.value if milestone.type else "unknown",
+                    poi_lat=poi_lat,
+                    poi_lon=poi_lon,
+                    distance_from_road_m=milestone.distance_from_road_meters or 0,
+                    final_side=milestone.side or "center",
+                    requires_detour=milestone.requires_detour or False,
+                    junction_lat=junction_lat,
+                    junction_lon=junction_lon,
+                    junction_distance_km=milestone.junction_distance_km,
+                    access_route_geometry=access_route_geometry,
+                    access_route_distance_km=access_route_distance_km,
+                    side_calculation=side_calculation,
+                    lookback_data=lookback_data,
+                )
+
+            except Exception as e:
+                logger.warning(f"⚠️ Erro ao coletar debug para POI {milestone.id}: {e}")
+                continue
+
+        logger.info(f"🐛 Debug coletado para {len(debug_collector.get_all_data())} POIs")
 
     def _poi_category_to_milestone_type(self, category: POICategory) -> MilestoneType:
         """
@@ -1669,120 +1848,263 @@ class RoadService:
         self,
         main_route_geometry: List[Tuple[float, float]],
         junction_point: Tuple[float, float],
-        poi_location: Tuple[float, float]
-    ) -> str:
+        poi_location: Tuple[float, float],
+        return_debug: bool = False
+    ) -> Union[str, Tuple[str, Dict[str, Any]]]:
         """
         Determine if POI is on the left or right side of the road.
-        
+
         Uses cross product to determine the side relative to the road direction.
-        
+
         Args:
             main_route_geometry: Main route geometry as list of (lat, lon) tuples
             junction_point: Junction coordinates (lat, lon)
             poi_location: POI coordinates (lat, lon)
-            
+            return_debug: If True, also return debug calculation info
+
         Returns:
-            'left' or 'right'
+            'left' or 'right' (or tuple with debug info if return_debug=True)
         """
         # Find the segment in main route closest to junction point
         min_distance = float('inf')
         segment_idx = 0
-        
+
         for i in range(len(main_route_geometry) - 1):
             seg_start = main_route_geometry[i]
             seg_end = main_route_geometry[i + 1]
             midpoint = ((seg_start[0] + seg_end[0]) / 2, (seg_start[1] + seg_end[1]) / 2)
-            
+
             dist = self._calculate_distance_meters(
                 junction_point[0], junction_point[1],
                 midpoint[0], midpoint[1]
             )
-            
+
             if dist < min_distance:
                 min_distance = dist
                 segment_idx = i
-        
+
         # Get the road direction vector at junction
         seg_start = main_route_geometry[segment_idx]
         seg_end = main_route_geometry[segment_idx + 1]
-        
+
         # Vector from segment start to end (road direction)
         road_vector = (seg_end[1] - seg_start[1], seg_end[0] - seg_start[0])  # (dx, dy)
-        
+
         # Vector from junction to POI
         poi_vector = (poi_location[1] - junction_point[1], poi_location[0] - junction_point[0])  # (dx, dy)
-        
+
         # Cross product in 2D: road_vector x poi_vector
         # If positive: POI is to the left (counter-clockwise)
         # If negative: POI is to the right (clockwise)
         cross_product = road_vector[0] * poi_vector[1] - road_vector[1] * poi_vector[0]
-        
-        return 'left' if cross_product > 0 else 'right'
+
+        side = 'left' if cross_product > 0 else 'right'
+
+        if return_debug:
+            debug_info = {
+                "road_vector": {"dx": road_vector[0], "dy": road_vector[1]},
+                "poi_vector": {"dx": poi_vector[0], "dy": poi_vector[1]},
+                "cross_product": cross_product,
+                "resulting_side": side,
+                "segment_start": {"lat": seg_start[0], "lon": seg_start[1]},
+                "segment_end": {"lat": seg_end[0], "lon": seg_end[1]},
+                "segment_idx": segment_idx
+            }
+            return (side, debug_info)
+
+        return side
+
+    def _determine_side_from_access_route(
+        self,
+        main_route_geometry: List[Tuple[float, float]],
+        junction_point: Tuple[float, float],
+        access_route_geometry: List[Tuple[float, float]],
+        return_debug: bool = False
+    ) -> Union[str, Tuple[str, Dict[str, Any]]]:
+        """
+        Determine if driver needs to turn left or right based on access route direction.
+
+        This method looks at the initial direction of the access route from the junction
+        point, which represents the actual turn the driver needs to make.
+
+        Args:
+            main_route_geometry: Main route geometry as list of (lat, lon) tuples
+            junction_point: Junction coordinates (lat, lon)
+            access_route_geometry: Access route geometry from lookback to POI
+            return_debug: If True, also return debug calculation info
+
+        Returns:
+            'left' or 'right' (or tuple with debug info if return_debug=True)
+        """
+        # Find the segment in main route closest to junction point
+        min_distance = float('inf')
+        segment_idx = 0
+
+        for i in range(len(main_route_geometry) - 1):
+            seg_start = main_route_geometry[i]
+            seg_end = main_route_geometry[i + 1]
+            midpoint = ((seg_start[0] + seg_end[0]) / 2, (seg_start[1] + seg_end[1]) / 2)
+
+            dist = self._calculate_distance_meters(
+                junction_point[0], junction_point[1],
+                midpoint[0], midpoint[1]
+            )
+
+            if dist < min_distance:
+                min_distance = dist
+                segment_idx = i
+
+        # Get the road direction vector at junction
+        seg_start = main_route_geometry[segment_idx]
+        seg_end = main_route_geometry[segment_idx + 1]
+
+        # Vector from segment start to end (road direction)
+        road_vector = (seg_end[1] - seg_start[1], seg_end[0] - seg_start[0])  # (dx, dy)
+
+        # Find the point in access route closest to junction
+        min_dist_to_junction = float('inf')
+        junction_idx_on_access = 0
+
+        for i, point in enumerate(access_route_geometry):
+            dist = self._calculate_distance_meters(
+                junction_point[0], junction_point[1],
+                point[0], point[1]
+            )
+            if dist < min_dist_to_junction:
+                min_dist_to_junction = dist
+                junction_idx_on_access = i
+
+        # Get the direction of access route AFTER the junction (towards POI)
+        # Look at the next few points to get a stable direction
+        # The access route goes from lookback -> junction -> POI
+        # So we want points AFTER the junction index
+        access_direction_point_idx = min(
+            junction_idx_on_access + 5,  # Look 5 points ahead
+            len(access_route_geometry) - 1
+        )
+
+        # If junction is very close to end, just use the last point
+        if access_direction_point_idx <= junction_idx_on_access:
+            access_direction_point_idx = len(access_route_geometry) - 1
+
+        access_start = access_route_geometry[junction_idx_on_access]
+        access_direction_point = access_route_geometry[access_direction_point_idx]
+
+        # Vector in the direction the driver turns (from junction towards POI)
+        access_vector = (
+            access_direction_point[1] - access_start[1],  # dx (lon)
+            access_direction_point[0] - access_start[0]   # dy (lat)
+        )
+
+        # Cross product: road_vector x access_vector
+        # If positive: turning left
+        # If negative: turning right
+        cross_product = road_vector[0] * access_vector[1] - road_vector[1] * access_vector[0]
+
+        side = 'left' if cross_product > 0 else 'right'
+
+        if return_debug:
+            debug_info = {
+                "road_vector": {"dx": road_vector[0], "dy": road_vector[1]},
+                "access_vector": {"dx": access_vector[0], "dy": access_vector[1]},
+                "cross_product": cross_product,
+                "resulting_side": side,
+                "segment_start": {"lat": seg_start[0], "lon": seg_start[1]},
+                "segment_end": {"lat": seg_end[0], "lon": seg_end[1]},
+                "segment_idx": segment_idx,
+                "junction_idx_on_access": junction_idx_on_access,
+                "access_direction_point_idx": access_direction_point_idx,
+                "access_start": {"lat": access_start[0], "lon": access_start[1]},
+                "access_direction_point": {"lat": access_direction_point[0], "lon": access_direction_point[1]},
+                "method": "access_route_direction"
+            }
+            return (side, debug_info)
+
+        return side
 
     def _find_route_intersection(
         self,
         main_route_geometry: List[Tuple[float, float]],
         access_route_geometry: List[Tuple[float, float]],
         tolerance_meters: float = 100.0
-    ) -> Optional[Tuple[Tuple[float, float], float]]:
+    ) -> Optional[Dict[str, Any]]:
         """
         Find the intersection point between main route and access route.
-        
-        This method finds the LAST point where the access route is still
-        on/near the main route before deviating to reach the POI.
-        This represents the true junction/exit point.
-        
+
+        This method finds the point where the access route is CLOSEST to
+        the main route - this represents the true junction/crossing point.
+
         Args:
             main_route_geometry: Main route geometry [(lat, lon), ...]
             access_route_geometry: Access route to POI [(lat, lon), ...]
-            tolerance_meters: Maximum distance to consider points as "on the route"
-            
+            tolerance_meters: Maximum distance to consider as valid intersection
+
         Returns:
-            Tuple of (junction_point, junction_distance_km) or None if no intersection found
+            Dict with:
+                - exit_point_on_access: The exit point on the access route geometry
+                - corresponding_point_on_main: The closest point on main route to exit
+                - distance_along_access_km: Distance from start of access route to exit point
+                - exit_point_index: Index of exit point in access route
+            Or None if no intersection found
         """
         if not main_route_geometry or not access_route_geometry:
             return None
-        
-        # Strategy: Iterate through access route from start to end
-        # Find the LAST point that is still close to the main route
-        # This is where the driver exits the main route to reach the POI
-        
-        last_intersection_point = None
-        last_intersection_on_main = None
-        
-        # Check each point in access route from start to end
+
+        # Strategy: Find the point on the access route that is CLOSEST to the main route
+        # This represents the actual crossing/junction point
+
+        best_intersection_point = None
+        best_intersection_on_main = None
+        best_intersection_index = 0
+        best_intersection_distance_m = 0.0
+        min_distance_to_main = float('inf')
+
+        # Track cumulative distance along access route
+        cumulative_distance_m = 0.0
+
+        # Check each point in access route
         for i, access_point in enumerate(access_route_geometry):
+            # Calculate distance from previous point (for cumulative tracking)
+            if i > 0:
+                prev_point = access_route_geometry[i - 1]
+                segment_distance = self._calculate_distance_meters(
+                    prev_point[0], prev_point[1],
+                    access_point[0], access_point[1]
+                )
+                cumulative_distance_m += segment_distance
+
             # Find the closest point on main route to this access point
-            min_distance = float('inf')
+            closest_distance = float('inf')
             closest_main_point = None
-            
+
             for main_point in main_route_geometry:
                 distance = self._calculate_distance_meters(
                     access_point[0], access_point[1],
                     main_point[0], main_point[1]
                 )
-                
-                if distance < min_distance:
-                    min_distance = distance
+
+                if distance < closest_distance:
+                    closest_distance = distance
                     closest_main_point = main_point
-            
-            # If this access point is close enough to main route, it's still on the route
-            if min_distance < tolerance_meters and closest_main_point:
-                last_intersection_point = access_point
-                last_intersection_on_main = closest_main_point
-            else:
-                # Access route has deviated from main route
-                # If we found at least one intersection before, use the last one
-                if last_intersection_on_main:
-                    break
-        
-        if last_intersection_on_main:
-            # Calculate distance along main route to the junction point
-            junction_distance_km = self._calculate_distance_along_route(
-                main_route_geometry, last_intersection_on_main
-            )
-            return (last_intersection_on_main, junction_distance_km)
-        
+
+            # If this is the closest point so far, update best intersection
+            if closest_distance < min_distance_to_main and closest_main_point:
+                min_distance_to_main = closest_distance
+                best_intersection_point = access_point
+                best_intersection_on_main = closest_main_point
+                best_intersection_index = i
+                best_intersection_distance_m = cumulative_distance_m
+
+        # Only return if we found an intersection within tolerance
+        if best_intersection_on_main and best_intersection_point and min_distance_to_main < tolerance_meters:
+            return {
+                "exit_point_on_access": best_intersection_point,
+                "corresponding_point_on_main": best_intersection_on_main,
+                "distance_along_access_km": best_intersection_distance_m / 1000.0,
+                "exit_point_index": best_intersection_index,
+                "intersection_distance_m": min_distance_to_main
+            }
+
         return None
 
     async def _calculate_junction_for_distant_poi(
@@ -1790,8 +2112,12 @@ class RoadService:
         poi: POI,
         search_point: Tuple[float, float],
         search_point_distance_km: float,
-        main_route: Route
-    ) -> Optional[Tuple[float, Tuple[float, float], float, str]]:
+        main_route: Route,
+        return_debug: bool = False
+    ) -> Optional[Union[
+        Tuple[float, Tuple[float, float], float, str],
+        Tuple[Tuple[float, Tuple[float, float], float, str], Dict[str, Any]]
+    ]]:
         """
         Calculate the junction/exit point for a distant POI.
 
@@ -1803,71 +2129,143 @@ class RoadService:
             search_point: The search point on main route closest to POI (lat, lon)
             search_point_distance_km: Distance of search point from origin
             main_route: The complete main route object with geometry
+            return_debug: If True, also return debug data
 
         Returns:
             Tuple of (junction_distance_km, junction_coordinates, access_route_distance_km, side) or None if not found
-            where side is 'left' or 'right'
+            where side is 'left' or 'right'.
+            If return_debug=True, returns (junction_info, debug_data) tuple instead.
         """
+        debug_data: Dict[str, Any] = {}
+
         # Calculate distance from POI to search point
         poi_distance_from_road_m = self._calculate_distance_meters(
             poi.location.latitude, poi.location.longitude,
             search_point[0], search_point[1]
         )
-        
+
         # Determine lookback distance based on POI distance
         # Further POIs might have junctions further back
         poi_distance_km = poi_distance_from_road_m / 1000.0
         lookback_km = min(20.0, max(5.0, poi_distance_km * 2))
-        
+
         # Find lookback point on main route
         lookback_distance_km = max(0, search_point_distance_km - lookback_km)
-        
+
         # Interpolate lookback point on main route geometry
         lookback_point = self._interpolate_coordinate_at_distance(
             main_route.geometry,
             lookback_distance_km,
             main_route.total_distance
         )
-        
+
+        # Capture lookback data for debug
+        if return_debug:
+            debug_data["lookback_data"] = {
+                "poi_distance_from_road_m": poi_distance_from_road_m,
+                "lookback_km": lookback_km,
+                "lookback_distance_km": lookback_distance_km,
+                "lookback_point": {"lat": lookback_point[0], "lon": lookback_point[1]},
+                "search_point": {"lat": search_point[0], "lon": search_point[1]},
+                "search_point_distance_km": search_point_distance_km
+            }
+
         try:
             # Calculate route from lookback point to POI
             access_route = await self.geo_provider.calculate_route(
                 GeoLocation(latitude=lookback_point[0], longitude=lookback_point[1]),
                 GeoLocation(latitude=poi.location.latitude, longitude=poi.location.longitude)
             )
-            
+
             if not access_route or not access_route.geometry:
                 return None
-            
+
+            # Capture access route geometry for debug (sample if too large)
+            if return_debug:
+                # Sample every Nth point to keep geometry manageable
+                geometry = access_route.geometry
+                if len(geometry) > 100:
+                    step = len(geometry) // 100
+                    sampled = geometry[::step]
+                    # Always include last point
+                    if geometry[-1] not in sampled:
+                        sampled.append(geometry[-1])
+                    debug_data["access_route_geometry"] = [[p[0], p[1]] for p in sampled]
+                else:
+                    debug_data["access_route_geometry"] = [[p[0], p[1]] for p in geometry]
+
             # Find intersection between access route and main route
+            # Use larger tolerance (300m) to avoid excluding POIs that have valid access routes
+            # but where the closest point on the access route is slightly far from the main route
             intersection = self._find_route_intersection(
                 main_route.geometry,
                 access_route.geometry,
-                tolerance_meters=150.0  # Allow 150m tolerance
+                tolerance_meters=300.0  # Allow 300m tolerance
             )
-            
+
             if intersection:
-                junction_coords, junction_distance = intersection
+                # Extract data from intersection result
+                exit_point_on_access = intersection["exit_point_on_access"]
+                corresponding_point_on_main = intersection["corresponding_point_on_main"]
+                distance_along_access_km = intersection["distance_along_access_km"]
+                exit_point_index = intersection["exit_point_index"]
 
-                # Calculate distance along access route from junction to POI
-                # Use the new method that calculates from junction point to end of route
-                access_route_distance_km = self._calculate_distance_from_point_to_end(
-                    access_route.geometry,
-                    junction_coords
-                )
-
-                # Determine which side of the road the POI is on
-                poi_location = (poi.location.latitude, poi.location.longitude)
-                side = self._determine_poi_side(
+                # Calculate junction_distance_km along the MAIN ROUTE to the junction point
+                # This gives the actual km marker where the driver exits
+                junction_distance_km = self._calculate_distance_along_route(
                     main_route.geometry,
-                    junction_coords,
-                    poi_location
+                    corresponding_point_on_main
                 )
 
-                return (junction_distance, junction_coords, access_route_distance_km, side)
+                # Use the corresponding point on main route as junction coordinates
+                # This ensures J marker appears on the blue line (main route)
+                junction_coords = corresponding_point_on_main
+
+                # Calculate distance from exit point to POI along access route
+                # Sum distances from exit point to end of access route
+                access_route_distance_km = 0.0
+                for i in range(exit_point_index, len(access_route.geometry) - 1):
+                    access_route_distance_km += self._calculate_distance_meters(
+                        access_route.geometry[i][0], access_route.geometry[i][1],
+                        access_route.geometry[i + 1][0], access_route.geometry[i + 1][1]
+                    ) / 1000.0
+
+                # Determine which side the driver needs to turn based on access route direction
+                # Use the corresponding point on main route for road direction calculation
+                # but use the access route geometry for turn direction
+                if return_debug:
+                    side, side_debug = self._determine_side_from_access_route(
+                        main_route.geometry,
+                        corresponding_point_on_main,  # Use main route point for road direction
+                        access_route.geometry,
+                        return_debug=True
+                    )
+                    debug_data["side_calculation"] = side_debug
+                    debug_data["access_route_distance_km"] = access_route_distance_km
+                    debug_data["junction_calculation"] = {
+                        "method": "closest_crossing_point",
+                        "junction_distance_km": junction_distance_km,
+                        "distance_along_access_to_crossing_km": distance_along_access_km,
+                        "exit_point_index": exit_point_index,
+                        "crossing_point_on_access": {"lat": exit_point_on_access[0], "lon": exit_point_on_access[1]},
+                        "corresponding_point_on_main": {"lat": corresponding_point_on_main[0], "lon": corresponding_point_on_main[1]},
+                        "intersection_distance_m": intersection.get("intersection_distance_m", 0),
+                    }
+                else:
+                    side = self._determine_side_from_access_route(
+                        main_route.geometry,
+                        corresponding_point_on_main,
+                        access_route.geometry
+                    )
+
+                junction_info = (junction_distance_km, junction_coords, access_route_distance_km, side)
+
+                if return_debug:
+                    return (junction_info, debug_data)
+                return junction_info
             else:
                 return None
-                
+
         except Exception as e:
             logger.error(f"❌ Erro calculando entroncamento para {poi.name}: {e}")
             return None

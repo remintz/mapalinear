@@ -18,6 +18,10 @@ DEFAULT_SETTINGS = {
     "duplicate_map_tolerance_km": {
         "value": "10",
         "description": "Tolerância em km para detectar mapas duplicados (1-50)"
+    },
+    "poi_debug_enabled": {
+        "value": "true",
+        "description": "Habilitar coleta de dados de debug para POIs (true/false)"
     }
 }
 

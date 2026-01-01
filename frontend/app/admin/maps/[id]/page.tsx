@@ -25,6 +25,7 @@ import {
   Building2,
   Coffee,
   MapPin,
+  Bug,
 } from "lucide-react";
 import { AdminMapDetail } from "@/lib/types";
 import { apiClient } from "@/lib/api";
@@ -323,6 +324,13 @@ export default function AdminMapDetailsPage() {
               <Route className="w-5 h-5" />
               Abrir Mapa OSM
             </button>
+            <Link
+              href={`/admin/maps/${mapId}/debug`}
+              className="inline-flex items-center gap-2 px-6 py-3 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors font-medium"
+            >
+              <Bug className="w-5 h-5" />
+              Debug POIs
+            </Link>
           </div>
         </div>
 

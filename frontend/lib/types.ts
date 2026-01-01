@@ -239,3 +239,77 @@ export interface AdminMapListResponse {
 export interface AdminMapDetail extends AdminMap {
   poi_counts: Record<string, number>;
 }
+
+// POI Debug types
+export interface SideCalculationDetail {
+  road_vector: { dx: number; dy: number };
+  poi_vector?: { dx: number; dy: number };  // Used by old method (POI position)
+  access_vector?: { dx: number; dy: number };  // Used by new method (access route direction)
+  cross_product: number;
+  resulting_side: 'left' | 'right';
+  segment_start: { lat: number; lon: number };
+  segment_end: { lat: number; lon: number };
+  segment_idx?: number;
+  // New fields for access route method
+  method?: 'access_route_direction' | 'poi_position';
+  junction_idx_on_access?: number;
+  access_direction_point_idx?: number;
+  access_start?: { lat: number; lon: number };
+  access_direction_point?: { lat: number; lon: number };
+}
+
+export interface LookbackDetail {
+  poi_distance_from_road_m: number;
+  lookback_km: number;
+  lookback_distance_km: number;
+  lookback_point: { lat: number; lon: number };
+  search_point: { lat: number; lon: number };
+  search_point_distance_km: number;
+}
+
+export interface RecalculationAttempt {
+  attempt: number;
+  search_point: { lat: number; lon: number };
+  search_point_distance_km: number;
+  junction_found: boolean;
+  junction_distance_km?: number;
+  access_route_distance_km?: number;
+  improvement: boolean;
+  reason?: string;
+}
+
+export interface POIDebugData {
+  id: string;
+  map_poi_id: string;
+  poi_name: string;
+  poi_type: string;
+  poi_lat: number;
+  poi_lon: number;
+  main_route_segment?: number[][];
+  junction_lat?: number;
+  junction_lon?: number;
+  junction_distance_km?: number;
+  access_route_geometry?: number[][];
+  access_route_distance_km?: number;
+  side_calculation?: SideCalculationDetail;
+  lookback_data?: LookbackDetail;
+  recalculation_history?: RecalculationAttempt[];
+  final_side: 'left' | 'right' | 'center';
+  requires_detour: boolean;
+  distance_from_road_m: number;
+  created_at: string;
+}
+
+export interface POIDebugSummary {
+  total: number;
+  detour_count: number;
+  left_count: number;
+  right_count: number;
+  center_count: number;
+}
+
+export interface POIDebugListResponse {
+  pois: POIDebugData[];
+  summary: POIDebugSummary;
+  has_debug_data: boolean;
+}
