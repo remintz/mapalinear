@@ -250,13 +250,12 @@ class HEREProvider(GeoProvider):
         Returns:
             GeoLocation with address details
         """
-        # Build cache params - include poi_name if provided
+        # Build cache params - only coordinates matter for reverse geocoding
+        # poi_name is NOT included because the result depends only on coordinates
         cache_params = {
             "latitude": latitude,
             "longitude": longitude
         }
-        if poi_name:
-            cache_params["poi_name"] = poi_name
 
         # Check cache first
         if self._cache:
