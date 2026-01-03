@@ -140,17 +140,17 @@ class ProviderSettings(BaseSettings):
         description="Cache TTL for geocoding results in seconds"
     )
     geo_cache_ttl_route: int = Field(
-        default=21600,   # 6 hours
+        default=604800,  # 7 days
         alias="GEO_CACHE_TTL_ROUTE",
         description="Cache TTL for routing results in seconds"
     )
     geo_cache_ttl_poi: int = Field(
-        default=86400,   # 1 day
+        default=604800,  # 7 days
         alias="GEO_CACHE_TTL_POI",
         description="Cache TTL for POI search results in seconds"
     )
     geo_cache_ttl_poi_details: int = Field(
-        default=43200,   # 12 hours
+        default=604800,  # 7 days
         alias="GEO_CACHE_TTL_POI_DETAILS",
         description="Cache TTL for POI details in seconds"
     )
