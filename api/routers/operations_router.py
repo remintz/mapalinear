@@ -8,6 +8,7 @@ from api.database.models.user import User
 from api.database.repositories.map import MapRepository
 from api.database.repositories.system_settings import SystemSettingsRepository
 from api.middleware.auth import get_current_user
+from api.middleware.request_id import get_request_id
 from api.models.road_models import (
     AsyncOperationResponse,
     LinearMapRequest,
@@ -133,7 +134,8 @@ async def start_async_linear_map(
     background_tasks.add_task(
         AsyncService.run_async,
         operation.operation_id,
-        process_linear_map
+        process_linear_map,
+        request_id=get_request_id()
     )
     
     return operation

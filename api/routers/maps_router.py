@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..database import MapPOIRepository, MapRepository, POIRepository, get_db
 from ..database.models.user import User
 from ..middleware.auth import get_current_admin, get_current_user
+from ..middleware.request_id import get_request_id
 from ..models.road_models import LinearMapResponse, SavedMapResponse
 from ..services.async_service import AsyncService
 from ..services.map_storage_service_db import MapStorageServiceDB
@@ -461,7 +462,10 @@ async def regenerate_map(
 
         # Execute in background
         background_tasks.add_task(
-            AsyncService.run_async, operation.operation_id, process_regeneration
+            AsyncService.run_async,
+            operation.operation_id,
+            process_regeneration,
+            request_id=get_request_id()
         )
 
         return {"operation_id": operation.operation_id}

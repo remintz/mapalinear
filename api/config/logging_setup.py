@@ -38,6 +38,9 @@ def setup_logging(config_path: str = None, default_level: int = logging.INFO):
             # Aplicar configuração
             logging.config.dictConfig(config)
 
+            # Add RequestIDFilter to all handlers
+            _add_request_id_filter()
+
             logger = logging.getLogger(__name__)
             logger.info(f"Logging configurado a partir de: {config_path}")
 
@@ -70,3 +73,20 @@ def get_logger(name: str) -> logging.Logger:
         Logger configurado
     """
     return logging.getLogger(name)
+
+
+def _add_request_id_filter():
+    """Add RequestIDFilter to all handlers for request tracking."""
+    from api.middleware.request_id import RequestIDFilter
+
+    request_id_filter = RequestIDFilter()
+
+    # Add filter to root logger handlers
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers:
+        handler.addFilter(request_id_filter)
+
+    # Add filter to api logger handlers
+    api_logger = logging.getLogger("api")
+    for handler in api_logger.handlers:
+        handler.addFilter(request_id_filter)

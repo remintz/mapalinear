@@ -268,6 +268,7 @@ class AsyncService:
         operation_id: str,
         function: Callable,
         *args,
+        request_id: Optional[str] = None,
         **kwargs
     ) -> None:
         """
@@ -276,12 +277,17 @@ class AsyncService:
         Args:
             operation_id: Operation ID
             function: Function to execute
+            request_id: Optional request ID for log tracking
             *args, **kwargs: Arguments for the function
         """
         from api.database.connection import create_standalone_engine, get_standalone_session
         from api.database.repositories.async_operation import AsyncOperationRepository
+        from api.middleware.request_id import set_request_id
 
         def _worker():
+            # Set request ID for this thread (for log tracking)
+            if request_id:
+                set_request_id(request_id)
             # Create a new event loop for this thread
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)

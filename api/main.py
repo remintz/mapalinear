@@ -6,6 +6,7 @@ import logging
 import time
 
 from api.middleware.error_handler import error_handler_middleware, setup_error_handlers
+from api.middleware.request_id import RequestIDMiddleware, set_request_id, get_request_id
 
 # Configurar logger
 logger = logging.getLogger("api.main")
@@ -57,18 +58,18 @@ app = FastAPI(
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     """Log de todas as requisições para depuração."""
-    # Use um marcador úncido para identificar o início e fim da mesma requisição
-    req_id = hash(f"{time.time()}-{request.url.path}")
-    
+    # Set request ID for this request (used by logging filter)
+    req_id = set_request_id()
+
     start_time = time.time()
     path = request.url.path
     method = request.method
-    
+
     # Skip logging for polling endpoints (too verbose)
     skip_logging = method == "GET" and path.startswith("/api/operations")
 
     if not skip_logging:
-        logger.info(f"🔔 {method} {path}")
+        logger.info(f">> {method} {path}")
 
     try:
         response = await call_next(request)
@@ -85,11 +86,14 @@ async def log_requests(request: Request, call_next):
             status_str = f"❌ {status_code}"
 
         if not skip_logging:
-            logger.info(f"🏁 {method} {path} - {status_str} - {process_time:.3f}s")
+            logger.info(f"<< {method} {path} - {status_str} - {process_time:.3f}s")
+
+        # Add request ID to response headers
+        response.headers["X-Request-ID"] = req_id
         return response
     except Exception as e:
         process_time = time.time() - start_time
-        logger.error(f"💥 REQ#{req_id} ERRO: {method} {path} - Exceção: {str(e)} - Tempo: {process_time:.4f}s")
+        logger.error(f"💥 ERRO: {method} {path} - Exceção: {str(e)} - Tempo: {process_time:.4f}s")
         raise
 
 # Configuração de CORS

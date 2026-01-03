@@ -6,11 +6,11 @@ disable_existing_loggers: false
 # Formatadores
 formatters:
   default:
-    format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    format: "%(asctime)s - [%(request_id)s] - %(levelname)s - %(name)s - %(message)s"
     datefmt: "%Y-%m-%d %H:%M:%S"
 
   simple:
-    format: "%(levelname)s - %(message)s"
+    format: "[%(request_id)s] - %(levelname)s - %(message)s"
 
 # Destinos dos logs
 handlers:
@@ -48,7 +48,15 @@ loggers:
     handlers: []
     propagate: false
 
-  
+  httpx:
+    level: WARNING
+    handlers: []
+    propagate: false
+
+  httpcore:
+    level: WARNING
+    handlers: []
+    propagate: false
 
 # Root logger
 root:
