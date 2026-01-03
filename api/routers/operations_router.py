@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 router = APIRouter()
-road_service = RoadService()
 
 @router.get("/{operation_id}", response_model=AsyncOperationResponse)
 async def get_operation(
@@ -110,6 +109,10 @@ async def start_async_linear_map(
     # NOTA: Não use try/except aqui - o run_async._worker já trata erros
     # corretamente usando engine standalone para a thread
     def process_linear_map(progress_callback=None):
+        # Criar nova instância do RoadService para esta thread
+        # (evita compartilhamento de estado entre operações concorrentes)
+        road_service = RoadService()
+
         # Gerar o mapa linear (sempre busca todos os tipos de POI)
         result = road_service.generate_linear_map(
             origin=request.origin,
