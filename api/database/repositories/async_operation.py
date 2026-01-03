@@ -5,7 +5,7 @@ Repository for async operations.
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.database.models.async_operation import AsyncOperation
@@ -23,6 +23,8 @@ class AsyncOperationRepository(BaseRepository[AsyncOperation]):
         operation_id: str,
         operation_type: str,
         estimated_completion: Optional[datetime] = None,
+        user_id: Optional[str] = None,
+        initial_result: Optional[dict] = None,
     ) -> AsyncOperation:
         """
         Create a new async operation.
@@ -31,6 +33,8 @@ class AsyncOperationRepository(BaseRepository[AsyncOperation]):
             operation_id: Unique operation ID
             operation_type: Type of operation (e.g., "linear_map")
             estimated_completion: Estimated completion time
+            user_id: ID of the user who requested the operation
+            initial_result: Initial result data (e.g., origin/destination for display during progress)
 
         Returns:
             Created AsyncOperation instance
@@ -41,6 +45,8 @@ class AsyncOperationRepository(BaseRepository[AsyncOperation]):
             status="in_progress",
             progress_percent=0.0,
             estimated_completion=estimated_completion,
+            user_id=user_id,
+            result=initial_result,
         )
         return await self.create(operation)
 
@@ -109,7 +115,7 @@ class AsyncOperationRepository(BaseRepository[AsyncOperation]):
             .values(
                 status="completed",
                 progress_percent=100.0,
-                completed_at=datetime.now(),
+                completed_at=func.now(),
                 estimated_completion=None,
                 result=result,
             )
@@ -136,7 +142,7 @@ class AsyncOperationRepository(BaseRepository[AsyncOperation]):
             .where(AsyncOperation.id == operation_id)
             .values(
                 status="failed",
-                completed_at=datetime.now(),
+                completed_at=func.now(),
                 estimated_completion=None,
                 error=error,
             )
@@ -213,15 +219,18 @@ class AsyncOperationRepository(BaseRepository[AsyncOperation]):
             .where(AsyncOperation.started_at < cutoff_time)
             .values(
                 status="failed",
-                completed_at=datetime.now(),
+                completed_at=func.now(),
                 error="Operation timed out (stale)",
             )
         )
         return result.rowcount
 
-    async def get_stats(self) -> Dict:
+    async def get_stats(self, operation_type: Optional[str] = None) -> Dict:
         """
         Get statistics about async operations.
+
+        Args:
+            operation_type: Filter by operation type
 
         Returns:
             Dictionary with operation statistics
@@ -229,12 +238,17 @@ class AsyncOperationRepository(BaseRepository[AsyncOperation]):
         from sqlalchemy import func
 
         # Count by status
-        result = await self.session.execute(
-            select(
-                AsyncOperation.status,
-                func.count(AsyncOperation.id).label("count"),
-            ).group_by(AsyncOperation.status)
+        query = select(
+            AsyncOperation.status,
+            func.count(AsyncOperation.id).label("count"),
         )
+
+        if operation_type:
+            query = query.where(AsyncOperation.operation_type == operation_type)
+
+        query = query.group_by(AsyncOperation.status)
+
+        result = await self.session.execute(query)
 
         stats = {"in_progress": 0, "completed": 0, "failed": 0, "total": 0}
         for row in result.all():
@@ -242,3 +256,65 @@ class AsyncOperationRepository(BaseRepository[AsyncOperation]):
             stats["total"] += row.count
 
         return stats
+
+    async def list_all_operations(
+        self,
+        status: Optional[str] = None,
+        operation_type: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> List[AsyncOperation]:
+        """
+        List all operations with user information for admin views.
+
+        Args:
+            status: Filter by status (in_progress, completed, failed)
+            operation_type: Filter by operation type
+            skip: Number of records to skip
+            limit: Maximum number of records to return
+
+        Returns:
+            List of AsyncOperation instances with user relationship loaded
+        """
+        from sqlalchemy.orm import selectinload
+
+        query = select(AsyncOperation).options(selectinload(AsyncOperation.user))
+
+        if status:
+            query = query.where(AsyncOperation.status == status)
+
+        if operation_type:
+            query = query.where(AsyncOperation.operation_type == operation_type)
+
+        query = query.order_by(AsyncOperation.started_at.desc()).offset(skip).limit(limit)
+
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def count_operations(
+        self,
+        status: Optional[str] = None,
+        operation_type: Optional[str] = None,
+    ) -> int:
+        """
+        Count operations with optional filters.
+
+        Args:
+            status: Filter by status
+            operation_type: Filter by operation type
+
+        Returns:
+            Count of matching operations
+        """
+        from sqlalchemy import func
+
+        query = select(func.count(AsyncOperation.id))
+
+        if status:
+            query = query.where(AsyncOperation.status == status)
+
+        if operation_type:
+            query = query.where(AsyncOperation.operation_type == operation_type)
+
+        result = await self.session.execute(query)
+        return result.scalar() or 0

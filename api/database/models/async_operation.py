@@ -6,9 +6,9 @@ from datetime import datetime
 from typing import Optional
 from uuid import uuid4
 
-from sqlalchemy import Index, String, Text, func
+from sqlalchemy import ForeignKey, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from api.database.connection import Base
 
@@ -35,6 +35,14 @@ class AsyncOperation(Base):
     # Progress percentage (0-100)
     progress_percent: Mapped[float] = mapped_column(default=0.0)
 
+    # User who requested the operation (optional for backwards compatibility)
+    user_id: Mapped[Optional[str]] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     # Timestamps
     started_at: Mapped[datetime] = mapped_column(default=func.now(), index=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
@@ -47,6 +55,9 @@ class AsyncOperation(Base):
 
     # Error message if operation failed
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Relationship to user
+    user = relationship("User", foreign_keys=[user_id], lazy="joined")
 
     # Indexes for efficient queries
     __table_args__ = (

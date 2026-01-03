@@ -96,8 +96,15 @@ async def start_async_linear_map(
     # Store user_id for the background task
     user_id = str(current_user.id)
 
-    # Criar uma nova operação
-    operation = await AsyncService.create_operation("linear_map")
+    # Criar uma nova operação com o user_id e metadados iniciais
+    operation = await AsyncService.create_operation(
+        "linear_map",
+        user_id=user_id,
+        initial_result={
+            "origin": request.origin,
+            "destination": request.destination,
+        },
+    )
     
     # Definir a função que executará o processamento em segundo plano
     # NOTA: Não use try/except aqui - o run_async._worker já trata erros

@@ -52,7 +52,11 @@ class AsyncService:
         )
 
     @staticmethod
-    async def _create_operation_async(operation_type: str) -> AsyncOperationResponse:
+    async def _create_operation_async(
+        operation_type: str,
+        user_id: Optional[str] = None,
+        initial_result: Optional[dict] = None,
+    ) -> AsyncOperationResponse:
         """Create a new operation in the database (async version)."""
         operation_id = str(uuid.uuid4())
         estimated_completion = datetime.now() + timedelta(minutes=5)
@@ -63,6 +67,8 @@ class AsyncService:
                 operation_id=operation_id,
                 operation_type=operation_type,
                 estimated_completion=estimated_completion,
+                user_id=user_id,
+                initial_result=initial_result,
             )
 
             response = AsyncService._db_to_response(db_op)
@@ -70,17 +76,23 @@ class AsyncService:
             return response
 
     @staticmethod
-    async def create_operation(operation_type: str) -> AsyncOperationResponse:
+    async def create_operation(
+        operation_type: str,
+        user_id: Optional[str] = None,
+        initial_result: Optional[dict] = None,
+    ) -> AsyncOperationResponse:
         """
         Create a new async operation.
 
         Args:
             operation_type: Type of operation (e.g., "linear_map")
+            user_id: ID of the user who requested the operation
+            initial_result: Initial result data (e.g., origin/destination for display)
 
         Returns:
             AsyncOperationResponse object
         """
-        return await AsyncService._create_operation_async(operation_type)
+        return await AsyncService._create_operation_async(operation_type, user_id, initial_result)
 
     @staticmethod
     async def _get_operation_async(operation_id: str) -> Optional[AsyncOperationResponse]:
@@ -308,12 +320,16 @@ class AsyncService:
                 _active_operations.pop(operation_id, None)
                 logger.error(f"Operation {operation_id} failed: {error}")
 
+            # Track last persisted progress to avoid excessive DB writes
+            last_persisted_progress = [0.0]  # Use list to allow mutation in closure
+
             def _update_progress_sync(progress: float):
                 """Sync wrapper for progress updates.
-                
-                When called from within a running coroutine (nested), only updates
-                the in-memory cache. When called from sync context, also persists
-                to database.
+
+                Persists progress to database with throttling (only when progress
+                changes by >= 5%). When called from within a running event loop
+                (e.g., inside run_async_safe), schedules the update as a task.
+                When called from sync context, uses run_until_complete.
                 """
                 # Always update in-memory cache (fast, sync)
                 if operation_id in _active_operations:
@@ -321,10 +337,20 @@ class AsyncService:
                     _active_operations[operation_id].estimated_completion = (
                         datetime.now() + timedelta(minutes=5 * (100 - progress) / 100)
                     )
-                
-                # Only persist to DB if loop is not already running
-                # (avoids nested run_until_complete which is not allowed)
-                if not loop.is_running():
+
+                # Only persist to DB if progress changed by >= 5%
+                if progress - last_persisted_progress[0] < 5.0:
+                    return
+
+                last_persisted_progress[0] = progress
+
+                # Persist to DB
+                if loop.is_running():
+                    # Loop is running - schedule the update as a task
+                    # This happens when called from inside run_async_safe()
+                    asyncio.ensure_future(_update_progress_bg(progress), loop=loop)
+                else:
+                    # Loop not running - can use run_until_complete
                     try:
                         loop.run_until_complete(_update_progress_bg(progress))
                     except Exception as e:

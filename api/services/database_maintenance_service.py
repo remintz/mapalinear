@@ -242,7 +242,7 @@ class DatabaseMaintenanceService:
             .where(AsyncOperation.started_at < stale_cutoff)
             .values(
                 status="failed",
-                completed_at=datetime.now(),
+                completed_at=func.now(),
                 error="Operation timed out (stale) - cleaned by maintenance",
             )
         )

@@ -166,7 +166,7 @@ def api_client(mock_provider):
     # Store created operations for get_operation to retrieve
     created_operations = {}
 
-    async def mock_create_operation(operation_type: str):
+    async def mock_create_operation(operation_type: str, user_id: str = None, initial_result: dict = None):
         op_id = str(uuid.uuid4())
         response = AsyncOperationResponse(
             operation_id=op_id,
@@ -174,6 +174,7 @@ def api_client(mock_provider):
             status=OperationStatus.IN_PROGRESS,
             started_at=datetime.now(),
             progress_percent=0.0,
+            result=initial_result,
         )
         created_operations[op_id] = response
         return response
@@ -412,13 +413,14 @@ class TestAsyncOperations:
         import uuid
 
         # Create a mock for AsyncService.create_operation that returns unique operation IDs
-        async def mock_create_operation(operation_type: str):
+        async def mock_create_operation(operation_type: str, user_id: str = None, initial_result: dict = None):
             return AsyncOperationResponse(
                 operation_id=str(uuid.uuid4()),
                 type=operation_type,
                 status=OperationStatus.IN_PROGRESS,
                 started_at=datetime.now(),
                 progress_percent=0.0,
+                result=initial_result,
             )
 
         # Mock run_async to prevent background tasks from actually running

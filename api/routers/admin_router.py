@@ -760,3 +760,197 @@ async def run_maintenance(
         execution_time_ms=stats.execution_time_ms,
         dry_run=dry_run,
     )
+
+
+# Async Operations Admin models
+class OperationUserResponse(BaseModel):
+    """User info for operation responses."""
+
+    id: str
+    email: str
+    name: str
+
+    model_config = {"from_attributes": True}
+
+
+class AdminOperationResponse(BaseModel):
+    """Async operation information for admin views."""
+
+    id: str = Field(..., description="Operation UUID")
+    operation_type: str = Field(..., description="Type of operation")
+    status: str = Field(..., description="Status: in_progress, completed, failed")
+    progress_percent: float = Field(..., description="Progress 0-100")
+    started_at: datetime = Field(..., description="When operation started")
+    completed_at: Optional[datetime] = Field(None, description="When operation completed")
+    duration_seconds: Optional[float] = Field(None, description="Duration in seconds")
+    error: Optional[str] = Field(None, description="Error message if failed")
+    user: Optional[OperationUserResponse] = Field(None, description="User who requested")
+    # Map info extracted from result
+    origin: Optional[str] = Field(None, description="Origin location")
+    destination: Optional[str] = Field(None, description="Destination location")
+    total_length_km: Optional[float] = Field(None, description="Route length in km")
+
+    model_config = {"from_attributes": True}
+
+
+class AdminOperationListResponse(BaseModel):
+    """Response with list of operations."""
+
+    operations: List[AdminOperationResponse]
+    total: int = Field(..., description="Total number of operations")
+    stats: dict = Field(default_factory=dict, description="Operation statistics")
+
+
+class CancelOperationResponse(BaseModel):
+    """Response after cancelling an operation."""
+
+    success: bool
+    message: str
+
+
+@router.post("/operations/{operation_id}/cancel", response_model=CancelOperationResponse)
+async def cancel_operation(
+    operation_id: str,
+    admin_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+) -> CancelOperationResponse:
+    """
+    Cancel an in-progress operation.
+
+    Marks the operation as failed. Useful for cleaning up stuck operations.
+
+    Requires admin privileges.
+
+    Args:
+        operation_id: UUID of the operation to cancel
+        admin_user: Current admin user (injected)
+        db: Database session
+
+    Returns:
+        Success status and message
+    """
+    from api.database.repositories.async_operation import AsyncOperationRepository
+
+    repo = AsyncOperationRepository(db)
+    operation = await repo.get_by_operation_id(operation_id)
+
+    if not operation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Operation not found",
+        )
+
+    if operation.status != "in_progress":
+        return CancelOperationResponse(
+            success=False,
+            message=f"Operação não pode ser cancelada (status: {operation.status})",
+        )
+
+    success = await repo.fail_operation(
+        operation_id=operation_id,
+        error="Operação cancelada pelo administrador",
+    )
+
+    if success:
+        logger.info(f"Admin {admin_user.email} cancelled operation {operation_id}")
+        return CancelOperationResponse(
+            success=True,
+            message="Operação cancelada com sucesso",
+        )
+    else:
+        return CancelOperationResponse(
+            success=False,
+            message="Erro ao cancelar operação",
+        )
+
+
+@router.get("/operations", response_model=AdminOperationListResponse)
+async def list_operations(
+    status: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 50,
+    admin_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AdminOperationListResponse:
+    """
+    List all async operations with details.
+
+    Requires admin privileges.
+
+    Args:
+        status: Filter by status (in_progress, completed, failed)
+        skip: Number of records to skip
+        limit: Maximum number of records to return
+        admin_user: Current admin user (injected)
+        db: Database session
+
+    Returns:
+        List of operations with user info and statistics
+    """
+    from api.database.repositories.async_operation import AsyncOperationRepository
+
+    repo = AsyncOperationRepository(db)
+
+    # Get operations with user info (all map-related operations)
+    operations = await repo.list_all_operations(
+        status=status,
+        skip=skip,
+        limit=limit,
+    )
+
+    # Get total count
+    total = await repo.count_operations(
+        status=status,
+    )
+
+    # Get stats
+    stats = await repo.get_stats()
+
+    # Convert to response models
+    operation_responses = []
+    for op in operations:
+        # Calculate duration
+        duration = None
+        if op.completed_at and op.started_at:
+            duration = (op.completed_at - op.started_at).total_seconds()
+
+        # Extract map info from result
+        origin = None
+        destination = None
+        total_length_km = None
+        if op.result:
+            origin = op.result.get("origin")
+            destination = op.result.get("destination")
+            total_length_km = op.result.get("total_length_km")
+
+        # Build user response
+        user_response = None
+        if op.user:
+            user_response = OperationUserResponse(
+                id=str(op.user.id),
+                email=op.user.email,
+                name=op.user.name,
+            )
+
+        operation_responses.append(
+            AdminOperationResponse(
+                id=op.id,
+                operation_type=op.operation_type,
+                status=op.status,
+                progress_percent=op.progress_percent,
+                started_at=op.started_at,
+                completed_at=op.completed_at,
+                duration_seconds=duration,
+                error=op.error,
+                user=user_response,
+                origin=origin,
+                destination=destination,
+                total_length_km=total_length_km,
+            )
+        )
+
+    return AdminOperationListResponse(
+        operations=operation_responses,
+        total=total,
+        stats=stats,
+    )

@@ -22,6 +22,7 @@ import {
   AdminPOIStats,
   RecalculateQualityResponse,
   RequiredTagsConfig,
+  AdminOperationListResponse,
 } from './types';
 
 // Helper to wait for session with retry
@@ -632,6 +633,28 @@ class APIClient {
    */
   async resetRequiredTags(): Promise<RequiredTagsConfig> {
     const { data } = await this.client.post<RequiredTagsConfig>('/settings/required-tags/reset');
+    return data;
+  }
+
+  // Admin Operations
+
+  /**
+   * Get list of async operations (admin).
+   */
+  async getAdminOperations(params?: {
+    status?: string;
+    skip?: number;
+    limit?: number;
+  }): Promise<AdminOperationListResponse> {
+    const { data } = await this.client.get<AdminOperationListResponse>('/admin/operations', { params });
+    return data;
+  }
+
+  /**
+   * Cancel an in-progress operation (admin).
+   */
+  async cancelOperation(operationId: string): Promise<{ success: boolean; message: string }> {
+    const { data } = await this.client.post<{ success: boolean; message: string }>(`/admin/operations/${operationId}/cancel`);
     return data;
   }
 

@@ -405,3 +405,38 @@ export interface RequiredTagsConfig {
   required_tags: Record<string, string[]>;
   available_tags: string[];
 }
+
+// Admin Operations types
+export interface OperationUser {
+  id: string;
+  email: string;
+  name: string;
+}
+
+export interface AdminOperation {
+  id: string;
+  operation_type: string;
+  status: 'in_progress' | 'completed' | 'failed';
+  progress_percent: number;
+  started_at: string;
+  completed_at?: string;
+  duration_seconds?: number;
+  error?: string;
+  user?: OperationUser;
+  origin?: string;
+  destination?: string;
+  total_length_km?: number;
+}
+
+export interface AdminOperationStats {
+  in_progress: number;
+  completed: number;
+  failed: number;
+  total: number;
+}
+
+export interface AdminOperationListResponse {
+  operations: AdminOperation[];
+  total: number;
+  stats: AdminOperationStats;
+}

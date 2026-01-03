@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import logging
@@ -8,10 +10,47 @@ from api.middleware.error_handler import error_handler_middleware, setup_error_h
 # Configurar logger
 logger = logging.getLogger("api.main")
 
+
+async def cleanup_orphaned_operations():
+    """Cancel any operations that were in_progress when the server stopped."""
+    from api.database.connection import get_session
+    from api.database.models.async_operation import AsyncOperation
+    from sqlalchemy import update, func
+
+    try:
+        async with get_session() as session:
+            result = await session.execute(
+                update(AsyncOperation)
+                .where(AsyncOperation.status == "in_progress")
+                .values(
+                    status="failed",
+                    completed_at=func.now(),
+                    error="Operação abortada (servidor reiniciado)",
+                )
+            )
+            count = result.rowcount
+            if count > 0:
+                logger.info(f"🧹 Limpeza: {count} operação(ões) órfã(s) marcada(s) como falha")
+    except Exception as e:
+        logger.warning(f"⚠️ Erro ao limpar operações órfãs: {e}")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifecycle manager for the FastAPI app."""
+    # Startup
+    logger.info("🚀 Iniciando servidor...")
+    await cleanup_orphaned_operations()
+    yield
+    # Shutdown
+    logger.info("👋 Encerrando servidor...")
+
+
 app = FastAPI(
     title="Mapa Linear API",
     description="API para geração de mapas lineares de estradas",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # Middleware para logging de requisições
