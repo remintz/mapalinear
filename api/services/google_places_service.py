@@ -106,7 +106,6 @@ class GooglePlacesService:
         if self.cache_repo:
             cached = await self.cache_repo.get_by_osm_id(osm_poi_id)
             if cached:
-                logger.debug(f"Cache hit for POI {osm_poi_id}")
                 return GooglePlaceData(
                     google_place_id=cached.google_place_id,
                     rating=float(cached.rating) if cached.rating else None,

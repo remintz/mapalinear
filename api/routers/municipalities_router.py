@@ -87,10 +87,8 @@ async def list_municipalities(
     )
 
     if cached_data:
-        logger.debug("Municipalities cache hit")
         municipalities = [Municipality(**m) if isinstance(m, dict) else m for m in cached_data]
     else:
-        logger.debug("Municipalities cache miss, fetching from IBGE")
         try:
             municipalities = await fetch_municipalities_from_ibge()
 

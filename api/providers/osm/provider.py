@@ -213,7 +213,6 @@ class OSMProvider(GeoProvider):
                 params=cache_params
             )
             if cached_result:
-                logger.info(f"✅ Cache HIT for reverse_geocode: {poi_name or 'no name'} at ({latitude:.4f}, {longitude:.4f})")
                 # Log cache hit
                 await api_call_logger.log_cache_hit(
                     provider="osm",
@@ -222,8 +221,6 @@ class OSMProvider(GeoProvider):
                     result_count=1,
                 )
                 return cached_result
-        
-        logger.info(f"❌ Cache MISS for reverse_geocode: {poi_name or 'no name'} at ({latitude:.4f}, {longitude:.4f}) - fetching from API")
         
         start_time = time.time()
         error_msg = None
@@ -254,7 +251,6 @@ class OSMProvider(GeoProvider):
             # Extract city from the address dictionary (not the string)
             address_dict = location.raw.get('address', {}) if hasattr(location, 'raw') else {}
 
-            logger.debug(f"🌍 Reverse geocode address dict: {address_dict}")
 
             city = (address_dict.get('city') or
                    address_dict.get('town') or
@@ -264,7 +260,6 @@ class OSMProvider(GeoProvider):
 
             state = address_dict.get('state')
 
-            logger.debug(f"🌍 Extracted city={city}, state={state} from reverse geocoding")
 
             result = GeoLocation(
                 latitude=latitude,
@@ -283,7 +278,6 @@ class OSMProvider(GeoProvider):
                     params=cache_params,
                     data=result
                 )
-                logger.info(f"💾 Cached reverse_geocode result for: {poi_name or 'no name'}")
             
             return result
             
@@ -313,8 +307,6 @@ class OSMProvider(GeoProvider):
         avoid: Optional[List[str]] = None
     ) -> Optional[Route]:
         """Calculate route using OSMnx or basic routing."""
-        logger.info(f"🗺️ Calculando rota OSM: origem=({origin.latitude:.6f}, {origin.longitude:.6f}), destino=({destination.latitude:.6f}, {destination.longitude:.6f})")
-        
         # Check cache first
         cache_key_params = {
             "origin_lat": origin.latitude,
@@ -332,22 +324,15 @@ class OSMProvider(GeoProvider):
                 params=cache_key_params
             )
             if cached_result:
-                logger.debug(f"🗺️ Cache hit: retornando rota do cache")
                 return cached_result
         
         try:
-            logger.info(f"🗺️ Calculando nova rota...")
             route_data = await self._calculate_osm_route(origin, destination, waypoints, avoid)
-            
+
             if not route_data:
-                logger.warning(f"🗺️ Falha ao calcular rota - route_data vazio")
+                logger.warning("🗺️ Falha ao calcular rota - route_data vazio")
                 return None
-            
-            logger.info(f"🗺️ Dados da rota obtidos:")
-            logger.info(f"🗺️ - Distância: {route_data['distance']/1000:.1f} km")
-            logger.info(f"🗺️ - Duração: {route_data['duration']/60:.1f} min")
-            logger.info(f"🗺️ - Pontos na geometria: {len(route_data['geometry'])}")
-            
+
             result = Route(
                 origin=origin,
                 destination=destination,
@@ -406,7 +391,6 @@ class OSMProvider(GeoProvider):
             # logger.debug(f"🔎 Query Overpass gerada:\n{query}")
             
             overpass_data = await self._make_overpass_request(query)
-            logger.debug(f"🔎 Overpass retornou {len(overpass_data.get('elements', []))} elementos")
             
             pois = []
             for i, element in enumerate(overpass_data.get('elements', [])):
@@ -418,9 +402,7 @@ class OSMProvider(GeoProvider):
                     if len(pois) >= limit:
                         break
                 else:
-                    logger.debug(f"🔎 Elemento {i} não foi convertido em POI")
-            
-            logger.debug(f"🔎 Resultado: {len(pois)} POIs processados com sucesso")
+                    pass
             
             # Cache the result
             if self._cache:
@@ -433,8 +415,7 @@ class OSMProvider(GeoProvider):
             
             return pois
             
-        except Exception as e:
-            logger.error(f"🔎 Erro na busca de POIs: {e}")
+        except Exception:
             return []
     
     async def get_poi_details(self, poi_id: str) -> Optional[POI]:
@@ -503,8 +484,8 @@ class OSMProvider(GeoProvider):
             osrm_result = await self._calculate_osrm_api_route(origin, destination)
             if osrm_result:
                 return osrm_result
-            
-            logger.warning(f"🗺️ OSRM falhou")
+
+            logger.warning("🗺️ OSRM falhou")
         except Exception as e:
             logger.warning(f"🗺️ Erro no OSRM: {e}")
         return None
@@ -522,9 +503,7 @@ class OSMProvider(GeoProvider):
             'geometries': 'geojson',
             'annotations': 'true'
         }
-        
-        logger.debug(f"🗺️ Consultando OSRM: {osrm_url}")
-        
+
         start_time = time.time()
         response_status = 0
         response_size = None
@@ -542,7 +521,7 @@ class OSMProvider(GeoProvider):
                 if response.status_code != 200:
                     logger.warning(f"🗺️ OSRM retornou status {response.status_code}")
                     error_msg = f"HTTP {response.status_code}"
-                    
+
                     # Log failed API call
                     duration_ms = int((time.time() - start_time) * 1000)
                     await api_call_logger.log_call(
@@ -566,7 +545,7 @@ class OSMProvider(GeoProvider):
                 if data.get('code') != 'Ok':
                     error_msg = data.get('message', 'Unknown error')
                     logger.warning(f"🗺️ OSRM erro: {error_msg}")
-                    
+
                     # Log failed API call
                     duration_ms = int((time.time() - start_time) * 1000)
                     await api_call_logger.log_call(
@@ -586,9 +565,9 @@ class OSMProvider(GeoProvider):
                     return None
                 
                 if not data.get('routes'):
-                    logger.warning(f"🗺️ OSRM não retornou rotas")
+                    logger.warning("🗺️ OSRM não retornou rotas")
                     error_msg = "No routes returned"
-                    
+
                     # Log failed API call
                     duration_ms = int((time.time() - start_time) * 1000)
                     await api_call_logger.log_call(
@@ -617,8 +596,7 @@ class OSMProvider(GeoProvider):
                 duration = route['duration']  # seconds
                 
                 result_count = len(geometry_converted)
-                logger.debug(f"🗺️ OSRM: {distance/1000:.1f}km, {result_count} pontos na geometria")
-                
+
                 # Log successful API call
                 duration_ms = int((time.time() - start_time) * 1000)
                 await api_call_logger.log_call(
@@ -667,7 +645,6 @@ class OSMProvider(GeoProvider):
     
     def _generate_overpass_query(self, location: GeoLocation, radius: float, categories: List[POICategory]) -> str:
         """Generate Overpass query for POI search."""
-        logger.debug(f"🔧 Gerando query Overpass para categorias: {[cat.value for cat in categories]}")
 
         # Convert radius to degrees (approximate)
         radius_deg = radius / 111000  # Rough conversion
@@ -705,11 +682,6 @@ class OSMProvider(GeoProvider):
 
         amenity_filters = list(amenity_filters)  # Convert back to list
         tourism_filters = list(tourism_filters)
-        logger.info(f"🔧 Amenities OSM únicos para busca: {amenity_filters}")
-        if tourism_filters:
-            logger.info(f"🔧 Tourism tags OSM para busca: {tourism_filters}")
-        if include_places:
-            logger.info(f"🏙️ Incluindo busca por cidades com raio de {radius * 5}m (place=city/town/village)")
 
         # Build query
         bbox_str = f"{bbox['south']},{bbox['west']},{bbox['north']},{bbox['east']}"
@@ -754,7 +726,6 @@ class OSMProvider(GeoProvider):
             error_msg = None
             
             try:
-                logger.debug(f"Trying Overpass endpoint: {endpoint}")
                 
                 # Use context manager to ensure proper client lifecycle
                 async with self._get_http_client() as client:
@@ -770,7 +741,6 @@ class OSMProvider(GeoProvider):
                     
                     result = response.json()
                     result_count = len(result.get('elements', []))
-                    logger.info(f"🌐 Overpass response: {result_count} elementos retornados")
                     
                     # Log successful API call
                     duration_ms = int((time.time() - start_time) * 1000)
@@ -786,7 +756,6 @@ class OSMProvider(GeoProvider):
                         result_count=result_count,
                     )
                     
-                    logger.debug(f"Overpass request successful using {endpoint}")
                     return result
                 
             except Exception as e:

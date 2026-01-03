@@ -956,7 +956,6 @@ class POISearchService:
         junction_debug_data: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> None:
         """Collect debug data for all milestones."""
-        logger.info(f"Collecting debug data for {len(milestones)} milestones")
         junction_debug_data = junction_debug_data or {}
 
         for milestone in milestones:
@@ -1022,5 +1021,3 @@ class POISearchService:
             except Exception as e:
                 logger.warning(f"Error collecting debug for POI {milestone.id}: {e}")
                 continue
-
-        logger.info(f"Debug collected for {len(debug_collector.get_all_data())} POIs")

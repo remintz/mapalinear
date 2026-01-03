@@ -248,8 +248,6 @@ class UnifiedCache:
             
             import asyncpg
             
-            logger.info(f"🔵 Creating PostgreSQL connection pool for loop {loop_id}...")
-            
             self._pools[loop_id] = await asyncpg.create_pool(
                 host=self.settings.postgres_host,
                 port=self.settings.postgres_port,
@@ -260,8 +258,6 @@ class UnifiedCache:
                 max_size=self.settings.postgres_pool_max_size,
                 command_timeout=60
             )
-            
-            logger.info(f"✅ PostgreSQL connection pool created for loop {loop_id}: {self.settings.postgres_host}:{self.settings.postgres_port}/{self.settings.postgres_database}")
 
         return self._pools[loop_id]
 
@@ -305,41 +301,51 @@ class UnifiedCache:
         
         if row:
             self._stats['hits'] += 1
-            logger.debug(f"Cache hit for {operation} with provider {provider.value}")
-            
+            self._record_hit(operation)
+
             # Parse JSONB data
             data = row['data']
             if isinstance(data, str):
                 data = json.loads(data)
-            
+
             # Reconstruct Pydantic models
             return self._reconstruct_data(data, operation)
-        
+
         # For geocoding, try semantic matching
         if operation == "geocode" and "address" in params:
             similar_entry = await self._find_similar_geocode(params["address"])
             if similar_entry:
                 self._stats['hits'] += 1
-                logger.debug(f"Cache hit via semantic matching for geocode: {params['address']}")
+                self._record_hit(operation)
                 data = similar_entry['data']
                 if isinstance(data, str):
                     data = json.loads(data)
                 return self._reconstruct_data(data, operation)
-        
+
         # For POI searches, try spatial matching
         elif operation == "poi_search" and all(k in params for k in ['latitude', 'longitude', 'radius']):
             spatial_entry = await self._find_spatial_poi_match(params)
             if spatial_entry:
                 self._stats['hits'] += 1
-                logger.debug(f"Cache hit via spatial matching for POI search")
+                self._record_hit(operation)
                 data = spatial_entry['data']
                 if isinstance(data, str):
                     data = json.loads(data)
                 return self._reconstruct_data(data, operation)
-        
+
         self._stats['misses'] += 1
-        logger.debug(f"Cache miss for {operation} with provider {provider.value}")
+        self._record_miss(operation)
         return None
+
+    def _record_hit(self, operation: str) -> None:
+        """Record a cache hit for the current stats collector."""
+        from api.services.cache_stats_collector import record_cache_hit
+        record_cache_hit(operation)
+
+    def _record_miss(self, operation: str) -> None:
+        """Record a cache miss for the current stats collector."""
+        from api.services.cache_stats_collector import record_cache_miss
+        record_cache_miss(operation)
 
     def _reconstruct_data(self, data: Any, operation: str) -> Any:
         """Reconstruct Pydantic models from dictionaries loaded from cache."""
@@ -433,7 +439,6 @@ class UnifiedCache:
                     )
             
             self._stats['sets'] += 1
-            logger.debug(f"Cached {operation} data for provider {provider.value}, expires at {entry.expires_at}")
             
         except Exception as e:
             logger.error(f"❌ set({operation}): Error caching data: {e}", exc_info=True)

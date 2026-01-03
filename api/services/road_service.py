@@ -24,6 +24,7 @@ from api.models.road_models import (
 from api.providers.base import GeoProvider, ProviderType
 from api.providers.models import GeoLocation, Route, POICategory
 from api.providers.settings import get_settings
+from api.services.cache_stats_collector import cache_stats_context
 from api.services.milestone_factory import MilestoneFactory
 from api.services.poi_debug_service import POIDebugDataCollector
 from api.services.poi_quality_service import POIQualityService
@@ -227,15 +228,7 @@ class RoadService:
 
     def _log_milestone_statistics(self, milestones: List[RoadMilestone]):
         """Log statistics about found milestones."""
-        milestones_with_city = len([m for m in milestones if m.city])
-        logger.info(f"Milestones with city: {milestones_with_city}/{len(milestones)}")
-
-        for milestone in milestones:
-            city_info = f" ({milestone.city})" if milestone.city else ""
-            logger.info(
-                f"Milestone: {milestone.name}{city_info} "
-                f"({milestone.type.value}) - dist={milestone.distance_from_origin_km:.1f}km"
-            )
+        pass
 
     # ========================================================================
     # MAIN PUBLIC METHODS
@@ -281,6 +274,37 @@ class RoadService:
         Returns:
             LinearMapResponse with segments and milestones
         """
+        # Use cache stats context to track hit/miss per operation
+        with cache_stats_context() as cache_stats:
+            return self._generate_linear_map_impl(
+                origin=origin,
+                destination=destination,
+                road_id=road_id,
+                include_cities=include_cities,
+                max_distance_from_road=max_distance_from_road,
+                max_detour_distance_km=max_detour_distance_km,
+                progress_callback=progress_callback,
+                segment_length_km=segment_length_km,
+                user_id=user_id,
+                cache_stats=cache_stats,
+            )
+
+    def _generate_linear_map_impl(
+        self,
+        origin: str,
+        destination: str,
+        road_id: Optional[str],
+        include_cities: bool,
+        max_distance_from_road: float,
+        max_detour_distance_km: float,
+        progress_callback: Optional[Callable[[float], None]],
+        segment_length_km: float,
+        user_id: Optional[str],
+        cache_stats,
+    ) -> LinearMapResponse:
+        """Internal implementation of generate_linear_map with cache stats tracking."""
+        from api.services.cache_stats_collector import CacheStatsCollector
+
         logger.info(f"Starting linear map generation: {origin} -> {destination}")
 
         # Extract origin city for POI filtering
@@ -322,7 +346,6 @@ class RoadService:
             if _is_debug_enabled_sync():
                 debug_collector = POIDebugDataCollector()
                 debug_collector.set_main_route_geometry(route.geometry)
-                logger.info("POI debug enabled - collecting calculation data")
         except Exception as e:
             logger.warning(f"Error checking debug config: {e}")
 
@@ -445,6 +468,9 @@ class RoadService:
                 asyncio.run(_enrich())
             except Exception as e:
                 logger.warning(f"Error enriching with HERE: {e}")
+
+        # Log cache statistics summary at the end of map generation
+        cache_stats.log_summary()
 
         return linear_map
 

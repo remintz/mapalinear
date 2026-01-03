@@ -439,7 +439,6 @@ class HEREProvider(GeoProvider):
                 params=cache_params
             )
             if cached_result is not None:
-                logger.debug(f"Cache hit for HERE POI search at {location.latitude},{location.longitude}")
                 # Log cache hit
                 await _get_api_call_logger().log_cache_hit(
                     provider="here",

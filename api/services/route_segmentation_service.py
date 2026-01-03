@@ -127,9 +127,6 @@ class RouteSegmentationService:
                     )
                 )
 
-        logger.info(
-            f"Generated {len(search_points)} search points from segments"
-        )
         return search_points
 
 

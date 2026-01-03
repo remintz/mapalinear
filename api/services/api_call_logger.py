@@ -229,8 +229,6 @@ class ApiCallLogger:
             finally:
                 await engine.dispose()
 
-            logger.debug(f"Flushed {len(to_flush)} API call logs to database")
-
         except Exception as e:
             logger.error(f"Failed to flush API call logs: {e}")
             # Put items back in queue for retry
