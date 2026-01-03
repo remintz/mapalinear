@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.database.connection import get_db
 from api.database.models.user import User
 from api.database.repositories.impersonation_session import ImpersonationSessionRepository
+from api.middleware.request_id import set_user_email
 from api.services.auth_service import AuthError, AuthService
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,7 @@ class AuthContext:
 
 
 async def _get_auth_context_internal(
+    request: Request,
     credentials: HTTPAuthorizationCredentials,
     db: AsyncSession,
 ) -> AuthContext:
@@ -53,6 +55,11 @@ async def _get_auth_context_internal(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # Set user_email in context for logging
+    # This will be the effective user (impersonated user if impersonating)
+    set_user_email(authenticated_user.email)
+    request.state.user_email = authenticated_user.email
+
     # Check for active impersonation session
     if authenticated_user.is_admin:
         imp_repo = ImpersonationSessionRepository(db)
@@ -60,6 +67,9 @@ async def _get_auth_context_internal(
 
         if imp_session and imp_session.target_user:
             # Admin is impersonating someone
+            # Update user_email in context to the impersonated user for logging
+            set_user_email(imp_session.target_user.email)
+            request.state.user_email = imp_session.target_user.email
             return AuthContext(
                 user=imp_session.target_user,
                 is_impersonating=True,
@@ -72,6 +82,7 @@ async def _get_auth_context_internal(
 
 
 async def get_current_user(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> User:
@@ -98,11 +109,12 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    context = await _get_auth_context_internal(credentials, db)
+    context = await _get_auth_context_internal(request, credentials, db)
     return context.user
 
 
 async def get_optional_user(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> Optional[User]:
@@ -113,6 +125,7 @@ async def get_optional_user(
     Useful for endpoints that work both authenticated and unauthenticated.
 
     Args:
+        request: FastAPI request object
         credentials: Bearer token from Authorization header
         db: Database session
 
@@ -123,13 +136,14 @@ async def get_optional_user(
         return None
 
     try:
-        context = await _get_auth_context_internal(credentials, db)
+        context = await _get_auth_context_internal(request, credentials, db)
         return context.user
     except HTTPException:
         return None
 
 
 async def get_auth_context(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> AuthContext:
@@ -139,6 +153,7 @@ async def get_auth_context(
     Useful for endpoints that need to know if the current session is an impersonation.
 
     Args:
+        request: FastAPI request object
         credentials: Bearer token from Authorization header
         db: Database session
 
@@ -155,10 +170,11 @@ async def get_auth_context(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    return await _get_auth_context_internal(credentials, db)
+    return await _get_auth_context_internal(request, credentials, db)
 
 
 async def get_current_admin(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> User:
@@ -196,6 +212,11 @@ async def get_current_admin(
             detail=e.message,
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # Set user_email in context for logging
+    set_user_email(user.email)
+    # Also save to request.state for middleware access
+    request.state.user_email = user.email
 
     if not user.is_admin:
         raise HTTPException(

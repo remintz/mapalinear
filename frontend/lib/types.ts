@@ -440,3 +440,36 @@ export interface AdminOperationListResponse {
   total: number;
   stats: AdminOperationStats;
 }
+
+// Application Log types
+export interface ApplicationLog {
+  id: string;
+  timestamp: string;
+  level: "DEBUG" | "INFO" | "WARNING" | "ERROR" | "CRITICAL";
+  module: string;
+  message: string;
+  request_id?: string;
+  session_id?: string;
+  user_email?: string;
+  func_name?: string;
+  line_no?: number;
+  exc_info?: string;
+}
+
+export interface ApplicationLogsResponse {
+  logs: ApplicationLog[];
+  total: number;
+  skip: number;
+  limit: number;
+}
+
+export interface ApplicationLogStats {
+  debug: number;
+  info: number;
+  warning: number;
+  error: number;
+  critical: number;
+  total: number;
+}
+
+export type LogTimeWindow = "5m" | "15m" | "1h" | "24h" | "custom";

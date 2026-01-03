@@ -6,7 +6,7 @@ import logging
 import time
 
 from api.middleware.error_handler import error_handler_middleware, setup_error_handlers
-from api.middleware.request_id import RequestIDMiddleware, set_request_id, get_request_id, set_session_id, clear_session_id
+from api.middleware.request_id import RequestIDMiddleware, set_request_id, get_request_id, set_session_id, clear_session_id, get_user_email, set_user_email
 
 # Configurar logger
 logger = logging.getLogger("api.main")
@@ -42,9 +42,24 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("🚀 Iniciando servidor...")
     await cleanup_orphaned_operations()
+
+    # Setup database logging handler after app is ready
+    from api.config.logging_setup import setup_database_logging
+    setup_database_logging()
+
     yield
+
     # Shutdown
     logger.info("👋 Encerrando servidor...")
+
+    # Flush remaining logs to database before shutdown
+    try:
+        from api.services.database_log_handler import get_database_log_handler
+        db_handler = get_database_log_handler()
+        await db_handler.shutdown()
+        logger.info("📝 Logs salvos no banco de dados")
+    except Exception as e:
+        logger.warning(f"⚠️ Erro ao salvar logs finais: {e}")
 
 
 app = FastAPI(
@@ -81,6 +96,11 @@ async def log_requests(request: Request, call_next):
 
         process_time = time.time() - start_time
         status_code = response.status_code
+
+        # Get user_email from request.state (set by auth middleware)
+        user_email = getattr(request.state, "user_email", None)
+        if user_email:
+            set_user_email(user_email)  # Set in context for the log below
 
         # Status code colorido por categoria
         if status_code < 400:
@@ -123,7 +143,7 @@ app.middleware("http")(error_handler_middleware)
 setup_error_handlers(app)
 
 # Import only required routers
-from api.routers import operations_router, export, maps_router, api_logs_router, auth_router, admin_router, settings_router, municipalities_router, problem_types_router, problem_reports_router, poi_debug_router, admin_pois_router, frontend_errors_router, session_activity_router
+from api.routers import operations_router, export, maps_router, api_logs_router, auth_router, admin_router, settings_router, municipalities_router, problem_types_router, problem_reports_router, poi_debug_router, admin_pois_router, frontend_errors_router, session_activity_router, application_logs_router
 
 # Include only required routers
 app.include_router(auth_router.router, tags=["Auth"])
@@ -140,6 +160,7 @@ app.include_router(poi_debug_router.router, tags=["POI Debug"])
 app.include_router(admin_pois_router.router, tags=["Admin POIs"])
 app.include_router(frontend_errors_router.router, tags=["Frontend Errors"])
 app.include_router(session_activity_router.router, tags=["Session Activity"])
+app.include_router(application_logs_router.router, tags=["Application Logs"])
 
 @app.get("/")
 async def root():

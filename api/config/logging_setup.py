@@ -90,3 +90,40 @@ def _add_request_id_filter():
     api_logger = logging.getLogger("api")
     for handler in api_logger.handlers:
         handler.addFilter(request_id_filter)
+
+
+def _add_database_handler():
+    """
+    Add DatabaseLogHandler to capture logs in PostgreSQL.
+
+    This handler writes logs to the database in batches for monitoring
+    through the admin interface.
+    """
+    from api.services.database_log_handler import get_database_log_handler
+
+    # Get or create the database handler (INFO level and above)
+    db_handler = get_database_log_handler(logging.INFO)
+
+    # Add to root logger so all logs are captured
+    root_logger = logging.getLogger()
+    root_logger.addHandler(db_handler)
+
+    # Add to api logger specifically
+    api_logger = logging.getLogger("api")
+    api_logger.addHandler(db_handler)
+
+
+def setup_database_logging():
+    """
+    Setup database logging handler.
+
+    Should be called after the application is fully initialized
+    and the database connection is available.
+    """
+    try:
+        _add_database_handler()
+        logger = logging.getLogger(__name__)
+        logger.info("Database logging handler configured")
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Failed to setup database logging: {e}")

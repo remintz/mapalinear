@@ -25,6 +25,9 @@ import {
   RecalculateQualityResponse,
   RequiredTagsConfig,
   AdminOperationListResponse,
+  ApplicationLogsResponse,
+  ApplicationLogStats,
+  LogTimeWindow,
 } from './types';
 
 // Helper to wait for session with retry
@@ -676,6 +679,58 @@ class APIClient {
    */
   async cancelOperation(operationId: string): Promise<{ success: boolean; message: string }> {
     const { data } = await this.client.post<{ success: boolean; message: string }>(`/admin/operations/${operationId}/cancel`);
+    return data;
+  }
+
+  // Application Logs (admin)
+
+  /**
+   * Get application logs with filters (admin).
+   */
+  async getApplicationLogs(params?: {
+    level?: string;
+    module?: string;
+    user_id?: string;
+    session_id?: string;
+    request_id?: string;
+    time_window?: LogTimeWindow;
+    start_time?: string;
+    end_time?: string;
+    skip?: number;
+    limit?: number;
+  }): Promise<ApplicationLogsResponse> {
+    const { data } = await this.client.get<ApplicationLogsResponse>('/admin/logs', { params });
+    return data;
+  }
+
+  /**
+   * Get application log statistics by level (admin).
+   */
+  async getApplicationLogStats(params?: {
+    time_window?: LogTimeWindow;
+    start_time?: string;
+    end_time?: string;
+  }): Promise<ApplicationLogStats> {
+    const { data } = await this.client.get<ApplicationLogStats>('/admin/logs/stats', { params });
+    return data;
+  }
+
+  /**
+   * Get list of log modules for filter dropdown (admin).
+   */
+  async getApplicationLogModules(): Promise<string[]> {
+    const { data } = await this.client.get<string[]>('/admin/logs/modules');
+    return data;
+  }
+
+  /**
+   * Cleanup old application logs (admin).
+   */
+  async cleanupApplicationLogs(daysToKeep: number = 30): Promise<{ message: string; deleted_count: number }> {
+    const { data } = await this.client.delete<{ message: string; deleted_count: number }>(
+      '/admin/logs/cleanup',
+      { params: { days_to_keep: daysToKeep } }
+    );
     return data;
   }
 

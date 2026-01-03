@@ -428,6 +428,10 @@ class TestMiddlewareImpersonation:
         mock_credentials = Mock(spec=HTTPAuthorizationCredentials)
         mock_credentials.credentials = "mock_jwt_token"
 
+        # Create mock request with state
+        mock_request = Mock()
+        mock_request.state = Mock()
+
         # Mock AuthService and ImpersonationSessionRepository
         mock_auth_service = AsyncMock()
         mock_auth_service.verify_jwt.return_value = VerifyResult(user=admin_user)
@@ -441,7 +445,7 @@ class TestMiddlewareImpersonation:
             "api.middleware.auth.ImpersonationSessionRepository",
             return_value=mock_imp_repo,
         ):
-            context = await _get_auth_context_internal(mock_credentials, mock_db)
+            context = await _get_auth_context_internal(mock_request, mock_credentials, mock_db)
 
         assert context.user == target_user
         assert context.is_impersonating is True
@@ -459,6 +463,10 @@ class TestMiddlewareImpersonation:
         mock_credentials = Mock(spec=HTTPAuthorizationCredentials)
         mock_credentials.credentials = "mock_jwt_token"
 
+        # Create mock request with state
+        mock_request = Mock()
+        mock_request.state = Mock()
+
         mock_auth_service = AsyncMock()
         mock_auth_service.verify_jwt.return_value = VerifyResult(user=admin_user)
 
@@ -471,7 +479,7 @@ class TestMiddlewareImpersonation:
             "api.middleware.auth.ImpersonationSessionRepository",
             return_value=mock_imp_repo,
         ):
-            context = await _get_auth_context_internal(mock_credentials, mock_db)
+            context = await _get_auth_context_internal(mock_request, mock_credentials, mock_db)
 
         assert context.user == admin_user
         assert context.is_impersonating is False
@@ -490,6 +498,10 @@ class TestMiddlewareImpersonation:
         mock_credentials = Mock(spec=HTTPAuthorizationCredentials)
         mock_credentials.credentials = "mock_jwt_token"
 
+        # Create mock request with state
+        mock_request = Mock()
+        mock_request.state = Mock()
+
         mock_auth_service = AsyncMock()
         mock_auth_service.verify_jwt.return_value = VerifyResult(user=regular_user)
 
@@ -497,7 +509,7 @@ class TestMiddlewareImpersonation:
             "api.middleware.auth.AuthService", return_value=mock_auth_service
         ):
             # ImpersonationSessionRepository should not be instantiated
-            context = await _get_auth_context_internal(mock_credentials, mock_db)
+            context = await _get_auth_context_internal(mock_request, mock_credentials, mock_db)
 
         assert context.user == regular_user
         assert context.is_impersonating is False

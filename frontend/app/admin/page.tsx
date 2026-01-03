@@ -4,7 +4,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Users, Settings, Shield, UserX, AlertTriangle, FileWarning, Map, MapPin, Tag, Activity } from "lucide-react";
+import { Users, Settings, Shield, UserX, AlertTriangle, FileWarning, Map, MapPin, Tag, Activity, FileText } from "lucide-react";
 import { toast } from "sonner";
 
 const SIMULATE_USER_KEY = 'mapalinear_simulate_user';
@@ -198,6 +198,23 @@ export default function AdminPage() {
                 <h2 className="text-lg font-semibold text-gray-900">Operações</h2>
                 <p className="text-sm text-gray-500">
                   Processos de geração de mapas
+                </p>
+              </div>
+            </div>
+          </Link>
+
+          <Link
+            href="/admin/logs"
+            className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
+          >
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-gray-100 rounded-lg">
+                <FileText className="w-6 h-6 text-gray-600" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Logs</h2>
+                <p className="text-sm text-gray-500">
+                  Monitoramento de logs do sistema
                 </p>
               </div>
             </div>

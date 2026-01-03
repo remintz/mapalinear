@@ -5,6 +5,7 @@ Provides endpoints for receiving and analyzing frontend errors
 reported by the client application.
 """
 
+import logging
 from datetime import datetime, timedelta
 from typing import List, Optional
 
@@ -14,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.database.connection import get_db
 from api.database.repositories.frontend_error_log import FrontendErrorLogRepository
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/frontend-errors", tags=["Frontend Errors"])
 
@@ -99,6 +102,20 @@ async def report_error(
 
     # Extract user agent from request headers
     user_agent = request.headers.get("user-agent", "unknown")[:500]
+
+    # Log the frontend error to application logs
+    log_message = f"[FRONTEND {error.error_type.upper()}] {error.message}"
+    if error.url:
+        log_message += f" | URL: {error.url}"
+
+    logger.error(
+        log_message,
+        extra={
+            "frontend_error_type": error.error_type,
+            "frontend_url": error.url,
+            "frontend_session_id": error.session_id,
+        }
+    )
 
     await repo.create_log(
         session_id=error.session_id,
