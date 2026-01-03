@@ -1,8 +1,11 @@
 """
-Request ID middleware for tracking requests and async operations.
+Request ID and Session ID middleware for tracking requests and async operations.
 
 Generates a short hexadecimal ID (8 characters) for each request or
 async operation, making it easy to filter logs by request/process.
+
+Also captures the frontend session ID from X-Session-ID header for
+correlating frontend errors with backend logs.
 """
 
 import logging
@@ -15,6 +18,9 @@ from starlette.requests import Request
 
 # Context variable to store the current request/process ID
 _request_id_ctx: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
+
+# Context variable to store the frontend session ID
+_session_id_ctx: ContextVar[Optional[str]] = ContextVar("session_id", default=None)
 
 
 def generate_request_id() -> str:
@@ -48,15 +54,45 @@ def clear_request_id() -> None:
     _request_id_ctx.set(None)
 
 
+def get_session_id() -> Optional[str]:
+    """Get the current frontend session ID."""
+    return _session_id_ctx.get()
+
+
+def set_session_id(session_id: Optional[str]) -> Optional[str]:
+    """
+    Set the current frontend session ID.
+
+    Args:
+        session_id: The session ID from the X-Session-ID header.
+
+    Returns:
+        The session ID that was set.
+    """
+    _session_id_ctx.set(session_id)
+    return session_id
+
+
+def clear_session_id() -> None:
+    """Clear the current frontend session ID."""
+    _session_id_ctx.set(None)
+
+
 class RequestIDMiddleware(BaseHTTPMiddleware):
-    """Middleware that assigns a unique ID to each HTTP request."""
+    """Middleware that assigns a unique ID to each HTTP request and captures session ID."""
 
     async def dispatch(self, request: Request, call_next):
         # Generate and set request ID
         request_id = set_request_id()
 
+        # Capture session ID from frontend header
+        session_id = request.headers.get("X-Session-ID")
+        if session_id:
+            set_session_id(session_id)
+
         # Add to request state for access in routes if needed
         request.state.request_id = request_id
+        request.state.session_id = session_id
 
         try:
             response = await call_next(request)
@@ -65,17 +101,21 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
             return response
         finally:
             clear_request_id()
+            clear_session_id()
 
 
 class RequestIDFilter(logging.Filter):
     """
-    Logging filter that adds request_id to log records.
+    Logging filter that adds request_id and session_id to log records.
 
-    This filter adds a 'request_id' attribute to each log record,
+    This filter adds 'request_id' and 'session_id' attributes to each log record,
     which can be used in log formatters.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
         request_id = get_request_id()
+        session_id = get_session_id()
         record.request_id = request_id if request_id else "--------"
+        # Use first 8 chars of session_id for brevity in logs
+        record.session_id = session_id[:8] if session_id else "--------"
         return True

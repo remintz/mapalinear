@@ -16,6 +16,7 @@ from api.database.models.problem_type import ProblemType
 from api.database.models.report_attachment import ReportAttachment
 from api.database.models.problem_report import ProblemReport
 from api.database.models.poi_debug_data import POIDebugData
+from api.database.models.frontend_error_log import FrontendErrorLog
 
 __all__ = [
     "ApiCallLog",
@@ -33,4 +34,5 @@ __all__ = [
     "ReportAttachment",
     "ProblemReport",
     "POIDebugData",
+    "FrontendErrorLog",
 ]

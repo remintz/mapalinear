@@ -6,7 +6,7 @@ disable_existing_loggers: false
 
 formatters:
   detailed:
-    format: "%(asctime)s - [%(levelname)s] - %(name)s - %(funcName)s:%(lineno)d - %(message)s"
+    format: "%(asctime)s - [%(request_id)s/%(session_id)s] - [%(levelname)s] - %(name)s - %(funcName)s:%(lineno)d - %(message)s"
     datefmt: "%Y-%m-%d %H:%M:%S"
 
 handlers:

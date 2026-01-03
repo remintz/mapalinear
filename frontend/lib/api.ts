@@ -1,5 +1,7 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import { getSession, signOut } from 'next-auth/react';
+import { getSessionId } from './session-id';
+import { reportApiError } from './error-reporter';
 import {
   RouteSearchRequest,
   RouteSearchResponse,
@@ -91,6 +93,12 @@ class APIClient {
       // Add request ID for debugging
       config.headers['X-Request-ID'] = Math.random().toString(36).substr(2, 9);
 
+      // Add session ID for error correlation
+      const sessionId = getSessionId();
+      if (sessionId) {
+        config.headers['X-Session-ID'] = sessionId;
+      }
+
       // Add auth token if available
       const token = await this.getValidToken();
       if (token) {
@@ -109,7 +117,20 @@ class APIClient {
           status: error.response?.status,
           data: error.response?.data,
         });
-        
+
+        // Report API errors to backend (except 401 which is expected for expired sessions)
+        if (error.response?.status !== 401) {
+          const errorToReport = new Error(
+            error.response?.data?.detail || error.message || 'Unknown API error'
+          );
+          errorToReport.stack = error.stack;
+          reportApiError(errorToReport, {
+            url: error.config?.url,
+            method: error.config?.method?.toUpperCase(),
+            status: error.response?.status,
+          });
+        }
+
         // Transform error for better UX
         if (error.response?.status === 400) {
           throw new Error(error.response.data?.detail || 'Dados inválidos');

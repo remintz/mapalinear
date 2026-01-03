@@ -31,6 +31,7 @@ class ApiCallLogRepository(BaseRepository[ApiCallLog]):
         cache_hit: bool = False,
         result_count: Optional[int] = None,
         error_message: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> ApiCallLog:
         """
         Create a new API call log entry.
@@ -47,6 +48,7 @@ class ApiCallLogRepository(BaseRepository[ApiCallLog]):
             cache_hit: Whether this was a cache hit
             result_count: Number of results returned
             error_message: Error message if any
+            session_id: Frontend session ID for correlation
 
         Returns:
             Created ApiCallLog instance
@@ -63,6 +65,7 @@ class ApiCallLogRepository(BaseRepository[ApiCallLog]):
             cache_hit=cache_hit,
             result_count=result_count,
             error_message=error_message,
+            session_id=session_id,
         )
         return await self.create(log)
 
@@ -281,6 +284,29 @@ class ApiCallLogRepository(BaseRepository[ApiCallLog]):
             .where(ApiCallLog.created_at >= start_date)
             .where(ApiCallLog.response_status >= 400)
             .order_by(ApiCallLog.created_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def get_by_session_id(
+        self,
+        session_id: str,
+        limit: int = 100,
+    ) -> List[ApiCallLog]:
+        """
+        Get all API calls for a specific frontend session.
+
+        Args:
+            session_id: Frontend session UUID
+            limit: Maximum number of records to return
+
+        Returns:
+            List of ApiCallLog instances
+        """
+        result = await self.session.execute(
+            select(ApiCallLog)
+            .where(ApiCallLog.session_id == session_id)
+            .order_by(ApiCallLog.created_at.asc())
             .limit(limit)
         )
         return list(result.scalars().all())

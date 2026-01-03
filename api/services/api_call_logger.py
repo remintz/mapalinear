@@ -63,6 +63,7 @@ class ApiCallContext:
     http_method: str = "GET"
     request_params: Optional[Dict[str, Any]] = None
     start_time: float = 0.0
+    session_id: Optional[str] = None  # Frontend session correlation
 
     # Results to be filled after the call
     response_status: int = 0
@@ -113,6 +114,7 @@ class ApiCallLogger:
         endpoint: str,
         http_method: str = "GET",
         request_params: Optional[Dict[str, Any]] = None,
+        session_id: Optional[str] = None,
     ):
         """
         Context manager for tracking an API call.
@@ -123,6 +125,7 @@ class ApiCallLogger:
             endpoint: API endpoint URL
             http_method: HTTP method (GET, POST, etc.)
             request_params: Request parameters (will be sanitized)
+            session_id: Frontend session ID for correlation
 
         Yields:
             ApiCallContext to fill with response details
@@ -134,6 +137,7 @@ class ApiCallLogger:
             http_method=http_method,
             request_params=sanitize_params(request_params),
             start_time=time.time(),
+            session_id=session_id,
         )
 
         try:
@@ -221,6 +225,7 @@ class ApiCallLogger:
                                 cache_hit=ctx.cache_hit,
                                 result_count=ctx.result_count,
                                 error_message=ctx.error_message,
+                                session_id=ctx.session_id,
                             )
                         await session.commit()
                     except Exception:
@@ -247,6 +252,7 @@ class ApiCallLogger:
         cache_hit: bool = False,
         result_count: Optional[int] = None,
         error_message: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> None:
         """
         Log an API call directly (alternative to context manager).
@@ -263,6 +269,7 @@ class ApiCallLogger:
             cache_hit: Whether it was a cache hit
             result_count: Number of results
             error_message: Error message if any
+            session_id: Frontend session ID for correlation
         """
         ctx = ApiCallContext(
             provider=provider,
@@ -275,6 +282,7 @@ class ApiCallLogger:
             cache_hit=cache_hit,
             result_count=result_count,
             error_message=error_message,
+            session_id=session_id,
         )
         await self._queue_log(ctx, duration_ms)
 
@@ -284,6 +292,7 @@ class ApiCallLogger:
         operation: str,
         request_params: Optional[Dict[str, Any]] = None,
         result_count: Optional[int] = None,
+        session_id: Optional[str] = None,
     ) -> None:
         """
         Log a cache hit (no actual API call made).
@@ -293,6 +302,7 @@ class ApiCallLogger:
             operation: Operation type
             request_params: Request parameters
             result_count: Number of cached results
+            session_id: Frontend session ID for correlation
         """
         await self.log_call(
             provider=provider,
@@ -304,6 +314,7 @@ class ApiCallLogger:
             request_params=request_params,
             cache_hit=True,
             result_count=result_count,
+            session_id=session_id,
         )
 
     async def flush(self) -> None:
@@ -337,6 +348,7 @@ async def log_osm_call(
     response_size_bytes: Optional[int] = None,
     result_count: Optional[int] = None,
     error_message: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> None:
     """Log an OSM API call."""
     await api_call_logger.log_call(
@@ -351,6 +363,7 @@ async def log_osm_call(
         cache_hit=False,
         result_count=result_count,
         error_message=error_message,
+        session_id=session_id,
     )
 
 
@@ -364,6 +377,7 @@ async def log_here_call(
     response_size_bytes: Optional[int] = None,
     result_count: Optional[int] = None,
     error_message: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> None:
     """Log a HERE API call."""
     await api_call_logger.log_call(
@@ -378,6 +392,7 @@ async def log_here_call(
         cache_hit=False,
         result_count=result_count,
         error_message=error_message,
+        session_id=session_id,
     )
 
 
@@ -391,6 +406,7 @@ async def log_google_places_call(
     response_size_bytes: Optional[int] = None,
     result_count: Optional[int] = None,
     error_message: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> None:
     """Log a Google Places API call."""
     await api_call_logger.log_call(
@@ -405,4 +421,5 @@ async def log_google_places_call(
         cache_hit=False,
         result_count=result_count,
         error_message=error_message,
+        session_id=session_id,
     )

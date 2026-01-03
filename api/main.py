@@ -6,7 +6,7 @@ import logging
 import time
 
 from api.middleware.error_handler import error_handler_middleware, setup_error_handlers
-from api.middleware.request_id import RequestIDMiddleware, set_request_id, get_request_id
+from api.middleware.request_id import RequestIDMiddleware, set_request_id, get_request_id, set_session_id, clear_session_id
 
 # Configurar logger
 logger = logging.getLogger("api.main")
@@ -61,6 +61,11 @@ async def log_requests(request: Request, call_next):
     # Set request ID for this request (used by logging filter)
     req_id = set_request_id()
 
+    # Capture session ID from frontend header (for log correlation)
+    session_id = request.headers.get("X-Session-ID")
+    if session_id:
+        set_session_id(session_id)
+
     start_time = time.time()
     path = request.url.path
     method = request.method
@@ -95,6 +100,9 @@ async def log_requests(request: Request, call_next):
         process_time = time.time() - start_time
         logger.error(f"💥 ERRO: {method} {path} - Exceção: {str(e)} - Tempo: {process_time:.4f}s")
         raise
+    finally:
+        # Clear session ID after request completes
+        clear_session_id()
 
 # Configuração de CORS
 # Nota: allow_credentials não é usado pois a autenticação é via Bearer token (JWT)
@@ -115,7 +123,7 @@ app.middleware("http")(error_handler_middleware)
 setup_error_handlers(app)
 
 # Import only required routers
-from api.routers import operations_router, export, maps_router, api_logs_router, auth_router, admin_router, settings_router, municipalities_router, problem_types_router, problem_reports_router, poi_debug_router, admin_pois_router
+from api.routers import operations_router, export, maps_router, api_logs_router, auth_router, admin_router, settings_router, municipalities_router, problem_types_router, problem_reports_router, poi_debug_router, admin_pois_router, frontend_errors_router, session_activity_router
 
 # Include only required routers
 app.include_router(auth_router.router, tags=["Auth"])
@@ -130,6 +138,8 @@ app.include_router(problem_types_router.router, tags=["Problem Types"])
 app.include_router(problem_reports_router.router, tags=["Problem Reports"])
 app.include_router(poi_debug_router.router, tags=["POI Debug"])
 app.include_router(admin_pois_router.router, tags=["Admin POIs"])
+app.include_router(frontend_errors_router.router, tags=["Frontend Errors"])
+app.include_router(session_activity_router.router, tags=["Session Activity"])
 
 @app.get("/")
 async def root():

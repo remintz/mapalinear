@@ -5,6 +5,7 @@ import { Navigation } from "@/components/layout/Navigation";
 import { ImpersonationBanner } from "@/components/layout/ImpersonationBanner";
 import { QueryProvider } from "@/components/providers/QueryProvider";
 import { AuthProvider } from "@/components/providers/AuthProvider";
+import { ErrorReporterProvider } from "@/components/providers/ErrorReporterProvider";
 import { Toaster } from "sonner";
 
 const geistSans = Geist({
@@ -33,16 +34,18 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-50`}
       >
         <AuthProvider>
-          <QueryProvider>
-            <div className="min-h-screen flex flex-col">
-              <ImpersonationBanner />
-              <Navigation />
-              <main className="flex-1">
-                {children}
-              </main>
-            </div>
-            <Toaster richColors position="top-right" />
-          </QueryProvider>
+          <ErrorReporterProvider>
+            <QueryProvider>
+              <div className="min-h-screen flex flex-col">
+                <ImpersonationBanner />
+                <Navigation />
+                <main className="flex-1">
+                  {children}
+                </main>
+              </div>
+              <Toaster richColors position="top-right" />
+            </QueryProvider>
+          </ErrorReporterProvider>
         </AuthProvider>
       </body>
     </html>

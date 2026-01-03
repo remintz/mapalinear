@@ -60,6 +60,9 @@ class ApiCallLog(Base):
     # Error information (if any)
     error_message: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
 
+    # Frontend session correlation
+    session_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+
     # Timestamp
     created_at: Mapped[datetime] = mapped_column(default=func.now(), index=True)
 
@@ -68,6 +71,7 @@ class ApiCallLog(Base):
         Index("idx_api_call_provider_created", "provider", "created_at"),
         Index("idx_api_call_operation_created", "operation", "created_at"),
         Index("idx_api_call_provider_operation", "provider", "operation"),
+        Index("idx_api_call_session_created", "session_id", "created_at"),
     )
 
     def __repr__(self) -> str:

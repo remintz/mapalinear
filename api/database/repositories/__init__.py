@@ -12,6 +12,7 @@ from api.database.repositories.map_poi import MapPOIRepository
 from api.database.repositories.poi import POIRepository
 from api.database.repositories.user import UserRepository
 from api.database.repositories.system_settings import SystemSettingsRepository
+from api.database.repositories.frontend_error_log import FrontendErrorLogRepository
 
 __all__ = [
     "ApiCallLogRepository",
@@ -25,4 +26,5 @@ __all__ = [
     "GooglePlacesCacheRepository",
     "UserRepository",
     "SystemSettingsRepository",
+    "FrontendErrorLogRepository",
 ]
