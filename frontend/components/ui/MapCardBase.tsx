@@ -33,7 +33,7 @@ export function MapCardBase({ map, children }: MapCardBaseProps) {
       <CardContent className="p-4">
         {/* Route Info */}
         <div className="mb-3">
-          <h3 className="text-base font-semibold text-gray-900 mb-1">
+          <h3 className="text-base font-semibold text-gray-900 mb-1 min-h-[3rem] line-clamp-2">
             {map.origin} → {map.destination}
           </h3>
           <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">

@@ -312,28 +312,6 @@ function SearchPageContent() {
           )}
         </section>
 
-        {/* Quick Help - Only show when not loading and not in form mode */}
-        {!isLoading && !showCreateForm && (
-          <div className="mt-8">
-            <div className="p-4 bg-blue-50 rounded-lg border border-blue-100">
-              <h3 className="text-sm font-semibold text-blue-900 mb-2">Dica rápida</h3>
-              <p className="text-xs text-blue-700">
-                Selecione um mapa existente para economizar tempo. Novos mapas são criados automaticamente
-                quando você escolhe uma rota que ainda não existe.
-              </p>
-            </div>
-
-            {/* Link to saved maps */}
-            <div className="mt-4 text-center">
-              <Link
-                href="/maps"
-                className="text-sm text-gray-600 hover:text-gray-800 underline"
-              >
-                Ver meus mapas salvos
-              </Link>
-            </div>
-          </div>
-        )}
       </main>
 
       {/* OSM Map Modal */}

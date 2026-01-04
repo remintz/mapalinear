@@ -121,31 +121,6 @@ export default function Home() {
           </Card>
         </div>
 
-        {/* Key Features */}
-        <div className="mb-16">
-          <h2 className="text-3xl font-bold text-center mb-10">Recursos Principais</h2>
-          <div className="grid md:grid-cols-1 gap-8 max-w-2xl mx-auto">
-            <Card className="border-blue-200 bg-blue-50">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-blue-900">
-                  <span className="text-2xl">💾</span>
-                  Mapas Salvos
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-blue-800 mb-4">
-                  Todos os mapas criados são automaticamente salvos e podem ser acessados a qualquer momento.
-                </p>
-                <ul className="text-sm text-blue-700 space-y-2">
-                  <li>✓ Salvamento automático</li>
-                  <li>✓ Abertura instantânea</li>
-                  <li>✓ Gerenciamento simplificado</li>
-                </ul>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-
         {/* CTA Section */}
         <Card className="bg-gradient-to-r from-blue-600 to-blue-700 border-0 text-white">
           <CardContent className="py-12 text-center">
