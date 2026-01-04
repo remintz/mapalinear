@@ -8,6 +8,10 @@ import time
 from api.middleware.error_handler import error_handler_middleware, setup_error_handlers
 from api.middleware.request_id import RequestIDMiddleware, set_request_id, get_request_id, set_session_id, clear_session_id, get_user_email, set_user_email
 
+# Setup logging configuration from YAML (must be done before getting loggers)
+from api.config.logging_setup import setup_logging
+setup_logging()
+
 # Configurar logger
 logger = logging.getLogger("api.main")
 
