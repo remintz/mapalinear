@@ -538,3 +538,13 @@ export interface PerformanceStats {
   max_duration_ms: number;
 }
 
+export interface LoginLocation {
+  latitude: number;
+  longitude: number;
+  user_id: string | null;
+  device_type: string | null;
+  created_at: string;
+  user_email: string | null;
+  user_name: string | null;
+}
+

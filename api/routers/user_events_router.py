@@ -133,6 +133,18 @@ class PerformanceStats(BaseModel):
     max_duration_ms: int
 
 
+class LoginLocation(BaseModel):
+    """Login event with location data."""
+
+    latitude: float
+    longitude: float
+    user_id: Optional[str]
+    device_type: Optional[str]
+    created_at: str
+    user_email: Optional[str]
+    user_name: Optional[str]
+
+
 class UserEventResponse(BaseModel):
     """Single user event response."""
 
@@ -335,6 +347,26 @@ async def get_performance_stats(
 
     stats = await repo.get_performance_stats(start_date, end_date)
     return [PerformanceStats(**s) for s in stats]
+
+
+@router.get("/stats/login-locations", response_model=List[LoginLocation])
+async def get_login_locations(
+    days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
+    admin_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get login events with location data.
+
+    Returns login events that have latitude/longitude for map visualization.
+    Requires admin privileges.
+    """
+    repo = UserEventRepository(db)
+    start_date = utcnow() - timedelta(days=days)
+    end_date = utcnow()
+
+    locations = await repo.get_login_locations(start_date, end_date)
+    return [LoginLocation(**loc) for loc in locations]
 
 
 @router.get("/export/csv")

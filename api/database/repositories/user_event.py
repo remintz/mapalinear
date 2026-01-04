@@ -555,6 +555,56 @@ class UserEventRepository(BaseRepository[UserEvent]):
         )
         return result.rowcount
 
+    async def get_login_locations(
+        self,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+    ) -> List[Dict]:
+        """
+        Get login events with location data.
+
+        Args:
+            start_date: Start of date range (default: 30 days ago)
+            end_date: End of date range (default: now)
+
+        Returns:
+            List of dictionaries with login location data
+        """
+        if start_date is None:
+            start_date = utcnow() - timedelta(days=30)
+        if end_date is None:
+            end_date = utcnow()
+
+        result = await self.session.execute(
+            select(
+                UserEvent.latitude,
+                UserEvent.longitude,
+                UserEvent.user_id,
+                UserEvent.device_type,
+                UserEvent.created_at,
+                UserEvent.event_data,
+            )
+            .where(UserEvent.created_at >= start_date)
+            .where(UserEvent.created_at <= end_date)
+            .where(UserEvent.event_type == "login")
+            .where(UserEvent.latitude.isnot(None))
+            .where(UserEvent.longitude.isnot(None))
+            .order_by(UserEvent.created_at.desc())
+        )
+
+        return [
+            {
+                "latitude": row.latitude,
+                "longitude": row.longitude,
+                "user_id": row.user_id,
+                "device_type": row.device_type,
+                "created_at": row.created_at.isoformat(),
+                "user_email": row.event_data.get("user_email") if row.event_data else None,
+                "user_name": row.event_data.get("user_name") if row.event_data else None,
+            }
+            for row in result.all()
+        ]
+
     async def export_to_csv(
         self,
         start_date: Optional[datetime] = None,

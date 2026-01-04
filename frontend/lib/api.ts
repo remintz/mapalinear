@@ -35,6 +35,7 @@ import {
   ConversionFunnelStats,
   DailyActiveUsers,
   PerformanceStats,
+  LoginLocation,
 } from './types';
 
 // Helper to wait for session with retry
@@ -822,6 +823,14 @@ class APIClient {
    */
   async getPerformanceStats(days: number = 30): Promise<PerformanceStats[]> {
     const { data } = await this.client.get<PerformanceStats[]>('/events/stats/performance', { params: { days } });
+    return data;
+  }
+
+  /**
+   * Get login locations for map visualization (admin).
+   */
+  async getLoginLocations(days: number = 30): Promise<LoginLocation[]> {
+    const { data } = await this.client.get<LoginLocation[]>('/events/stats/login-locations', { params: { days } });
     return data;
   }
 

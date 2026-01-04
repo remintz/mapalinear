@@ -211,13 +211,15 @@ export interface UseAnalyticsReturn {
       category?: string;
       pagePath?: string;
       durationMs?: number;
+      latitude?: number;
+      longitude?: number;
     }
   ) => void;
   trackPageView: (pagePath: string, referrer?: string) => void;
   trackPerformance: (eventType: string, durationMs: number, context?: Record<string, unknown>) => void;
   trackMapEvent: (eventType: string, eventData?: Record<string, unknown>) => void;
   trackConversion: (eventType: string, eventData?: Record<string, unknown>) => void;
-  trackAuthEvent: (eventType: string, eventData?: Record<string, unknown>) => void;
+  trackAuthEvent: (eventType: string, eventData?: Record<string, unknown>, location?: { latitude: number; longitude: number }) => void;
   trackPOIFilterToggle: (filterName: string, enabled: boolean) => void;
   trackPOIClick: (poiId: string, poiName: string, poiType: string) => void;
   flush: () => Promise<void>;
@@ -274,6 +276,8 @@ export function useAnalytics(): UseAnalyticsReturn {
         category?: string;
         pagePath?: string;
         durationMs?: number;
+        latitude?: number;
+        longitude?: number;
       }
     ) => {
       const sessionId = getSessionId();
@@ -296,6 +300,8 @@ export function useAnalytics(): UseAnalyticsReturn {
         page_path: options?.pagePath || (typeof window !== 'undefined' ? window.location.pathname : undefined),
         referrer: typeof document !== 'undefined' ? document.referrer : undefined,
         duration_ms: options?.durationMs,
+        latitude: options?.latitude,
+        longitude: options?.longitude,
       };
 
       queueEvent(event);
@@ -373,9 +379,11 @@ export function useAnalytics(): UseAnalyticsReturn {
    * Track an authentication event.
    */
   const trackAuthEvent = useCallback(
-    (eventType: string, eventData?: Record<string, unknown>) => {
+    (eventType: string, eventData?: Record<string, unknown>, location?: { latitude: number; longitude: number }) => {
       trackEvent(eventType, eventData, {
         category: EventCategory.AUTH,
+        latitude: location?.latitude,
+        longitude: location?.longitude,
       });
     },
     [trackEvent]

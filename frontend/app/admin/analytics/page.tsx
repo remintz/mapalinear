@@ -4,6 +4,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import {
   ArrowLeft,
   Loader2,
@@ -21,6 +22,7 @@ import {
   Clock,
   Info,
   X,
+  MapPin,
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiClient } from "@/lib/api";
@@ -33,7 +35,21 @@ import {
   POIFilterUsageStats,
   ConversionFunnelStats,
   PerformanceStats,
+  LoginLocation,
 } from "@/lib/types";
+
+// Dynamic import for Leaflet map (no SSR)
+const LoginLocationsMap = dynamic(
+  () => import("@/components/admin/LoginLocationsMap"),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-[500px] flex items-center justify-center bg-gray-100 rounded-lg">
+        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+      </div>
+    ),
+  }
+);
 
 const DAYS_OPTIONS = [
   { value: 7, label: "7 dias" },
@@ -116,13 +132,14 @@ export default function AdminAnalyticsPage() {
   const [poiFilterStats, setPOIFilterStats] = useState<POIFilterUsageStats[]>([]);
   const [funnelStats, setFunnelStats] = useState<ConversionFunnelStats | null>(null);
   const [performanceStats, setPerformanceStats] = useState<PerformanceStats[]>([]);
+  const [loginLocations, setLoginLocations] = useState<LoginLocation[]>([]);
 
   // UI state
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [days, setDays] = useState(30);
   const [autoRefresh, setAutoRefresh] = useState(false);
-  const [activeTab, setActiveTab] = useState<"overview" | "devices" | "funnel">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "devices" | "funnel" | "locations">("overview");
 
   const fetchData = useCallback(async () => {
     try {
@@ -137,6 +154,7 @@ export default function AdminAnalyticsPage() {
         poiFilterData,
         funnelData,
         performanceData,
+        loginLocationsData,
       ] = await Promise.all([
         apiClient.getEventStatsOverview(days),
         apiClient.getEventTypeStats(days),
@@ -146,6 +164,7 @@ export default function AdminAnalyticsPage() {
         apiClient.getPOIFilterStats(days),
         apiClient.getConversionFunnelStats(days),
         apiClient.getPerformanceStats(days),
+        apiClient.getLoginLocations(days),
       ]);
 
       setOverview(overviewData);
@@ -156,6 +175,7 @@ export default function AdminAnalyticsPage() {
       setPOIFilterStats(poiFilterData);
       setFunnelStats(funnelData);
       setPerformanceStats(performanceData);
+      setLoginLocations(loginLocationsData);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro desconhecido");
     } finally {
@@ -357,6 +377,7 @@ export default function AdminAnalyticsPage() {
               { id: "overview", label: "Visão Geral" },
               { id: "devices", label: "Dispositivos" },
               { id: "funnel", label: "Funil" },
+              { id: "locations", label: "Localização" },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -649,6 +670,70 @@ export default function AdminAnalyticsPage() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {activeTab === "locations" && (
+          <div className="bg-white rounded-lg shadow p-6">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-2">
+                <MapPin className="h-5 w-5 text-blue-600" />
+                <h3 className="text-lg font-semibold">Localização dos Logins</h3>
+              </div>
+              <div className="text-sm text-gray-500">
+                {loginLocations.length} logins com localização
+              </div>
+            </div>
+
+            {loginLocations.length > 0 ? (
+              <>
+                <LoginLocationsMap locations={loginLocations} />
+
+                {/* Legend */}
+                <div className="mt-4 flex items-center gap-6 text-sm text-gray-600">
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded-full bg-green-500"></div>
+                    <span>Mobile</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded-full bg-purple-500"></div>
+                    <span>Tablet</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded-full bg-blue-500"></div>
+                    <span>Desktop</span>
+                  </div>
+                </div>
+
+                {/* Stats summary */}
+                <div className="mt-4 grid grid-cols-3 gap-4 pt-4 border-t">
+                  <div className="text-center">
+                    <p className="text-sm text-gray-600">Total de Logins</p>
+                    <p className="text-xl font-bold">{loginLocations.length}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-sm text-gray-600">Mobile</p>
+                    <p className="text-xl font-bold text-green-600">
+                      {loginLocations.filter(l => l.device_type === 'mobile').length}
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-sm text-gray-600">Desktop</p>
+                    <p className="text-xl font-bold text-blue-600">
+                      {loginLocations.filter(l => l.device_type === 'desktop').length}
+                    </p>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="h-[300px] flex flex-col items-center justify-center text-gray-500">
+                <MapPin className="h-12 w-12 text-gray-300 mb-4" />
+                <p>Nenhum login com localização registrado</p>
+                <p className="text-sm mt-1">
+                  Os logins aparecerão aqui quando os usuários permitirem a localização
+                </p>
+              </div>
+            )}
           </div>
         )}
 
