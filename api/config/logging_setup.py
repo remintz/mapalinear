@@ -2,6 +2,7 @@
 Setup de logging configurável para a API MapaLinear.
 
 Carrega configuração de logs a partir de arquivo YAML.
+Seleciona automaticamente o arquivo de configuração baseado no ambiente.
 """
 import logging
 import logging.config
@@ -10,19 +11,37 @@ from pathlib import Path
 import yaml
 
 
+def _get_logging_config_for_environment() -> Path:
+    """
+    Seleciona o arquivo de configuração de logging baseado no ambiente.
+
+    Returns:
+        Path para o arquivo de configuração YAML apropriado
+    """
+    config_dir = Path(__file__).parent
+    environment = os.environ.get("ENVIRONMENT", "development").lower()
+
+    if environment == "production":
+        config_file = config_dir / "logging_config.production.yaml"
+        if config_file.exists():
+            return config_file
+
+    # Default: desenvolvimento
+    return config_dir / "logging_config.yaml"
+
+
 def setup_logging(config_path: str = None, default_level: int = logging.INFO):
     """
     Configura o sistema de logging a partir de arquivo YAML.
 
     Args:
         config_path: Caminho para o arquivo de configuração YAML.
-                     Se None, usa o arquivo padrão em api/config/logging_config.yaml
+                     Se None, seleciona automaticamente baseado no ENVIRONMENT
         default_level: Nível de logging padrão caso não consiga carregar a configuração
     """
     if config_path is None:
-        # Usar arquivo de configuração padrão
-        config_dir = Path(__file__).parent
-        config_path = config_dir / "logging_config.yaml"
+        # Selecionar arquivo baseado no ambiente
+        config_path = _get_logging_config_for_environment()
 
     config_path = Path(config_path)
 

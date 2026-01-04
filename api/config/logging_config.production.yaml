@@ -1,46 +1,57 @@
-# Configuração de Logging para Produção
-# Nível mais alto, menos verboso, foco em erros
+# Configuração de Logging para Produção - MapaLinear API
+# Logs vão para console (stdout) e banco de dados
+# Sem arquivos de log em disco
 
 version: 1
 disable_existing_loggers: false
 
+# Formatadores
 formatters:
   default:
-    format: "%(asctime)s - [%(request_id)s/%(session_id)s] - %(name)s - %(levelname)s - %(message)s"
+    format: "%(asctime)s - [%(request_id)s/%(session_id)s] - %(levelname)s - %(name)s - %(message)s"
     datefmt: "%Y-%m-%d %H:%M:%S"
 
+  simple:
+    format: "[%(request_id)s/%(session_id)s] - %(levelname)s - %(message)s"
+
+# Destinos dos logs (apenas console - banco de dados é configurado separadamente)
 handlers:
   console:
     class: logging.StreamHandler
-    level: WARNING
+    level: DEBUG
     formatter: default
     stream: ext://sys.stdout
 
-  file:
-    class: logging.handlers.RotatingFileHandler
-    level: INFO
-    formatter: default
-    filename: logs/app.log
-    maxBytes: 52428800  # 50MB
-    backupCount: 10
-    encoding: utf8
-
+# Configuração por módulo
 loggers:
+  # Aplicação
   api:
-    level: INFO
-    handlers: [console, file]
+    level: DEBUG
+    handlers: [console]
     propagate: false
 
+  # Bibliotecas externas
   uvicorn:
-    level: WARNING
+    level: INFO
     handlers: [console]
     propagate: false
 
   uvicorn.access:
-    level: ERROR
+    level: WARNING
     handlers: []
     propagate: false
 
+  httpx:
+    level: WARNING
+    handlers: []
+    propagate: false
+
+  httpcore:
+    level: WARNING
+    handlers: []
+    propagate: false
+
+# Root logger
 root:
-  level: WARNING
-  handlers: [console, file]
+  level: INFO
+  handlers: [console]

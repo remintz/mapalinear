@@ -5,19 +5,33 @@ This module centralizes all configuration for geographic data providers,
 using Pydantic Settings for validation and type safety.
 """
 
+from enum import Enum
 from pydantic import Field
 from pydantic_settings import BaseSettings
 from typing import Optional, Dict, Any
 
 
+class Environment(str, Enum):
+    """Application environment."""
+    DEVELOPMENT = "development"
+    PRODUCTION = "production"
+
+
 class ProviderSettings(BaseSettings):
     """
     Settings for geographic data providers.
-    
+
     Uses Pydantic Settings to load and validate configuration from
     environment variables with proper type checking and defaults.
     """
-    
+
+    # Environment configuration
+    environment: Environment = Field(
+        default=Environment.DEVELOPMENT,
+        alias="ENVIRONMENT",
+        description="Application environment (development or production)"
+    )
+
     # Primary provider configuration (legacy - kept for backwards compatibility)
     geo_primary_provider: str = Field(
         default="osm",
@@ -259,7 +273,15 @@ class ProviderSettings(BaseSettings):
         if self.geo_primary_provider.lower() == "here":
             return self.here_api_key is not None
         return True
-    
+
+    def is_production(self) -> bool:
+        """Check if running in production environment."""
+        return self.environment == Environment.PRODUCTION
+
+    def is_development(self) -> bool:
+        """Check if running in development environment."""
+        return self.environment == Environment.DEVELOPMENT
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert settings to dictionary."""
         return self.dict()
