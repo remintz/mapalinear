@@ -762,6 +762,58 @@ async def run_maintenance(
     )
 
 
+# Log cleanup models
+class LogCleanupResultResponse(BaseModel):
+    """Result of log cleanup operation."""
+
+    retention_days: int = Field(..., description="Configured retention period in days")
+    cutoff_date: str = Field(..., description="Logs before this date were deleted")
+    application_logs_deleted: int = Field(..., description="Application logs deleted")
+    api_logs_deleted: int = Field(..., description="API call logs deleted")
+    frontend_logs_deleted: int = Field(..., description="Frontend error logs deleted")
+    total_deleted: int = Field(..., description="Total logs deleted")
+
+
+@router.post("/maintenance/cleanup-logs", response_model=LogCleanupResultResponse)
+async def cleanup_logs(
+    admin_user: User = Depends(get_current_admin),
+) -> LogCleanupResultResponse:
+    """
+    Manually run log cleanup.
+
+    Deletes logs older than the configured retention period.
+    This is the same cleanup that runs automatically every 24 hours.
+
+    Requires admin privileges.
+
+    Args:
+        admin_user: Current admin user (injected)
+
+    Returns:
+        Cleanup statistics
+    """
+    from api.services.log_cleanup_service import get_log_cleanup_service
+
+    logger.info(f"Admin {admin_user.email} initiated manual log cleanup")
+
+    service = get_log_cleanup_service()
+    result = await service.run_manual_cleanup()
+
+    logger.info(
+        f"Manual log cleanup completed: {result['total_deleted']} logs deleted "
+        f"(retention: {result['retention_days']} days)"
+    )
+
+    return LogCleanupResultResponse(
+        retention_days=result["retention_days"],
+        cutoff_date=result["cutoff_date"],
+        application_logs_deleted=result["application_logs_deleted"],
+        api_logs_deleted=result["api_logs_deleted"],
+        frontend_logs_deleted=result["frontend_logs_deleted"],
+        total_deleted=result["total_deleted"],
+    )
+
+
 # Async Operations Admin models
 class OperationUserResponse(BaseModel):
     """User info for operation responses."""

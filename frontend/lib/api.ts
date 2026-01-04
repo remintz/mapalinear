@@ -543,6 +543,14 @@ class APIClient {
     return data;
   }
 
+  /**
+   * Run manual log cleanup.
+   */
+  async runLogCleanup(): Promise<LogCleanupResult> {
+    const { data } = await this.client.post<LogCleanupResult>('/admin/maintenance/cleanup-logs');
+    return data;
+  }
+
   // Admin Maps functions
 
   /**
@@ -828,6 +836,7 @@ export interface SystemSettings {
   poi_search_radius_km: string;
   duplicate_map_tolerance_km: string;
   poi_debug_enabled?: string;
+  log_retention_days?: string;
 }
 
 // Types for database maintenance
@@ -848,6 +857,15 @@ export interface MaintenanceResult {
   stale_operations_cleaned: number;
   execution_time_ms: number;
   dry_run: boolean;
+}
+
+export interface LogCleanupResult {
+  retention_days: number;
+  cutoff_date: string;
+  application_logs_deleted: number;
+  api_logs_deleted: number;
+  frontend_logs_deleted: number;
+  total_deleted: number;
 }
 
 // Types for debug segments

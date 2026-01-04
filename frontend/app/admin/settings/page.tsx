@@ -17,6 +17,7 @@ import {
   CheckCircle,
   RefreshCw,
   Bug,
+  Clock,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -24,6 +25,7 @@ import {
   SystemSettings,
   DatabaseStats,
   MaintenanceResult,
+  LogCleanupResult,
 } from "@/lib/api";
 
 export default function AdminSettingsPage() {
@@ -33,6 +35,7 @@ export default function AdminSettingsPage() {
     poi_search_radius_km: "5",
     duplicate_map_tolerance_km: "10",
     poi_debug_enabled: "true",
+    log_retention_days: "7",
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -43,6 +46,10 @@ export default function AdminSettingsPage() {
   const [loadingStats, setLoadingStats] = useState(false);
   const [runningMaintenance, setRunningMaintenance] = useState(false);
   const [lastMaintenanceResult, setLastMaintenanceResult] = useState<MaintenanceResult | null>(null);
+
+  // Log cleanup state
+  const [runningLogCleanup, setRunningLogCleanup] = useState(false);
+  const [lastLogCleanupResult, setLastLogCleanupResult] = useState<LogCleanupResult | null>(null);
 
   const fetchSettings = useCallback(async () => {
     try {
@@ -109,6 +116,15 @@ export default function AdminSettingsPage() {
     }));
   };
 
+  const handleRetentionChange = (value: string) => {
+    // Allow only numbers
+    const numericValue = value.replace(/[^0-9]/g, "");
+    setSettings((prev) => ({
+      ...prev,
+      log_retention_days: numericValue,
+    }));
+  };
+
   const fetchDatabaseStats = useCallback(async () => {
     try {
       setLoadingStats(true);
@@ -144,6 +160,24 @@ export default function AdminSettingsPage() {
       toast.error(err instanceof Error ? err.message : "Erro na manutenção");
     } finally {
       setRunningMaintenance(false);
+    }
+  };
+
+  const runLogCleanup = async () => {
+    try {
+      setRunningLogCleanup(true);
+      setLastLogCleanupResult(null);
+
+      const result = await apiClient.runLogCleanup();
+      setLastLogCleanupResult(result);
+
+      toast.success(
+        `Limpeza concluída: ${result.total_deleted} logs removidos`
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro na limpeza de logs");
+    } finally {
+      setRunningLogCleanup(false);
     }
   };
 
@@ -315,6 +349,102 @@ export default function AdminSettingsPage() {
                   <span className="text-amber-600">Debug habilitado - dados serão coletados ao gerar novos mapas</span>
                 ) : (
                   <span>Debug desabilitado - nenhum dado de debug será coletado</span>
+                )}
+              </div>
+            </div>
+
+            {/* Log Retention Period */}
+            <div className="space-y-3 pt-4 border-t border-gray-200">
+              <label className="block">
+                <span className="flex items-center gap-2 text-sm font-medium text-gray-900">
+                  <Clock className="w-4 h-4 text-purple-600" />
+                  Período de retenção de logs
+                </span>
+                <span className="text-sm text-gray-500 mt-1 block">
+                  Define por quantos dias os logs são mantidos no banco de dados.
+                  Logs mais antigos são automaticamente removidos a cada 24 horas.
+                  Afeta logs de aplicação, chamadas de API e erros do frontend.
+                </span>
+              </label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min="1"
+                  max="90"
+                  step="1"
+                  value={settings.log_retention_days || "7"}
+                  onChange={(e) => handleRetentionChange(e.target.value)}
+                  className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-purple-600"
+                />
+                <div className="flex items-center gap-1 min-w-[100px]">
+                  <input
+                    type="number"
+                    min="1"
+                    max="365"
+                    value={settings.log_retention_days || "7"}
+                    onChange={(e) => handleRetentionChange(e.target.value)}
+                    className="w-16 px-2 py-1 text-center border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                  />
+                  <span className="text-sm text-gray-600">dias</span>
+                </div>
+              </div>
+              <div className="flex justify-between text-xs text-gray-400">
+                <span>1 dia</span>
+                <span>90 dias</span>
+              </div>
+              <div className="text-xs text-gray-500">
+                Valores acima de 90 podem ser digitados manualmente (máximo: 365 dias)
+              </div>
+
+              {/* Manual Log Cleanup */}
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-sm font-medium text-gray-700">
+                      Limpeza manual de logs
+                    </span>
+                    <p className="text-xs text-gray-500 mt-1">
+                      A limpeza automática executa a cada 24h. Use este botão para executar imediatamente.
+                    </p>
+                  </div>
+                  <button
+                    onClick={runLogCleanup}
+                    disabled={runningLogCleanup || saving}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
+                  >
+                    {runningLogCleanup ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Limpando...
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="w-4 h-4" />
+                        Limpar Agora
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Log Cleanup Result */}
+                {lastLogCleanupResult && (
+                  <div className="mt-3 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                    <div className="flex items-center gap-2 mb-2">
+                      <CheckCircle className="w-4 h-4 text-purple-600" />
+                      <span className="font-medium text-purple-700">
+                        Limpeza Concluída
+                      </span>
+                    </div>
+                    <div className="text-sm text-purple-600 space-y-1">
+                      <p>Período de retenção: {lastLogCleanupResult.retention_days} dias</p>
+                      <p>Logs de aplicação: {lastLogCleanupResult.application_logs_deleted} removidos</p>
+                      <p>Logs de API: {lastLogCleanupResult.api_logs_deleted} removidos</p>
+                      <p>Erros do frontend: {lastLogCleanupResult.frontend_logs_deleted} removidos</p>
+                      <p className="font-medium pt-1 border-t border-purple-200">
+                        Total: {lastLogCleanupResult.total_deleted} logs removidos
+                      </p>
+                    </div>
+                  </div>
                 )}
               </div>
             </div>

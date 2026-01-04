@@ -51,10 +51,23 @@ async def lifespan(app: FastAPI):
     from api.config.logging_setup import setup_database_logging
     setup_database_logging()
 
+    # Start the periodic log cleanup service
+    from api.services.log_cleanup_service import get_log_cleanup_service
+    log_cleanup_service = get_log_cleanup_service()
+    await log_cleanup_service.start()
+    logger.info("🧹 Serviço de limpeza de logs iniciado (execução a cada 24h)")
+
     yield
 
     # Shutdown
     logger.info("👋 Encerrando servidor...")
+
+    # Stop the log cleanup service
+    try:
+        await log_cleanup_service.stop()
+        logger.info("🧹 Serviço de limpeza de logs encerrado")
+    except Exception as e:
+        logger.warning(f"⚠️ Erro ao encerrar serviço de limpeza de logs: {e}")
 
     # Flush remaining logs to database before shutdown
     try:

@@ -54,6 +54,10 @@ DEFAULT_SETTINGS = {
     "required_tags_by_poi_type": {
         "value": json.dumps(DEFAULT_REQUIRED_TAGS),
         "description": "Tags OSM obrigatórias por tipo de POI (JSON)"
+    },
+    "log_retention_days": {
+        "value": "7",
+        "description": "Dias para manter logs no banco de dados (1-365)"
     }
 }
 

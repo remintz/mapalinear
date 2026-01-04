@@ -292,6 +292,20 @@ async def update_setting(
                 detail="O valor deve ser 'true' ou 'false'"
             )
 
+    if key == "log_retention_days":
+        try:
+            days = int(request.value)
+            if days < 1 or days > 365:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="O período de retenção deve estar entre 1 e 365 dias"
+                )
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="O período de retenção deve ser um número inteiro"
+            )
+
     setting = await repo.set(
         key=key,
         value=request.value,
@@ -364,6 +378,20 @@ async def update_settings(
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="O valor deve ser 'true' ou 'false'"
+                )
+
+        if key == "log_retention_days":
+            try:
+                days = int(value)
+                if days < 1 or days > 365:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="O período de retenção deve estar entre 1 e 365 dias"
+                    )
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="O período de retenção deve ser um número inteiro"
                 )
 
         await repo.set(key=key, value=value, updated_by=admin_user.email)
