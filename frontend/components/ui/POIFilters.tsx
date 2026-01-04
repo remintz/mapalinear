@@ -1,4 +1,5 @@
 import React from 'react';
+import { useAnalytics } from '@/hooks/useAnalytics';
 
 interface FilterOption {
   id: string;
@@ -14,6 +15,15 @@ interface POIFiltersProps {
 }
 
 export function POIFilters({ filters, activeFilters, onFilterToggle }: POIFiltersProps) {
+  const { trackPOIFilterToggle } = useAnalytics();
+
+  // Wrapper to track filter toggles
+  const handleFilterToggle = (filterId: string) => {
+    const willBeEnabled = !activeFilters.has(filterId);
+    trackPOIFilterToggle(filterId, willBeEnabled);
+    onFilterToggle(filterId);
+  };
+
   // Calculate total POIs from active filters
   const totalActivePOIs = filters
     .filter(f => activeFilters.has(f.id))
@@ -29,7 +39,7 @@ export function POIFilters({ filters, activeFilters, onFilterToggle }: POIFilter
         {/* Clear filters button - only show when filters are active */}
         {activeFilters.size > 0 && (
           <button
-            onClick={() => filters.forEach(f => activeFilters.has(f.id) && onFilterToggle(f.id))}
+            onClick={() => filters.forEach(f => activeFilters.has(f.id) && handleFilterToggle(f.id))}
             className="inline-flex items-center justify-center h-8 px-3 rounded-full lg:rounded-lg lg:w-full lg:justify-start text-xs font-medium bg-zinc-100 text-zinc-600 hover:bg-zinc-200 border border-zinc-200 transition-colors"
           >
             Limpar ({activeFilters.size})
@@ -44,7 +54,7 @@ export function POIFilters({ filters, activeFilters, onFilterToggle }: POIFilter
           return (
             <button
               key={filter.id}
-              onClick={() => onFilterToggle(filter.id)}
+              onClick={() => handleFilterToggle(filter.id)}
               className={`
                 inline-flex items-center gap-1.5 h-8 px-3 rounded-full lg:rounded-lg lg:w-full lg:justify-between text-sm font-medium border transition-all duration-200
                 ${isActive

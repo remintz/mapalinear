@@ -3,9 +3,11 @@
 import { signIn, signOut, useSession } from "next-auth/react";
 import { LogIn, LogOut, User, Loader2 } from "lucide-react";
 import Image from "next/image";
+import { useAnalytics } from "@/hooks/useAnalytics";
 
 export function LoginButton() {
   const { data: session, status } = useSession();
+  const { trackAuthEvent } = useAnalytics();
 
   if (status === "loading") {
     return (
@@ -39,6 +41,8 @@ export function LoginButton() {
         </div>
         <button
           onClick={() => {
+            // Track logout event
+            trackAuthEvent('logout', { user_id: session.user.id });
             // Clear admin simulation mode on logout
             sessionStorage.removeItem('mapalinear_simulate_user');
             signOut();
@@ -55,7 +59,10 @@ export function LoginButton() {
 
   return (
     <button
-      onClick={() => signIn("google")}
+      onClick={() => {
+        trackAuthEvent('login', { provider: 'google' });
+        signIn("google");
+      }}
       className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
     >
       <LogIn className="w-4 h-4" />

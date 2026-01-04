@@ -18,6 +18,8 @@ from api.database.models.report_attachment import ReportAttachment
 from api.database.models.problem_report import ProblemReport
 from api.database.models.poi_debug_data import POIDebugData
 from api.database.models.frontend_error_log import FrontendErrorLog
+from api.database.models.user_event import UserEvent
+from api.database.models.event_types import EventCategory, EventType, EVENT_TYPE_TO_CATEGORY, get_category_for_event_type
 
 __all__ = [
     "ApiCallLog",
@@ -37,4 +39,9 @@ __all__ = [
     "ProblemReport",
     "POIDebugData",
     "FrontendErrorLog",
+    "UserEvent",
+    "EventCategory",
+    "EventType",
+    "EVENT_TYPE_TO_CATEGORY",
+    "get_category_for_event_type",
 ]

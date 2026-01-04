@@ -14,6 +14,7 @@ import { apiClient } from '@/lib/api';
 import { useRouteSimulation } from '@/hooks/useRouteSimulation';
 import { useRouteTracking } from '@/hooks/useRouteTracking';
 import { useGeolocation } from '@/hooks/useGeolocation';
+import { useAnalytics } from '@/hooks/useAnalytics';
 import { RouteSegment, Milestone } from '@/lib/types';
 import { ReportProblemButton } from '@/components/reports/ReportProblemButton';
 import RouteMapModal from '@/components/RouteMapModal';
@@ -34,6 +35,7 @@ function MapPageContent() {
   const router = useRouter();
   const { data: session } = useSession();
   const isActualAdmin = session?.user?.isAdmin ?? false;
+  const { trackMapEvent, trackPageView } = useAnalytics();
 
   // State for simulating regular user (set via Admin page)
   const [isSimulatingUser, setIsSimulatingUser] = useState(false);
@@ -88,6 +90,15 @@ function MapPageContent() {
 
           setData(routeData);
           setIsLoading(false);
+
+          // Track map view
+          trackPageView('/map');
+          trackMapEvent('linear_map_view', {
+            map_id: mapId,
+            origin: savedMap.origin,
+            destination: savedMap.destination,
+            total_distance_km: savedMap.total_length_km || 0,
+          });
         } catch (error) {
           console.error('Error loading saved map:', error);
           setError('Erro ao carregar mapa salvo');
@@ -98,7 +109,7 @@ function MapPageContent() {
 
       loadSavedMap();
     }
-  }, [mapId]);
+  }, [mapId, trackPageView, trackMapEvent]);
 
   // Monitor async operation if operationId is provided
   useEffect(() => {
@@ -320,6 +331,12 @@ function MapPageContent() {
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
+
+      // Track export
+      trackMapEvent(format === 'geojson' ? 'map_export_geojson' : 'map_export_gpx', {
+        map_id: mapId,
+        format,
+      });
     } catch (error) {
       // apiClient handles 401 automatically and redirects to login
       console.error('Erro ao exportar:', error);
@@ -353,6 +370,9 @@ function MapPageContent() {
       a.click();
       window.URL.revokeObjectURL(blobUrl);
       document.body.removeChild(a);
+
+      // Track PDF export
+      trackMapEvent('map_export_pdf', { map_id: mapId });
     } catch (error) {
       // apiClient handles 401 automatically and redirects to login
       console.error('Erro ao exportar PDF:', error);

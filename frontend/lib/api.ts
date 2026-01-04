@@ -17,7 +17,6 @@ import {
   POIDebugListResponse,
   POIDebugData,
   POIDebugSummary,
-  AdminPOI,
   AdminPOIDetail,
   AdminPOIListResponse,
   AdminPOIFilters,
@@ -28,6 +27,14 @@ import {
   ApplicationLogsResponse,
   ApplicationLogStats,
   LogTimeWindow,
+  UserEventStatsOverview,
+  EventTypeStats,
+  FeatureUsageStats,
+  DeviceStats,
+  POIFilterUsageStats,
+  ConversionFunnelStats,
+  DailyActiveUsers,
+  PerformanceStats,
 } from './types';
 
 // Helper to wait for session with retry
@@ -751,6 +758,94 @@ class APIClient {
     const { data } = await this.client.get<DebugSegmentsData>('/operations/debug/segments');
     return data;
   }
+
+  // User Event Analytics
+
+  /**
+   * Get user event analytics overview stats (admin).
+   */
+  async getEventStatsOverview(days: number = 30): Promise<UserEventStatsOverview> {
+    const { data } = await this.client.get<UserEventStatsOverview>('/events/stats', { params: { days } });
+    return data;
+  }
+
+  /**
+   * Get event type statistics (admin).
+   */
+  async getEventTypeStats(days: number = 30): Promise<EventTypeStats[]> {
+    const { data } = await this.client.get<EventTypeStats[]>('/events/stats/events', { params: { days } });
+    return data;
+  }
+
+  /**
+   * Get feature usage statistics (admin).
+   */
+  async getFeatureUsageStats(days: number = 30): Promise<FeatureUsageStats[]> {
+    const { data } = await this.client.get<FeatureUsageStats[]>('/events/stats/features', { params: { days } });
+    return data;
+  }
+
+  /**
+   * Get device statistics (admin).
+   */
+  async getDeviceStats(days: number = 30): Promise<DeviceStats[]> {
+    const { data } = await this.client.get<DeviceStats[]>('/events/stats/devices', { params: { days } });
+    return data;
+  }
+
+  /**
+   * Get POI filter usage statistics (admin).
+   */
+  async getPOIFilterStats(days: number = 30): Promise<POIFilterUsageStats[]> {
+    const { data } = await this.client.get<POIFilterUsageStats[]>('/events/stats/poi-filters', { params: { days } });
+    return data;
+  }
+
+  /**
+   * Get conversion funnel statistics (admin).
+   */
+  async getConversionFunnelStats(days: number = 30): Promise<ConversionFunnelStats> {
+    const { data } = await this.client.get<ConversionFunnelStats>('/events/stats/funnel', { params: { days } });
+    return data;
+  }
+
+  /**
+   * Get daily active users statistics (admin).
+   */
+  async getDailyActiveUsers(days: number = 30): Promise<DailyActiveUsers[]> {
+    const { data } = await this.client.get<DailyActiveUsers[]>('/events/stats/daily', { params: { days } });
+    return data;
+  }
+
+  /**
+   * Get performance statistics (admin).
+   */
+  async getPerformanceStats(days: number = 30): Promise<PerformanceStats[]> {
+    const { data } = await this.client.get<PerformanceStats[]>('/events/stats/performance', { params: { days } });
+    return data;
+  }
+
+  /**
+   * Export user events to CSV (admin).
+   */
+  async exportEventsCsv(days: number = 30): Promise<Blob> {
+    const response = await this.client.get('/events/export/csv', {
+      params: { days },
+      responseType: 'blob',
+    });
+    return response.data;
+  }
+
+  /**
+   * Cleanup old user events (admin).
+   */
+  async cleanupUserEvents(daysToKeep: number = 365): Promise<{ message: string; deleted_count: number }> {
+    const { data } = await this.client.delete<{ message: string; deleted_count: number }>(
+      '/events/cleanup',
+      { params: { days_to_keep: daysToKeep } }
+    );
+    return data;
+  }
 }
 
 // Types for saved maps
@@ -837,6 +932,7 @@ export interface SystemSettings {
   duplicate_map_tolerance_km: string;
   poi_debug_enabled?: string;
   log_retention_days?: string;
+  analytics_retention_days?: string;
 }
 
 // Types for database maintenance

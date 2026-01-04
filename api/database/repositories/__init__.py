@@ -13,6 +13,7 @@ from api.database.repositories.poi import POIRepository
 from api.database.repositories.user import UserRepository
 from api.database.repositories.system_settings import SystemSettingsRepository
 from api.database.repositories.frontend_error_log import FrontendErrorLogRepository
+from api.database.repositories.user_event import UserEventRepository
 
 __all__ = [
     "ApiCallLogRepository",
@@ -27,4 +28,5 @@ __all__ = [
     "UserRepository",
     "SystemSettingsRepository",
     "FrontendErrorLogRepository",
+    "UserEventRepository",
 ]

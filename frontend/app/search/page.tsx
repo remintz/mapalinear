@@ -22,6 +22,7 @@ import { apiClient, SavedMap } from '@/lib/api';
 import { toast } from 'sonner';
 import RouteMapModal from '@/components/RouteMapModal';
 import { SearchFormData } from '@/lib/validations';
+import { useAnalytics } from '@/hooks/useAnalytics';
 
 interface RouteSearchResult {
   id?: string;
@@ -33,6 +34,7 @@ function SearchPageContent() {
   const operationId = searchParams.get('operationId');
 
   const { searchRoute, isLoading, error, data, progressMessage, progressPercent, estimatedCompletion } = useAsyncRouteSearch();
+  const { trackConversion, trackMapEvent } = useAnalytics();
 
   // State for suggested maps
   const [suggestedMaps, setSuggestedMaps] = useState<SavedMap[]>([]);
@@ -102,9 +104,10 @@ function SearchPageContent() {
   useEffect(() => {
     const result = data as RouteSearchResult | undefined;
     if (result?.id) {
+      trackConversion('search_completed', { map_id: result.id });
       router.push(`/map?mapId=${result.id}`);
     }
-  }, [data, router]);
+  }, [data, router, trackConversion]);
 
   // If operationId is provided in URL, redirect to map page to monitor it there
   useEffect(() => {
@@ -114,6 +117,10 @@ function SearchPageContent() {
   }, [operationId, router]);
 
   const handleSearch = (formData: SearchFormData) => {
+    trackConversion('search_started', {
+      origin: formData.origin,
+      destination: formData.destination,
+    });
     searchRoute(formData);
   };
 
@@ -121,6 +128,7 @@ function SearchPageContent() {
     try {
       setAdoptingId(mapId);
       await apiClient.adoptMap(mapId);
+      trackMapEvent('map_adopt', { map_id: mapId });
       toast.success('Mapa adicionado à sua coleção!');
       router.push(`/map?mapId=${mapId}`);
     } catch (error) {

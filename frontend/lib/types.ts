@@ -473,3 +473,68 @@ export interface ApplicationLogStats {
 }
 
 export type LogTimeWindow = "5m" | "15m" | "1h" | "24h" | "custom";
+
+// User Event Analytics Types
+export interface UserEventStatsOverview {
+  period_start: string;
+  period_end: string;
+  total_events: number;
+  unique_sessions: number;
+  unique_users: number;
+}
+
+export interface EventTypeStats {
+  event_category: string;
+  event_type: string;
+  count: number;
+  unique_sessions: number;
+  unique_users: number;
+}
+
+export interface DeviceStats {
+  device_type: string | null;
+  os: string | null;
+  browser: string | null;
+  count: number;
+  unique_sessions: number;
+}
+
+export interface DailyActiveUsers {
+  date: string;
+  unique_sessions: number;
+  unique_users: number;
+  total_events: number;
+}
+
+export interface FeatureUsageStats {
+  feature: string;
+  count: number;
+  unique_sessions: number;
+  unique_users: number;
+}
+
+export interface POIFilterUsageStats {
+  filter_name: string | null;
+  enabled: boolean;
+  count: number;
+}
+
+export interface ConversionFunnelStats {
+  search_started: { sessions: number; events: number };
+  search_completed: { sessions: number; events: number };
+  search_abandoned: { sessions: number; events: number };
+  map_create: { sessions: number; events: number };
+  map_adopt: { sessions: number; events: number };
+  completion_rate: number;
+  abandonment_rate: number;
+  map_creation_rate: number;
+}
+
+export interface PerformanceStats {
+  event_type: string;
+  count: number;
+  avg_duration_ms: number;
+  min_duration_ms: number;
+  max_duration_ms: number;
+}
+

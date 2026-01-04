@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { apiClient, SavedMap } from '@/lib/api';
 import RouteMapModal from '@/components/RouteMapModal';
+import { useAnalytics } from '@/hooks/useAnalytics';
 
 export default function SavedMapsPage() {
   const [myMaps, setMyMaps] = useState<SavedMap[]>([]);
@@ -23,9 +24,12 @@ export default function SavedMapsPage() {
   const [error, setError] = useState<string | null>(null);
   const [osmMapId, setOsmMapId] = useState<string | null>(null);
   const router = useRouter();
+  const { trackPageView, trackMapEvent } = useAnalytics();
 
   useEffect(() => {
+    trackPageView('/maps');
     loadMyMaps();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadMyMaps = async () => {
@@ -59,6 +63,7 @@ export default function SavedMapsPage() {
       setDeletingId(mapId);
       const response = await apiClient.deleteMap(mapId);
       toast.success(response.message || 'Mapa removido da coleção');
+      trackMapEvent('map_remove', { map_id: mapId });
       loadMyMaps();
     } catch (error) {
       console.error('Error removing map:', error);

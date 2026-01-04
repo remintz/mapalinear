@@ -18,6 +18,7 @@ import {
   RefreshCw,
   Bug,
   Clock,
+  BarChart2,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -36,6 +37,7 @@ export default function AdminSettingsPage() {
     duplicate_map_tolerance_km: "10",
     poi_debug_enabled: "true",
     log_retention_days: "7",
+    analytics_retention_days: "90",
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -122,6 +124,15 @@ export default function AdminSettingsPage() {
     setSettings((prev) => ({
       ...prev,
       log_retention_days: numericValue,
+    }));
+  };
+
+  const handleAnalyticsRetentionChange = (value: string) => {
+    // Allow only numbers
+    const numericValue = value.replace(/[^0-9]/g, "");
+    setSettings((prev) => ({
+      ...prev,
+      analytics_retention_days: numericValue,
     }));
   };
 
@@ -446,6 +457,46 @@ export default function AdminSettingsPage() {
                     </div>
                   </div>
                 )}
+              </div>
+            </div>
+
+            {/* Analytics Retention Period */}
+            <div className="space-y-3 pt-4 border-t border-gray-200">
+              <label className="block">
+                <span className="flex items-center gap-2 text-sm font-medium text-gray-900">
+                  <BarChart2 className="w-4 h-4 text-green-600" />
+                  Período de retenção de analytics
+                </span>
+                <span className="text-sm text-gray-500 mt-1 block">
+                  Define por quantos dias os registros de analytics (eventos de usuário) são mantidos.
+                  Registros mais antigos são automaticamente removidos a cada 24 horas.
+                </span>
+              </label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min="1"
+                  max="365"
+                  step="1"
+                  value={settings.analytics_retention_days || "90"}
+                  onChange={(e) => handleAnalyticsRetentionChange(e.target.value)}
+                  className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-green-600"
+                />
+                <div className="flex items-center gap-1 min-w-[100px]">
+                  <input
+                    type="number"
+                    min="1"
+                    max="365"
+                    value={settings.analytics_retention_days || "90"}
+                    onChange={(e) => handleAnalyticsRetentionChange(e.target.value)}
+                    className="w-16 px-2 py-1 text-center border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                  />
+                  <span className="text-sm text-gray-600">dias</span>
+                </div>
+              </div>
+              <div className="flex justify-between text-xs text-gray-400">
+                <span>1 dia</span>
+                <span>365 dias</span>
               </div>
             </div>
           </div>

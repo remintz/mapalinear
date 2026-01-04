@@ -17,6 +17,7 @@ from api.database.connection import get_session
 from api.database.models.application_log import ApplicationLog
 from api.database.models.api_call_log import ApiCallLog
 from api.database.models.frontend_error_log import FrontendErrorLog
+from api.database.models.user_event import UserEvent
 from api.database.repositories.system_settings import SystemSettingsRepository
 
 logger = logging.getLogger(__name__)
@@ -37,8 +38,11 @@ class LogCleanupService:
     # Run cleanup every 24 hours (in seconds)
     CLEANUP_INTERVAL_SECONDS = 24 * 60 * 60
 
-    # Default retention days if setting is not found
-    DEFAULT_RETENTION_DAYS = 7
+    # Default retention days for logs if setting is not found
+    DEFAULT_LOG_RETENTION_DAYS = 7
+
+    # Default retention days for analytics (user_events) - independent config
+    DEFAULT_ANALYTICS_RETENTION_DAYS = 90
 
     @classmethod
     def get_instance(cls) -> "LogCleanupService":
@@ -85,7 +89,7 @@ class LogCleanupService:
             except asyncio.CancelledError:
                 break
 
-    async def _get_retention_days(self, session: AsyncSession) -> int:
+    async def _get_log_retention_days(self, session: AsyncSession) -> int:
         """Get the configured log retention period in days."""
         repo = SystemSettingsRepository(session)
         value = await repo.get_value("log_retention_days")
@@ -98,49 +102,74 @@ class LogCleanupService:
             except ValueError:
                 pass
 
-        return self.DEFAULT_RETENTION_DAYS
+        return self.DEFAULT_LOG_RETENTION_DAYS
+
+    async def _get_analytics_retention_days(self, session: AsyncSession) -> int:
+        """Get the configured analytics (user_events) retention period in days."""
+        repo = SystemSettingsRepository(session)
+        value = await repo.get_value("analytics_retention_days")
+
+        if value:
+            try:
+                days = int(value)
+                if 1 <= days <= 365:
+                    return days
+            except ValueError:
+                pass
+
+        return self.DEFAULT_ANALYTICS_RETENTION_DAYS
 
     async def _run_cleanup(self) -> None:
-        """Execute the cleanup of old logs."""
+        """Execute the cleanup of old logs and analytics."""
         async with get_session() as session:
-            retention_days = await self._get_retention_days(session)
-            cutoff_date = datetime.utcnow() - timedelta(days=retention_days)
+            # Get retention settings
+            log_retention_days = await self._get_log_retention_days(session)
+            analytics_retention_days = await self._get_analytics_retention_days(session)
+
+            log_cutoff_date = datetime.utcnow() - timedelta(days=log_retention_days)
+            analytics_cutoff_date = datetime.utcnow() - timedelta(days=analytics_retention_days)
 
             logger.info(
-                f"Starting log cleanup: removing logs older than {retention_days} days "
-                f"(before {cutoff_date.isoformat()})"
+                f"Starting cleanup: logs older than {log_retention_days} days, "
+                f"analytics older than {analytics_retention_days} days"
             )
 
             total_deleted = 0
 
             # Clean up application logs
             app_logs_deleted = await self._delete_old_logs(
-                session, ApplicationLog, "timestamp", cutoff_date
+                session, ApplicationLog, "timestamp", log_cutoff_date
             )
             total_deleted += app_logs_deleted
 
             # Clean up API call logs
             api_logs_deleted = await self._delete_old_logs(
-                session, ApiCallLog, "created_at", cutoff_date
+                session, ApiCallLog, "created_at", log_cutoff_date
             )
             total_deleted += api_logs_deleted
 
             # Clean up frontend error logs
             frontend_logs_deleted = await self._delete_old_logs(
-                session, FrontendErrorLog, "created_at", cutoff_date
+                session, FrontendErrorLog, "created_at", log_cutoff_date
             )
             total_deleted += frontend_logs_deleted
+
+            # Clean up user events (analytics) - independent retention
+            analytics_deleted = await self._delete_old_logs(
+                session, UserEvent, "created_at", analytics_cutoff_date
+            )
+            total_deleted += analytics_deleted
 
             await session.commit()
 
             if total_deleted > 0:
                 logger.info(
-                    f"Log cleanup completed: deleted {total_deleted} logs "
+                    f"Cleanup completed: deleted {total_deleted} records "
                     f"(app: {app_logs_deleted}, api: {api_logs_deleted}, "
-                    f"frontend: {frontend_logs_deleted})"
+                    f"frontend: {frontend_logs_deleted}, analytics: {analytics_deleted})"
                 )
             else:
-                logger.debug("Log cleanup completed: no old logs to delete")
+                logger.debug("Cleanup completed: no old records to delete")
 
     async def _delete_old_logs(
         self,
@@ -199,28 +228,37 @@ class LogCleanupService:
             Dictionary with cleanup statistics
         """
         async with get_session() as session:
-            retention_days = await self._get_retention_days(session)
-            cutoff_date = datetime.utcnow() - timedelta(days=retention_days)
+            log_retention_days = await self._get_log_retention_days(session)
+            analytics_retention_days = await self._get_analytics_retention_days(session)
+
+            log_cutoff_date = datetime.utcnow() - timedelta(days=log_retention_days)
+            analytics_cutoff_date = datetime.utcnow() - timedelta(days=analytics_retention_days)
 
             app_logs_deleted = await self._delete_old_logs(
-                session, ApplicationLog, "timestamp", cutoff_date
+                session, ApplicationLog, "timestamp", log_cutoff_date
             )
             api_logs_deleted = await self._delete_old_logs(
-                session, ApiCallLog, "created_at", cutoff_date
+                session, ApiCallLog, "created_at", log_cutoff_date
             )
             frontend_logs_deleted = await self._delete_old_logs(
-                session, FrontendErrorLog, "created_at", cutoff_date
+                session, FrontendErrorLog, "created_at", log_cutoff_date
+            )
+            analytics_deleted = await self._delete_old_logs(
+                session, UserEvent, "created_at", analytics_cutoff_date
             )
 
             await session.commit()
 
             return {
-                "retention_days": retention_days,
-                "cutoff_date": cutoff_date.isoformat(),
+                "log_retention_days": log_retention_days,
+                "log_cutoff_date": log_cutoff_date.isoformat(),
+                "analytics_retention_days": analytics_retention_days,
+                "analytics_cutoff_date": analytics_cutoff_date.isoformat(),
                 "application_logs_deleted": app_logs_deleted,
                 "api_logs_deleted": api_logs_deleted,
                 "frontend_logs_deleted": frontend_logs_deleted,
-                "total_deleted": app_logs_deleted + api_logs_deleted + frontend_logs_deleted,
+                "analytics_deleted": analytics_deleted,
+                "total_deleted": app_logs_deleted + api_logs_deleted + frontend_logs_deleted + analytics_deleted,
             }
 
 
