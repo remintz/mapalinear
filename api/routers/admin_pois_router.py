@@ -9,7 +9,6 @@ This router provides endpoints for:
 """
 
 import logging
-from datetime import datetime
 from typing import Dict, List, Optional
 from uuid import UUID
 
@@ -23,6 +22,7 @@ from api.database.models.user import User
 from api.database.repositories.poi import POIRepository
 from api.database.repositories.system_settings import SystemSettingsRepository
 from api.middleware.auth import get_current_admin
+from api.models.base import UTCDatetime
 from api.services.poi_quality_service import POIQualityService
 
 logger = logging.getLogger(__name__)
@@ -67,7 +67,7 @@ class POIResponse(BaseModel):
     has_brand: bool = Field(..., description="Has brand")
     has_operator: bool = Field(..., description="Has operator")
 
-    created_at: datetime = Field(..., description="When POI was created")
+    created_at: UTCDatetime = Field(..., description="When POI was created")
 
     model_config = {"from_attributes": True}
 

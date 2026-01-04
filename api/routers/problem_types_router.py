@@ -3,7 +3,6 @@ Problem types router for admin endpoints.
 """
 
 import logging
-from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
@@ -15,6 +14,7 @@ from api.database.connection import get_db
 from api.database.models.user import User
 from api.database.repositories.problem_type import ProblemTypeRepository
 from api.middleware.auth import get_current_admin
+from api.models.base import UTCDatetime
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +30,8 @@ class ProblemTypeResponse(BaseModel):
     description: Optional[str] = Field(None, description="Problem type description")
     is_active: bool = Field(..., description="Whether type is active")
     sort_order: int = Field(..., description="Display order")
-    created_at: datetime = Field(..., description="Creation timestamp")
-    updated_at: datetime = Field(..., description="Last update timestamp")
+    created_at: UTCDatetime = Field(..., description="Creation timestamp")
+    updated_at: UTCDatetime = Field(..., description="Last update timestamp")
 
     model_config = {"from_attributes": True}
 

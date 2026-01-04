@@ -15,6 +15,7 @@ from api.database.connection import get_db
 from api.database.models.user import User
 from api.database.repositories.application_log import ApplicationLogRepository
 from api.middleware.auth import get_current_admin
+from api.models.base import UTCDatetime
 
 router = APIRouter(prefix="/api/admin/logs", tags=["Application Logs"])
 
@@ -23,7 +24,7 @@ class LogEntry(BaseModel):
     """Single application log entry."""
 
     id: str
-    timestamp: datetime
+    timestamp: UTCDatetime
     level: str
     module: str
     message: str

@@ -3,7 +3,6 @@ Problem reports router for user and admin endpoints.
 """
 
 import logging
-from datetime import datetime
 from typing import Dict, List, Optional
 from uuid import UUID
 
@@ -19,6 +18,7 @@ from api.database.repositories.problem_report import ProblemReportRepository
 from api.database.repositories.problem_type import ProblemTypeRepository
 from api.database.repositories.report_attachment import ReportAttachmentRepository
 from api.middleware.auth import get_current_admin, get_current_user
+from api.models.base import UTCDatetime
 from api.services.audio_service import convert_audio_to_mp3, is_audio_mime_type
 from api.services.auth_service import AuthError, AuthService
 from api.services.image_service import convert_image_to_jpeg, is_image_mime_type
@@ -96,8 +96,8 @@ class ProblemReportResponse(BaseModel):
     description: str = Field(..., description="Problem description")
     latitude: Optional[float] = Field(None, description="Location latitude")
     longitude: Optional[float] = Field(None, description="Location longitude")
-    created_at: datetime = Field(..., description="Creation timestamp")
-    updated_at: datetime = Field(..., description="Last update timestamp")
+    created_at: UTCDatetime = Field(..., description="Creation timestamp")
+    updated_at: UTCDatetime = Field(..., description="Last update timestamp")
 
     problem_type: ProblemTypePublicResponse
     user: UserResponse

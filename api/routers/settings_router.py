@@ -3,7 +3,6 @@ Settings router for system configuration endpoints.
 """
 
 import logging
-from datetime import datetime
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -18,6 +17,7 @@ from api.database.repositories.system_settings import (
     DEFAULT_REQUIRED_TAGS,
 )
 from api.middleware.auth import get_current_admin, get_current_user
+from api.models.base import UTCDatetime
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ class SettingResponse(BaseModel):
     key: str = Field(..., description="Setting key")
     value: str = Field(..., description="Setting value")
     description: Optional[str] = Field(None, description="Setting description")
-    updated_at: Optional[datetime] = Field(None, description="Last update time")
+    updated_at: Optional[UTCDatetime] = Field(None, description="Last update time")
     updated_by: Optional[str] = Field(None, description="Who last updated")
 
 

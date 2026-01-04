@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.database.connection import get_db
 from api.database.repositories.api_call_log import ApiCallLogRepository
+from api.models.base import UTCDatetime
 
 router = APIRouter(prefix="/api/api-logs", tags=["API Logs"])
 
@@ -64,14 +65,14 @@ class ApiCallLogResponse(BaseModel):
     cache_hit: bool
     result_count: Optional[int]
     error_message: Optional[str]
-    created_at: datetime
+    created_at: UTCDatetime
 
 
 class StatsOverview(BaseModel):
     """Overview statistics response."""
 
-    period_start: datetime
-    period_end: datetime
+    period_start: UTCDatetime
+    period_end: UTCDatetime
     by_provider: List[ProviderStats]
     by_operation: List[OperationStats]
 

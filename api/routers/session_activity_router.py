@@ -5,7 +5,6 @@ Provides endpoints for viewing unified session activity including
 frontend errors and API calls correlated by session ID.
 """
 
-from datetime import datetime
 from typing import List, Literal, Optional, Union
 
 from fastapi import APIRouter, Depends, Query
@@ -15,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.database.connection import get_db
 from api.database.repositories.api_call_log import ApiCallLogRepository
 from api.database.repositories.frontend_error_log import FrontendErrorLogRepository
+from api.models.base import UTCDatetime
 
 router = APIRouter(prefix="/api/sessions", tags=["Session Activity"])
 
@@ -26,7 +26,7 @@ class ApiCallEvent(BaseModel):
     """API call event in the timeline."""
 
     event_type: Literal["api_call"] = "api_call"
-    timestamp: datetime
+    timestamp: UTCDatetime
     id: str
     provider: str
     operation: str
@@ -42,7 +42,7 @@ class FrontendErrorEvent(BaseModel):
     """Frontend error event in the timeline."""
 
     event_type: Literal["frontend_error"] = "frontend_error"
-    timestamp: datetime
+    timestamp: UTCDatetime
     id: str
     error_type: str
     message: str
@@ -58,8 +58,8 @@ class SessionSummary(BaseModel):
     """Summary of session activity."""
 
     session_id: str
-    first_activity: Optional[datetime]
-    last_activity: Optional[datetime]
+    first_activity: Optional[UTCDatetime]
+    last_activity: Optional[UTCDatetime]
     total_api_calls: int
     total_errors: int
     error_rate: float  # Percentage of events that are errors

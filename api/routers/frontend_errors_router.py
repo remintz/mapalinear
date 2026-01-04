@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.database.connection import get_db
 from api.database.repositories.frontend_error_log import FrontendErrorLogRepository
+from api.models.base import UTCDatetime
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ class FrontendErrorResponse(BaseModel):
     component_stack: Optional[str]
     user_id: Optional[str]
     extra_context: Optional[dict]
-    created_at: datetime
+    created_at: UTCDatetime
 
 
 class ErrorStats(BaseModel):
@@ -76,8 +77,8 @@ class TopError(BaseModel):
 class ErrorStatsOverview(BaseModel):
     """Overview of error statistics."""
 
-    period_start: datetime
-    period_end: datetime
+    period_start: UTCDatetime
+    period_end: UTCDatetime
     total_errors: int
     by_type: List[ErrorStats]
     top_errors: List[TopError]

@@ -3,7 +3,6 @@ Admin router for user management endpoints.
 """
 
 import logging
-from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
@@ -16,6 +15,7 @@ from api.database.models.user import User
 from api.database.repositories.impersonation_session import ImpersonationSessionRepository
 from api.database.repositories.user import UserRepository
 from api.middleware.auth import AuthContext, get_auth_context, get_current_admin
+from api.models.base import UTCDatetime
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +32,9 @@ class UserAdminResponse(BaseModel):
     avatar_url: Optional[str] = Field(None, description="URL to user avatar")
     is_active: bool = Field(..., description="Whether user is active")
     is_admin: bool = Field(..., description="Whether user is an administrator")
-    created_at: datetime = Field(..., description="When user was created")
-    updated_at: datetime = Field(..., description="When user was last updated")
-    last_login_at: Optional[datetime] = Field(None, description="Last login timestamp")
+    created_at: UTCDatetime = Field(..., description="When user was created")
+    updated_at: UTCDatetime = Field(..., description="When user was last updated")
+    last_login_at: Optional[UTCDatetime] = Field(None, description="Last login timestamp")
     map_count: int = Field(0, description="Number of maps owned by user")
 
     model_config = {"from_attributes": True}
@@ -527,8 +527,8 @@ class MapAdminResponse(BaseModel):
     origin: str = Field(..., description="Origin location")
     destination: str = Field(..., description="Destination location")
     total_length_km: float = Field(..., description="Total route length in km")
-    created_at: datetime = Field(..., description="When map was created")
-    updated_at: datetime = Field(..., description="When map was last updated")
+    created_at: UTCDatetime = Field(..., description="When map was created")
+    updated_at: UTCDatetime = Field(..., description="When map was last updated")
     user_count: int = Field(0, description="Number of users with this map")
     created_by_user_id: Optional[str] = Field(None, description="Creator user ID")
 
@@ -780,8 +780,8 @@ class AdminOperationResponse(BaseModel):
     operation_type: str = Field(..., description="Type of operation")
     status: str = Field(..., description="Status: in_progress, completed, failed")
     progress_percent: float = Field(..., description="Progress 0-100")
-    started_at: datetime = Field(..., description="When operation started")
-    completed_at: Optional[datetime] = Field(None, description="When operation completed")
+    started_at: UTCDatetime = Field(..., description="When operation started")
+    completed_at: Optional[UTCDatetime] = Field(None, description="When operation completed")
     duration_seconds: Optional[float] = Field(None, description="Duration in seconds")
     error: Optional[str] = Field(None, description="Error message if failed")
     user: Optional[OperationUserResponse] = Field(None, description="User who requested")
