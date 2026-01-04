@@ -21,6 +21,8 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiClient, SavedMap } from '@/lib/api';
 import RouteMapModal from '@/components/RouteMapModal';
+import { useAnalytics } from '@/hooks/useAnalytics';
+import { EventType } from '@/lib/analytics-types';
 
 export default function AvailableMapsPage() {
   const [availableMaps, setAvailableMaps] = useState<SavedMap[]>([]);
@@ -32,6 +34,7 @@ export default function AvailableMapsPage() {
   const [searchDestination, setSearchDestination] = useState('');
   const [osmMapId, setOsmMapId] = useState<string | null>(null);
   const router = useRouter();
+  const { trackMapEvent } = useAnalytics();
 
   // Load user's maps to know which ones they already have
   const loadMyMaps = useCallback(async () => {
@@ -70,6 +73,13 @@ export default function AvailableMapsPage() {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
+    // Track map search event
+    if (searchOrigin || searchDestination) {
+      trackMapEvent(EventType.MAP_SEARCH, {
+        origin: searchOrigin || undefined,
+        destination: searchDestination || undefined,
+      });
+    }
     loadAvailableMaps(searchOrigin, searchDestination);
   };
 

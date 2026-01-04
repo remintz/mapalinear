@@ -15,6 +15,7 @@ import { useRouteSimulation } from '@/hooks/useRouteSimulation';
 import { useRouteTracking } from '@/hooks/useRouteTracking';
 import { useGeolocation } from '@/hooks/useGeolocation';
 import { useAnalytics } from '@/hooks/useAnalytics';
+import { EventType } from '@/lib/analytics-types';
 import { RouteSegment, Milestone } from '@/lib/types';
 import { ReportProblemButton } from '@/components/reports/ReportProblemButton';
 import RouteMapModal from '@/components/RouteMapModal';
@@ -35,7 +36,7 @@ function MapPageContent() {
   const router = useRouter();
   const { data: session } = useSession();
   const isActualAdmin = session?.user?.isAdmin ?? false;
-  const { trackMapEvent, trackPageView } = useAnalytics();
+  const { trackEvent, trackMapEvent, trackPageView, trackPerformance } = useAnalytics();
 
   // State for simulating regular user (set via Admin page)
   const [isSimulatingUser, setIsSimulatingUser] = useState(false);
@@ -72,6 +73,7 @@ function MapPageContent() {
   useEffect(() => {
     if (mapId) {
       const loadSavedMap = async () => {
+        const startTime = performance.now();
         try {
           setIsLoading(true);
           setProgressMessage('Carregando mapa salvo...');
@@ -91,6 +93,14 @@ function MapPageContent() {
           setData(routeData);
           setIsLoading(false);
 
+          // Track map load time
+          const loadTime = performance.now() - startTime;
+          trackPerformance(EventType.MAP_LOAD_TIME, loadTime, {
+            map_id: mapId,
+            poi_count: savedMap.milestones?.length || 0,
+            segment_count: savedMap.segments?.length || 0,
+          });
+
           // Track map view
           trackPageView('/map');
           trackMapEvent('linear_map_view', {
@@ -109,7 +119,7 @@ function MapPageContent() {
 
       loadSavedMap();
     }
-  }, [mapId, trackPageView, trackMapEvent]);
+  }, [mapId, trackPageView, trackMapEvent, trackPerformance]);
 
   // Monitor async operation if operationId is provided
   useEffect(() => {
@@ -372,7 +382,7 @@ function MapPageContent() {
       document.body.removeChild(a);
 
       // Track PDF export
-      trackMapEvent('map_export_pdf', { map_id: mapId });
+      trackMapEvent(EventType.MAP_EXPORT_PDF, { map_id: mapId });
     } catch (error) {
       // apiClient handles 401 automatically and redirects to login
       console.error('Erro ao exportar PDF:', error);
@@ -543,7 +553,10 @@ function MapPageContent() {
               {/* View Route on Map Button */}
               {mapId && (
                 <button
-                  onClick={() => setOsmMapOpen(true)}
+                  onClick={() => {
+                    setOsmMapOpen(true);
+                    trackEvent(EventType.OSM_MAP_VIEW, { map_id: mapId });
+                  }}
                   className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900 px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors border border-gray-200"
                   title="Ver rota no mapa"
                 >
@@ -606,6 +619,7 @@ function MapPageContent() {
                   controls={simulation.controls}
                   isOnRoute={tracking.isOnRoute}
                   distanceToRoute={tracking.distanceToRoute}
+                  mapId={mapId || undefined}
                 />
               </div>
             )}

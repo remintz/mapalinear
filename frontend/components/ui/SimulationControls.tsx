@@ -10,12 +10,15 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { SimulationState, SimulationControls as SimulationControlsType } from '@/hooks/useRouteSimulation';
+import { useAnalytics } from '@/hooks/useAnalytics';
+import { EventType } from '@/lib/analytics-types';
 
 interface SimulationControlsProps {
   state: SimulationState;
   controls: SimulationControlsType;
   isOnRoute: boolean;
   distanceToRoute: number | null;
+  mapId?: string;
   className?: string;
 }
 
@@ -26,9 +29,26 @@ export function SimulationControls({
   controls,
   isOnRoute,
   distanceToRoute,
+  mapId,
   className = '',
 }: SimulationControlsProps) {
+  const { trackEvent } = useAnalytics();
   const { isActive, isPlaying, distanceKm, totalDistanceKm, speedKmH, progressPercent } = state;
+
+  const handleStart = () => {
+    trackEvent(EventType.ROUTE_TRACKING_START, { map_id: mapId, mode: 'simulation' });
+    controls.start();
+  };
+
+  const handleStop = () => {
+    trackEvent(EventType.ROUTE_TRACKING_STOP, {
+      map_id: mapId,
+      mode: 'simulation',
+      distance_traveled_km: distanceKm,
+      progress_percent: progressPercent,
+    });
+    controls.stop();
+  };
 
   // If simulation is not active, show the start button
   if (!isActive) {
@@ -40,7 +60,7 @@ export function SimulationControls({
             <span className="text-sm font-medium text-gray-700">Modo Simulacao</span>
           </div>
           <button
-            onClick={controls.start}
+            onClick={handleStart}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
           >
             <Play className="w-4 h-4" />
@@ -64,7 +84,7 @@ export function SimulationControls({
             <span className="text-sm font-medium text-gray-700">Simulacao Ativa</span>
           </div>
           <button
-            onClick={controls.stop}
+            onClick={handleStop}
             className="flex items-center gap-1 px-2 py-1 text-red-600 hover:bg-red-50 rounded transition-colors text-xs"
             title="Parar simulacao"
           >

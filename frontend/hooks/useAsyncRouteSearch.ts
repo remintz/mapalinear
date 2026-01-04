@@ -2,6 +2,8 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { apiClient } from '@/lib/api';
 import { RouteSearchRequest, RouteSearchResponse, AsyncOperation, POIType } from '@/lib/types';
 import { SearchFormData } from '@/lib/validations';
+import { trackAnalyticsEvent } from '@/hooks/useAnalytics';
+import { EventType } from '@/lib/analytics-types';
 
 // Cache for system settings
 let cachedPoiSearchRadius: number | null = null;
@@ -28,6 +30,7 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
   
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const currentOperationIdRef = useRef<string | null>(null);
+  const searchStartTimeRef = useRef<number | null>(null);
 
   const clearPolling = useCallback(() => {
     if (pollingIntervalRef.current) {
@@ -63,7 +66,19 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
         setIsLoading(false);
         setProgressMessage('Criar Mapa');
         setProgressPercent(100);
-        
+
+        // Track search response time
+        if (searchStartTimeRef.current) {
+          const duration = performance.now() - searchStartTimeRef.current;
+          trackAnalyticsEvent(EventType.SEARCH_RESPONSE_TIME, {
+            origin: operation.result?.origin,
+            destination: operation.result?.destination,
+            total_distance_km: operation.result?.total_length_km,
+            poi_count: operation.result?.milestones?.length || 0,
+          }, { durationMs: duration });
+          searchStartTimeRef.current = null;
+        }
+
         if (operation.result) {
           // Debug log to see what data we're receiving
           console.log('Dados recebidos da API:', operation.result);
@@ -161,6 +176,7 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
       setProgressPercent(0);
       setProgressMessage('Iniciando busca...');
       setEstimatedCompletion(null);
+      searchStartTimeRef.current = performance.now();
 
       // Fetch POI search radius from system settings if not cached
       let poiSearchRadius = cachedPoiSearchRadius;

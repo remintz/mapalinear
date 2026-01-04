@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense, useEffect, useState, useCallback } from 'react';
+import React, { Suspense, useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { SearchForm } from '@/components/forms/SearchForm';
 import { useAsyncRouteSearch } from '@/hooks/useAsyncRouteSearch';
@@ -23,6 +23,7 @@ import { toast } from 'sonner';
 import RouteMapModal from '@/components/RouteMapModal';
 import { SearchFormData } from '@/lib/validations';
 import { useAnalytics } from '@/hooks/useAnalytics';
+import { EventType } from '@/lib/analytics-types';
 
 interface RouteSearchResult {
   id?: string;
@@ -35,6 +36,30 @@ function SearchPageContent() {
 
   const { searchRoute, isLoading, error, data, progressMessage, progressPercent, estimatedCompletion } = useAsyncRouteSearch();
   const { trackConversion, trackMapEvent } = useAnalytics();
+
+  // Ref to track search state for abandonment detection
+  const searchStateRef = useRef<{ isSearching: boolean; origin?: string; destination?: string }>({
+    isSearching: false,
+  });
+
+  // Update search state ref when loading changes
+  useEffect(() => {
+    searchStateRef.current.isSearching = isLoading;
+  }, [isLoading]);
+
+  // Track search abandonment when component unmounts while searching
+  useEffect(() => {
+    return () => {
+      if (searchStateRef.current.isSearching) {
+        trackConversion(EventType.SEARCH_ABANDONED, {
+          origin: searchStateRef.current.origin,
+          destination: searchStateRef.current.destination,
+          progress_percent: progressPercent,
+        });
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // State for suggested maps
   const [suggestedMaps, setSuggestedMaps] = useState<SavedMap[]>([]);
@@ -117,6 +142,12 @@ function SearchPageContent() {
   }, [operationId, router]);
 
   const handleSearch = (formData: SearchFormData) => {
+    // Store search info for potential abandonment tracking
+    searchStateRef.current = {
+      isSearching: true,
+      origin: formData.origin,
+      destination: formData.destination,
+    };
     trackConversion('search_started', {
       origin: formData.origin,
       destination: formData.destination,

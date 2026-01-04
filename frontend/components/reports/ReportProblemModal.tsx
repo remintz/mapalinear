@@ -8,6 +8,8 @@ import { apiClient } from '@/lib/api';
 import { PhotoUpload } from './PhotoUpload';
 import { POICombobox } from './POICombobox';
 import { AudioRecorder, isAudioRecordingSupported } from './AudioRecorder';
+import { useAnalytics } from '@/hooks/useAnalytics';
+import { EventType } from '@/lib/analytics-types';
 
 interface POI {
   id: string;
@@ -32,6 +34,7 @@ export function ReportProblemModal({
   userLocation,
 }: ReportProblemModalProps) {
   const { problemTypes, isLoading: typesLoading } = useProblemTypes();
+  const { trackEvent } = useAnalytics();
 
   const [selectedTypeId, setSelectedTypeId] = useState<string>('');
   const [selectedPoiId, setSelectedPoiId] = useState<string | null>(null);
@@ -47,7 +50,7 @@ export function ReportProblemModal({
     setAudioSupported(isAudioRecordingSupported());
   }, []);
 
-  // Reset form when modal opens
+  // Reset form and track event when modal opens
   useEffect(() => {
     if (isOpen) {
       setSelectedTypeId('');
@@ -55,8 +58,10 @@ export function ReportProblemModal({
       setDescription('');
       setPhotos([]);
       setAudioBlob(null);
+      // Track report start
+      trackEvent(EventType.PROBLEM_REPORT_START, { map_id: mapId });
     }
-  }, [isOpen]);
+  }, [isOpen, mapId, trackEvent]);
 
   // Check if form has valid content
   // If audio is supported: description OR audio is valid
@@ -107,6 +112,15 @@ export function ReportProblemModal({
       }
 
       await apiClient.submitProblemReport(formData);
+
+      // Track successful submission
+      trackEvent(EventType.PROBLEM_REPORT_SUBMIT, {
+        map_id: mapId,
+        problem_type_id: selectedTypeId,
+        has_photos: photos.length > 0,
+        has_audio: !!audioBlob,
+        poi_id: selectedPoiId,
+      });
 
       toast.success('Problema reportado com sucesso!');
       onClose();

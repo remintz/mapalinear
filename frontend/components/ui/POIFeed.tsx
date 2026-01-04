@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useMemo } from 'react';
 import { POI, Milestone } from '@/lib/types';
 import { POICard } from './POICard';
+import { useAnalytics } from '@/hooks/useAnalytics';
 
 interface POIFeedProps {
   pois: (POI | Milestone)[];
@@ -22,6 +23,8 @@ export function POIFeed({
   nextPOIIndex,
   autoScroll = true,
 }: POIFeedProps) {
+  const { trackPOIClick } = useAnalytics();
+
   // Refs for each POI card for scrolling
   const poiRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const containerRef = useRef<HTMLDivElement>(null);
@@ -95,7 +98,10 @@ export function POIFeed({
           >
             <POICard
               poi={poi}
-              onClick={() => onPOIClick?.(poi)}
+              onClick={() => {
+                trackPOIClick(poi.id, poi.name, poi.type);
+                onPOIClick?.(poi);
+              }}
               isPassed={isPassed}
               isNext={isNext}
             />
