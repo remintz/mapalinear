@@ -22,24 +22,62 @@ import { apiClient } from "@/lib/api";
 import { AdminPOI, AdminPOIFilters, AdminPOIStats } from "@/lib/types";
 
 const POI_TYPE_LABELS: Record<string, string> = {
+  // Main categories
   gas_station: "Posto de Combustível",
+  fuel: "Combustível",
   restaurant: "Restaurante",
+  food: "Alimentação",
+  fast_food: "Fast Food",
+  cafe: "Café",
   hotel: "Hotel",
+  lodging: "Hospedagem",
+  camping: "Camping",
   hospital: "Hospital",
-  toll_booth: "Pedágio",
+  pharmacy: "Farmácia",
+  bank: "Banco",
+  atm: "Caixa Eletrônico",
+  shopping: "Shopping",
+  supermarket: "Supermercado",
+  tourist_attraction: "Atração Turística",
   rest_area: "Área de Descanso",
+  parking: "Estacionamento",
+  toll_booth: "Pedágio",
+  police: "Polícia",
+  mechanic: "Mecânica",
+  services: "Serviços",
+  other: "Outro",
+  // Place types
   city: "Cidade",
   town: "Cidade",
   village: "Vila",
 };
 
 const POI_TYPE_ICONS: Record<string, string> = {
+  // Main categories
   gas_station: "⛽",
+  fuel: "⛽",
   restaurant: "🍽️",
+  food: "🍴",
+  fast_food: "🍔",
+  cafe: "☕",
   hotel: "🏨",
+  lodging: "🛏️",
+  camping: "⛺",
   hospital: "🏥",
-  toll_booth: "🚧",
+  pharmacy: "💊",
+  bank: "🏦",
+  atm: "💳",
+  shopping: "🛒",
+  supermarket: "🛒",
+  tourist_attraction: "🏛️",
   rest_area: "🅿️",
+  parking: "🅿️",
+  toll_booth: "🚧",
+  police: "👮",
+  mechanic: "🔧",
+  services: "🏢",
+  other: "📍",
+  // Place types
   city: "🏙️",
   town: "🏘️",
   village: "🏡",
@@ -71,6 +109,10 @@ function AdminPOIsPageContent() {
   const [loading, setLoading] = useState(true);
   const [loadingFilters, setLoadingFilters] = useState(true);
   const [recalculating, setRecalculating] = useState(false);
+  const [updating, setUpdating] = useState(false);
+
+  // Selection state
+  const [selectedPois, setSelectedPois] = useState<Set<string>>(new Set());
 
   // Helper to update URL params
   const updateUrlParams = useCallback(
@@ -219,6 +261,55 @@ function AdminPOIsPageContent() {
     router.push("/admin/pois", { scroll: false });
   };
 
+  // Selection handlers
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedPois(new Set(pois.map((poi) => poi.id)));
+    } else {
+      setSelectedPois(new Set());
+    }
+  };
+
+  const handleSelectPoi = (poiId: string, checked: boolean) => {
+    const newSelection = new Set(selectedPois);
+    if (checked) {
+      newSelection.add(poiId);
+    } else {
+      newSelection.delete(poiId);
+    }
+    setSelectedPois(newSelection);
+  };
+
+  const isAllSelected = pois.length > 0 && pois.every((poi) => selectedPois.has(poi.id));
+  const isSomeSelected = pois.some((poi) => selectedPois.has(poi.id));
+
+  // Clear selection when POIs change (page change, filter change)
+  useEffect(() => {
+    setSelectedPois(new Set());
+  }, [pois]);
+
+  const handleUpdateSelected = async () => {
+    if (selectedPois.size === 0) return;
+
+    if (!confirm(`Atualizar informações de ${selectedPois.size} POI(s) selecionado(s)?`)) {
+      return;
+    }
+
+    try {
+      setUpdating(true);
+      const result = await apiClient.refreshPOIs(Array.from(selectedPois));
+      toast.success(result.message);
+      setSelectedPois(new Set());
+      // Reload data
+      await loadPOIs();
+    } catch (error) {
+      console.error("Error updating POIs:", error);
+      toast.error("Erro ao atualizar POIs");
+    } finally {
+      setUpdating(false);
+    }
+  };
+
   const totalPages = Math.ceil(total / limit);
 
   if (status === "loading" || !session?.user?.isAdmin) {
@@ -316,6 +407,7 @@ function AdminPOIsPageContent() {
                 disabled={loadingFilters}
               >
                 <option value="">Todas</option>
+                <option value="__no_city__">Sem cidade</option>
                 {filters?.cities.map((city) => (
                   <option key={city} value={city}>
                     {city}
@@ -360,6 +452,35 @@ function AdminPOIsPageContent() {
           </div>
         </div>
 
+        {/* Selection Actions Bar */}
+        {selectedPois.size > 0 && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 flex items-center justify-between">
+            <span className="text-sm text-blue-800">
+              {selectedPois.size} POI{selectedPois.size !== 1 ? "s" : ""} selecionado{selectedPois.size !== 1 ? "s" : ""}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setSelectedPois(new Set())}
+                className="text-sm text-blue-600 hover:text-blue-700"
+              >
+                Limpar seleção
+              </button>
+              <button
+                onClick={handleUpdateSelected}
+                disabled={updating}
+                className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                {updating ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+                Atualizar Selecionados
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* POI Table */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
           {loading ? (
@@ -384,6 +505,17 @@ function AdminPOIsPageContent() {
               <table className="w-full">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
+                    <th className="px-4 py-3 text-left">
+                      <input
+                        type="checkbox"
+                        checked={isAllSelected}
+                        ref={(el) => {
+                          if (el) el.indeterminate = isSomeSelected && !isAllSelected;
+                        }}
+                        onChange={(e) => handleSelectAll(e.target.checked)}
+                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                      />
+                    </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Nome
                     </th>
@@ -403,7 +535,15 @@ function AdminPOIsPageContent() {
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {pois.map((poi) => (
-                    <tr key={poi.id} className="hover:bg-gray-50">
+                    <tr key={poi.id} className={`hover:bg-gray-50 ${selectedPois.has(poi.id) ? "bg-blue-50" : ""}`}>
+                      <td className="px-4 py-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedPois.has(poi.id)}
+                          onChange={(e) => handleSelectPoi(poi.id, e.target.checked)}
+                          className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        />
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <span className="text-lg">{POI_TYPE_ICONS[poi.type] || "📍"}</span>

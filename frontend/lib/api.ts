@@ -650,6 +650,17 @@ class APIClient {
     return data;
   }
 
+  /**
+   * Refresh/update POIs by re-fetching their data from providers (admin).
+   */
+  async refreshPOIs(poiIds: string[]): Promise<{ updated: number; failed: number; message: string }> {
+    const { data } = await this.client.post<{ updated: number; failed: number; message: string }>(
+      '/admin/pois/refresh',
+      { poi_ids: poiIds }
+    );
+    return data;
+  }
+
   // Required Tags Config (admin)
 
   /**

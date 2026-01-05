@@ -625,7 +625,8 @@ class POIRepository(BaseRepository[POI]):
 
         Args:
             name_filter: Filter by POI name (case-insensitive partial match)
-            city_filter: Filter by city name (case-insensitive partial match)
+            city_filter: Filter by city name (case-insensitive partial match).
+                         Use "__no_city__" to filter POIs without city.
             type_filter: Filter by POI type
             low_quality_only: Show only low quality POIs
             limit: Maximum number of results
@@ -640,7 +641,10 @@ class POIRepository(BaseRepository[POI]):
             conditions.append(POI.name.ilike(f"%{name_filter}%"))
 
         if city_filter:
-            conditions.append(POI.city.ilike(f"%{city_filter}%"))
+            if city_filter == "__no_city__":
+                conditions.append(POI.city.is_(None))
+            else:
+                conditions.append(POI.city.ilike(f"%{city_filter}%"))
 
         if type_filter:
             conditions.append(POI.type == type_filter)
@@ -669,7 +673,8 @@ class POIRepository(BaseRepository[POI]):
 
         Args:
             name_filter: Filter by POI name (case-insensitive partial match)
-            city_filter: Filter by city name (case-insensitive partial match)
+            city_filter: Filter by city name (case-insensitive partial match).
+                         Use "__no_city__" to filter POIs without city.
             type_filter: Filter by POI type
             low_quality_only: Count only low quality POIs
 
@@ -684,7 +689,10 @@ class POIRepository(BaseRepository[POI]):
             conditions.append(POI.name.ilike(f"%{name_filter}%"))
 
         if city_filter:
-            conditions.append(POI.city.ilike(f"%{city_filter}%"))
+            if city_filter == "__no_city__":
+                conditions.append(POI.city.is_(None))
+            else:
+                conditions.append(POI.city.ilike(f"%{city_filter}%"))
 
         if type_filter:
             conditions.append(POI.type == type_filter)

@@ -116,6 +116,20 @@ class RecalculateQualityResponse(BaseModel):
     message: str = Field(..., description="Status message")
 
 
+class RefreshPOIsRequest(BaseModel):
+    """Request to refresh POIs by re-fetching data from providers."""
+
+    poi_ids: List[str] = Field(..., description="List of POI UUIDs to refresh", min_length=1, max_length=100)
+
+
+class RefreshPOIsResponse(BaseModel):
+    """Response for refresh POIs endpoint."""
+
+    updated: int = Field(..., description="Number of POIs successfully updated")
+    failed: int = Field(..., description="Number of POIs that failed to update")
+    message: str = Field(..., description="Status message")
+
+
 def _poi_to_response(poi: POI) -> POIResponse:
     """Convert POI model to response."""
     return POIResponse(
@@ -326,6 +340,157 @@ async def recalculate_quality(
         updated=total_updated,
         total=total_processed,
         message=f"Qualidade recalculada para {total_processed} POIs. {total_updated} foram atualizados."
+    )
+
+
+@router.post("/refresh", response_model=RefreshPOIsResponse)
+async def refresh_pois(
+    request: RefreshPOIsRequest,
+    admin_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+) -> RefreshPOIsResponse:
+    """
+    Refresh selected POIs by re-fetching data from geographic providers.
+
+    This will:
+    - Re-fetch POI data from OSM/HERE using get_poi_details
+    - Update name, phone, website, opening_hours, brand, operator
+    - Update city via reverse geocoding
+    - Recalculate quality score and missing_tags
+
+    Note: Does NOT re-enrich with Google Places (ratings are preserved).
+
+    Requires admin privileges.
+    """
+    from api.providers.manager import create_provider
+
+    poi_repo = POIRepository(db)
+    settings_repo = SystemSettingsRepository(db)
+    quality_service = POIQualityService()
+    provider = create_provider()
+
+    # Get required tags config for quality recalculation
+    required_tags_config = await settings_repo.get_required_tags()
+
+    updated_count = 0
+    failed_count = 0
+
+    for poi_id_str in request.poi_ids:
+        try:
+            poi_uuid = UUID(poi_id_str)
+            poi = await poi_repo.get_by_id(poi_uuid)
+
+            if not poi:
+                logger.warning(f"POI not found: {poi_id_str}")
+                failed_count += 1
+                continue
+
+            poi_updated = False
+
+            # 1. Re-fetch data from provider using osm_id or here_id
+            provider_poi = None
+            if poi.osm_id:
+                try:
+                    # osm_id in DB is just the number, get_poi_details expects "node/123" format
+                    # Try node first, then way if not found
+                    osm_id_with_type = f"node/{poi.osm_id}"
+                    provider_poi = await provider.get_poi_details(osm_id_with_type)
+                    if not provider_poi:
+                        osm_id_with_type = f"way/{poi.osm_id}"
+                        provider_poi = await provider.get_poi_details(osm_id_with_type)
+                except Exception as e:
+                    logger.warning(f"Failed to fetch OSM data for POI {poi_id_str}: {e}")
+
+            if provider_poi:
+                # Update fields from provider data
+                # Update type/category from provider
+                if provider_poi.category:
+                    new_type = provider_poi.category.value if hasattr(provider_poi.category, 'value') else str(provider_poi.category)
+                    if new_type != poi.type:
+                        poi.type = new_type
+                        poi_updated = True
+
+                if provider_poi.name and provider_poi.name != poi.name:
+                    poi.name = provider_poi.name
+                    poi_updated = True
+
+                if provider_poi.phone and not poi.phone:
+                    poi.phone = provider_poi.phone
+                    poi_updated = True
+
+                if provider_poi.website and not poi.website:
+                    poi.website = provider_poi.website
+                    poi_updated = True
+
+                if provider_poi.opening_hours and not poi.opening_hours:
+                    # Convert dict to string if needed
+                    if isinstance(provider_poi.opening_hours, dict):
+                        poi.opening_hours = "; ".join(
+                            f"{k}: {v}" for k, v in provider_poi.opening_hours.items()
+                        )
+                    else:
+                        poi.opening_hours = str(provider_poi.opening_hours)
+                    poi_updated = True
+
+                # Update brand/operator from provider_data
+                provider_data = provider_poi.provider_data or {}
+                tags = provider_data.get("tags", {})
+
+                if tags.get("brand") and not poi.brand:
+                    poi.brand = tags["brand"]
+                    poi_updated = True
+
+                if tags.get("operator") and not poi.operator:
+                    poi.operator = tags["operator"]
+                    poi_updated = True
+
+                # Update amenities
+                if provider_poi.amenities and not poi.amenities:
+                    poi.amenities = provider_poi.amenities
+                    poi_updated = True
+
+            # 2. Update city via reverse geocoding (always try, even if already has city)
+            try:
+                location = await provider.reverse_geocode(
+                    latitude=poi.latitude,
+                    longitude=poi.longitude,
+                    poi_name=poi.name
+                )
+                if location and location.city and location.city != poi.city:
+                    poi.city = location.city
+                    poi_updated = True
+            except Exception as e:
+                logger.warning(f"Failed to reverse geocode POI {poi_id_str}: {e}")
+
+            # 3. Recalculate quality
+            quality_updated = quality_service.update_poi_quality_fields(poi, required_tags_config)
+            if quality_updated:
+                poi_updated = True
+
+            if poi_updated:
+                updated_count += 1
+            else:
+                # POI was processed but nothing changed
+                pass
+
+        except ValueError:
+            logger.warning(f"Invalid POI ID format: {poi_id_str}")
+            failed_count += 1
+        except Exception as e:
+            logger.error(f"Error refreshing POI {poi_id_str}: {e}")
+            failed_count += 1
+
+    await db.commit()
+
+    logger.info(
+        f"POIs refreshed by {admin_user.email}: "
+        f"{updated_count} updated, {failed_count} failed out of {len(request.poi_ids)}"
+    )
+
+    return RefreshPOIsResponse(
+        updated=updated_count,
+        failed=failed_count,
+        message=f"{updated_count} POI(s) atualizado(s). {failed_count} falha(s)."
     )
 
 
