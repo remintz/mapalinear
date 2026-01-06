@@ -9,7 +9,10 @@ from api.database.repositories.google_places_cache import GooglePlacesCacheRepos
 from api.database.repositories.impersonation_session import ImpersonationSessionRepository
 from api.database.repositories.map import MapRepository
 from api.database.repositories.map_poi import MapPOIRepository
+from api.database.repositories.map_segment import MapSegmentRepository
 from api.database.repositories.poi import POIRepository
+from api.database.repositories.route_segment import RouteSegmentRepository
+from api.database.repositories.segment_poi import SegmentPOIRepository
 from api.database.repositories.user import UserRepository
 from api.database.repositories.system_settings import SystemSettingsRepository
 from api.database.repositories.frontend_error_log import FrontendErrorLogRepository
@@ -21,8 +24,11 @@ __all__ = [
     "BaseRepository",
     "ImpersonationSessionRepository",
     "MapRepository",
+    "MapSegmentRepository",
     "POIRepository",
     "MapPOIRepository",
+    "RouteSegmentRepository",
+    "SegmentPOIRepository",
     "CacheRepository",
     "GooglePlacesCacheRepository",
     "UserRepository",

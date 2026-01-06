@@ -15,6 +15,7 @@ from api.database.connection import Base
 
 if TYPE_CHECKING:
     from api.database.models.map_poi import MapPOI
+    from api.database.models.segment_poi import SegmentPOI
 
 
 class POI(Base):
@@ -116,6 +117,9 @@ class POI(Base):
     # Relationships
     map_pois: Mapped[List["MapPOI"]] = relationship(
         "MapPOI", back_populates="poi", cascade="all, delete-orphan"
+    )
+    segment_pois: Mapped[List["SegmentPOI"]] = relationship(
+        "SegmentPOI", back_populates="poi", cascade="all, delete-orphan"
     )
 
     # Indexes

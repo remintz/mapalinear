@@ -12,6 +12,7 @@ specialized services for each step of the process:
 import logging
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from api.database.models.route_segment import RouteSegment as RouteSegmentDB
 from api.models.road_models import (
     LinearMapResponse,
     LinearRoadSegment,
@@ -230,6 +231,347 @@ class RoadService:
         """Log statistics about found milestones."""
         pass
 
+    def _create_milestones_from_segment_pois(
+        self,
+        route_segments_data: List[Tuple[RouteSegmentDB, bool]],
+        all_pois_with_segments: List[Tuple[Any, int, int, RouteSegmentDB]],
+        route: Route,
+        exclude_cities: List[str],
+        max_detour_distance_km: float,
+    ) -> List[RoadMilestone]:
+        """
+        Create RoadMilestones from POIs discovered in segments.
+
+        This method converts POI data from the segment-based discovery into
+        RoadMilestone objects suitable for the LinearMapResponse.
+
+        Args:
+            route_segments_data: List of (RouteSegment, is_new) tuples in route order
+            all_pois_with_segments: List of (POI, search_point_index, distance_m, segment) tuples
+            route: The complete Route object with geometry
+            exclude_cities: Cities to exclude from milestones
+            max_detour_distance_km: Maximum detour distance for junction calculation
+
+        Returns:
+            List of RoadMilestone objects sorted by distance_from_origin
+        """
+        from decimal import Decimal
+
+        milestones: List[RoadMilestone] = []
+
+        # Build segment order map: segment_id -> (order_index, cumulative_distance_km)
+        segment_distances: Dict[Any, Tuple[int, float]] = {}
+        cumulative_distance = 0.0
+        for idx, (segment, _) in enumerate(route_segments_data):
+            segment_distances[segment.id] = (idx, cumulative_distance)
+            cumulative_distance += float(segment.length_km)
+
+        # Track seen POIs for deduplication (keep one with shorter access)
+        seen_pois: Dict[str, Tuple[RoadMilestone, float]] = {}  # poi_id -> (milestone, distance_m)
+
+        for poi, sp_index, distance_m, segment in all_pois_with_segments:
+            segment_info = segment_distances.get(segment.id)
+            if not segment_info:
+                logger.warning(f"Segment {segment.id} not found in route order")
+                continue
+
+            segment_order, segment_start_distance = segment_info
+
+            # Get search point data for this POI
+            sp_data = None
+            if segment.search_points:
+                for sp in segment.search_points:
+                    if sp.get("index") == sp_index:
+                        sp_data = sp
+                        break
+
+            if not sp_data:
+                # Fallback: estimate based on segment start
+                distance_from_origin = segment_start_distance
+                route_point = (float(segment.start_lat), float(segment.start_lon))
+            else:
+                # Calculate distance from origin
+                sp_distance = sp_data.get("distance_from_segment_start_km", 0.0)
+                distance_from_origin = segment_start_distance + sp_distance
+                route_point = (sp_data["lat"], sp_data["lon"])
+
+            # Calculate junction info for distant POIs (> 500m from road)
+            junction_info = None
+            if distance_m > 500:
+                # Use simple junction calculation (POI is accessed from route_point)
+                poi_coords = (poi.location.latitude, poi.location.longitude)
+
+                # Determine side
+                side = self._determine_poi_side(route.geometry, route_point, poi_coords)
+                if isinstance(side, tuple):
+                    side = side[0]  # If debug info returned, extract just side
+
+                # Calculate access route distance (straight line for now)
+                access_km = distance_m / 1000.0
+
+                # Junction is at route_point, access distance is straight line
+                junction_info = (distance_from_origin, route_point, access_km, side)
+
+            # Create milestone
+            try:
+                milestone = self.milestone_factory.create_from_poi(
+                    poi=poi,
+                    distance_from_origin=distance_from_origin,
+                    route_point=route_point,
+                    junction_info=junction_info,
+                )
+
+                # Deduplication: keep POI with shorter access distance
+                poi_id = poi.id
+                if poi_id in seen_pois:
+                    existing_milestone, existing_distance = seen_pois[poi_id]
+                    if distance_m < existing_distance:
+                        # Replace with closer one
+                        seen_pois[poi_id] = (milestone, distance_m)
+                else:
+                    seen_pois[poi_id] = (milestone, distance_m)
+
+            except Exception as e:
+                logger.warning(f"Error creating milestone for POI {poi.id}: {e}")
+                continue
+
+        # Collect deduplicated milestones
+        milestones = [milestone for milestone, _ in seen_pois.values()]
+
+        # Filter excluded cities
+        if exclude_cities:
+            milestones = self._filter_excluded_cities(milestones, exclude_cities)
+
+        # Sort by distance from origin
+        milestones.sort(key=lambda m: m.distance_from_origin_km)
+
+        logger.info(
+            f"Created {len(milestones)} milestones from segment POIs "
+            f"(deduplicated from {len(all_pois_with_segments)} total)"
+        )
+
+        return milestones
+
+    def _process_steps_into_segments(
+        self,
+        steps: List,
+        milestone_categories: List[POICategory],
+        max_distance_from_road: float,
+        force_poi_refresh: bool = False,
+    ) -> Tuple[List[Tuple[RouteSegmentDB, bool]], List[Tuple[Any, int, int, RouteSegmentDB]]]:
+        # Note: force_poi_refresh is currently not used but reserved for future
+        # implementation where we can mark segments for re-fetching POIs
+        """
+        Process OSRM steps into reusable RouteSegments.
+
+        For new segments (not previously seen), searches for POIs and creates
+        SegmentPOI associations. Also returns all discovered POIs for milestone
+        creation.
+
+        Args:
+            steps: List of RouteStep objects from OSRM
+            milestone_categories: POI categories to search for
+            max_distance_from_road: Maximum POI search radius
+            force_poi_refresh: If True, re-search POIs even for existing segments
+
+        Returns:
+            Tuple of:
+            - List of (RouteSegment, is_new) tuples
+            - List of (POI, search_point_index, distance_m, segment) tuples
+        """
+        import asyncio
+        from sqlalchemy.ext.asyncio import (
+            AsyncSession,
+            async_sessionmaker,
+            create_async_engine,
+        )
+        from api.services.segment_service import SegmentService
+        from api.database.repositories.segment_poi import SegmentPOIRepository
+        from api.database.repositories.poi import POIRepository
+
+        settings = get_settings()
+
+        async def _process():
+            database_url = (
+                f"postgresql+asyncpg://{settings.postgres_user}:{settings.postgres_password}"
+                f"@{settings.postgres_host}:{settings.postgres_port}/{settings.postgres_database}"
+            )
+            engine = create_async_engine(
+                database_url,
+                pool_size=1,
+                max_overflow=0,
+                pool_pre_ping=True,
+            )
+            session_maker = async_sessionmaker(
+                engine,
+                class_=AsyncSession,
+                expire_on_commit=False,
+            )
+
+            # Collect all POIs with their segment info for milestone creation
+            all_pois_with_segments: List[Tuple[Any, int, int, RouteSegmentDB]] = []
+
+            try:
+                async with session_maker() as session:
+                    try:
+                        segment_service = SegmentService(session)
+                        segment_poi_repo = SegmentPOIRepository(session)
+                        poi_repo = POIRepository(session)
+
+                        # Bulk get or create segments
+                        results = await segment_service.bulk_get_or_create_segments(steps)
+
+                        # For each segment, get or search POIs
+                        for segment, is_new in results:
+                            if is_new and await segment_service.needs_poi_search(segment):
+                                # Search POIs for this NEW segment
+                                pois_with_data = await self.poi_search_service.search_pois_for_segment(
+                                    segment=segment,
+                                    categories=milestone_categories,
+                                    max_distance_from_road=max_distance_from_road,
+                                )
+
+                                if pois_with_data:
+                                    # Persist POIs first and get DB POI IDs
+                                    poi_id_map = await self._persist_pois_for_segment(
+                                        session, pois_with_data
+                                    )
+
+                                    # Create SegmentPOI associations with DB POI IDs
+                                    poi_tuples = []
+                                    for poi, sp_idx, dist_m in pois_with_data:
+                                        db_poi_id = poi_id_map.get(poi.id)
+                                        if db_poi_id:
+                                            poi_tuples.append((db_poi_id, sp_idx, dist_m))
+
+                                    if poi_tuples:
+                                        await segment_service.associate_pois_to_segment(
+                                            segment, poi_tuples
+                                        )
+                                    else:
+                                        from api.database.repositories.route_segment import RouteSegmentRepository
+                                        segment_repo = RouteSegmentRepository(session)
+                                        await segment_repo.mark_pois_fetched(segment.id)
+
+                                    # Collect POIs for milestone creation
+                                    for poi, sp_idx, dist_m in pois_with_data:
+                                        all_pois_with_segments.append((poi, sp_idx, dist_m, segment))
+                                else:
+                                    from api.database.repositories.route_segment import RouteSegmentRepository
+                                    segment_repo = RouteSegmentRepository(session)
+                                    await segment_repo.mark_pois_fetched(segment.id)
+                            else:
+                                # EXISTING segment - load POIs from SegmentPOI associations
+                                segment_pois = await segment_poi_repo.get_by_segment_with_pois(
+                                    segment.id
+                                )
+                                for sp in segment_pois:
+                                    if sp.poi:
+                                        # Convert DB POI to provider POI format for consistency
+                                        from api.providers.models import POI as ProviderPOI, GeoLocation
+
+                                        # Safely convert type to POICategory
+                                        try:
+                                            poi_category = POICategory(sp.poi.type) if sp.poi.type else POICategory.OTHER
+                                        except ValueError:
+                                            # Type not in POICategory enum (e.g., 'village', 'city')
+                                            poi_category = POICategory.OTHER
+
+                                        provider_poi = ProviderPOI(
+                                            id=str(sp.poi.osm_id or sp.poi.id),
+                                            name=sp.poi.name,
+                                            location=GeoLocation(
+                                                latitude=float(sp.poi.latitude),
+                                                longitude=float(sp.poi.longitude),
+                                                city=sp.poi.city,
+                                            ),
+                                            category=poi_category,
+                                            amenities=sp.poi.amenities or [],
+                                            phone=sp.poi.phone,
+                                            website=sp.poi.website,
+                                            rating=float(sp.poi.rating) if sp.poi.rating else None,
+                                            review_count=sp.poi.rating_count,
+                                            provider_data=sp.poi.tags or {},
+                                        )
+                                        all_pois_with_segments.append((
+                                            provider_poi,
+                                            sp.search_point_index,
+                                            sp.straight_line_distance_m,
+                                            segment,
+                                        ))
+
+                        await session.commit()
+                        return results, all_pois_with_segments
+
+                    except Exception:
+                        await session.rollback()
+                        raise
+            finally:
+                await engine.dispose()
+
+        return asyncio.run(_process())
+
+    async def _persist_pois_for_segment(
+        self,
+        session,
+        pois_with_data: List[Tuple],
+    ) -> Dict[str, Any]:
+        """
+        Persist POIs to database before creating SegmentPOI associations.
+
+        Args:
+            session: Database session
+            pois_with_data: List of (POI, sp_index, distance_m) tuples
+
+        Returns:
+            Dict mapping provider POI ID -> database POI UUID
+        """
+        from uuid import UUID
+        from api.database.repositories.poi import POIRepository
+        from api.providers.models import POI as ProviderPOI
+
+        poi_repo = POIRepository(session)
+        poi_id_map: Dict[str, UUID] = {}
+
+        for poi, _, _ in pois_with_data:
+            if not isinstance(poi, ProviderPOI):
+                continue
+
+            # Try to extract city from POI data first (no API call)
+            city = poi.location.city
+            if not city and poi.provider_data:
+                city = (
+                    poi.provider_data.get("addr:city")
+                    or poi.provider_data.get("address:city")
+                    or poi.provider_data.get("addr:municipality")
+                )
+            # Note: Reverse geocoding for city is done later in MapAssemblyService
+            # only for POIs that actually appear in the final map (after deduplication)
+
+            # Prepare POI data dict
+            poi_data = {
+                "name": poi.name,
+                "type": poi.category.value if poi.category else "other",
+                "latitude": poi.location.latitude,
+                "longitude": poi.location.longitude,
+                "city": city,
+                "amenities": poi.amenities,
+                "phone": poi.phone,
+                "website": poi.website,
+                "rating": poi.rating,
+                "rating_count": poi.review_count,
+                "tags": poi.provider_data,
+            }
+
+            # Get OSM ID if available
+            osm_id = poi.provider_data.get("osm_id") or poi.provider_data.get("id") or poi.id
+
+            if osm_id:
+                db_poi, _ = await poi_repo.get_or_create_by_osm_id(str(osm_id), poi_data)
+                poi_id_map[poi.id] = db_poi.id
+
+        return poi_id_map
+
     # ========================================================================
     # MAIN PUBLIC METHODS
     # ========================================================================
@@ -326,18 +668,38 @@ class RoadService:
 
         self._log_route_info(route)
 
-        # Step 3: Process route into linear segments
+        # Step 3: Process route into linear segments (for display)
         linear_segments = self.segmentation_service.process_route_into_segments(
             route, segment_length_km
         )
 
-        # Step 4: Find milestones along the route
+        # Step 3b: Process OSRM steps into reusable RouteSegments and collect POIs
         milestone_categories = self.milestone_factory.build_milestone_categories(
             include_cities
         )
-
         logger.info(
             f"Milestone categories requested: {[cat.value for cat in milestone_categories]}"
+        )
+
+        route_segments_data: List[Tuple[RouteSegmentDB, bool]] = []
+        all_pois_with_segments: List[Tuple[Any, int, int, RouteSegmentDB]] = []
+
+        if not route.steps:
+            raise ValueError(
+                f"Route from {origin} to {destination} has no steps. "
+                "OSRM steps are required for map generation."
+            )
+
+        logger.info(f"Processing {len(route.steps)} OSRM steps into reusable segments")
+        route_segments_data, all_pois_with_segments = self._process_steps_into_segments(
+            route.steps,
+            milestone_categories=milestone_categories,
+            max_distance_from_road=max_distance_from_road,
+        )
+        logger.info(
+            f"Created/reused {len(route_segments_data)} route segments "
+            f"({sum(1 for _, is_new in route_segments_data if is_new)} new), "
+            f"found {len(all_pois_with_segments)} POIs"
         )
 
         # Check if debug is enabled and create collector
@@ -349,21 +711,16 @@ class RoadService:
         except Exception as e:
             logger.warning(f"Error checking debug config: {e}")
 
-        all_milestones = run_async_safe(
-            self.poi_search_service.find_milestones(
-                segments=linear_segments,
-                categories=milestone_categories,
-                max_distance_from_road=max_distance_from_road,
-                max_detour_distance_km=max_detour_distance_km,
-                exclude_cities=[origin_city],
-                progress_callback=progress_callback,
-                main_route=route,
-                debug_collector=debug_collector,
-            )
+        # Step 4: Create milestones from segment POIs
+        all_milestones = self._create_milestones_from_segment_pois(
+            route_segments_data=route_segments_data,
+            all_pois_with_segments=all_pois_with_segments,
+            route=route,
+            exclude_cities=[origin_city],
+            max_detour_distance_km=max_detour_distance_km,
         )
 
-        # Step 5: Sort and assign milestones to segments
-        all_milestones.sort(key=lambda m: m.distance_from_origin_km)
+        # Step 5: Assign milestones to display segments
         self.milestone_factory.assign_to_segments(linear_segments, all_milestones)
 
         # Step 6: Enrich with Google Places ratings
@@ -400,6 +757,9 @@ class RoadService:
                 linear_map,
                 user_id=user_id,
                 debug_collector=debug_collector,
+                route_segments_data=route_segments_data,
+                route_geometry=route.geometry,
+                route_total_km=route.total_distance,
             )
             linear_map.id = map_id
         except Exception as e:

@@ -85,6 +85,8 @@ def sample_destination_location():
 @pytest.fixture
 def sample_route(sample_origin_location, sample_destination_location):
     """Sample route between SP and RJ."""
+    from api.providers.models import RouteStep
+
     return Route(
         origin=sample_origin_location,
         destination=sample_destination_location,
@@ -96,7 +98,34 @@ def sample_route(sample_origin_location, sample_destination_location):
             (-23.0000, -44.5000),  # Intermediate 2
             (-22.9068, -43.1729),  # Rio de Janeiro
         ],
-        road_names=["BR-116", "Via Dutra"]
+        road_names=["BR-116", "Via Dutra"],
+        steps=[
+            RouteStep(
+                distance_m=215000.0,
+                duration_s=10800.0,
+                geometry=[
+                    (-23.5505, -46.6333),
+                    (-23.2000, -45.5000),
+                    (-23.0000, -44.5000),
+                ],
+                road_name="BR-116",
+                maneuver_type="depart",
+                maneuver_modifier=None,
+                maneuver_location=(-23.5505, -46.6333),
+            ),
+            RouteStep(
+                distance_m=215500.0,
+                duration_s=10800.0,
+                geometry=[
+                    (-23.0000, -44.5000),
+                    (-22.9068, -43.1729),
+                ],
+                road_name="Via Dutra",
+                maneuver_type="arrive",
+                maneuver_modifier=None,
+                maneuver_location=(-23.0000, -44.5000),
+            ),
+        ],
     )
 
 
@@ -664,9 +693,10 @@ class TestGenerateLinearMap:
         mock_geo_provider.calculate_route.return_value = sample_route
         mock_poi_provider.search_pois.return_value = sample_pois
 
-        # Mock the POI search service's find_milestones method
-        with patch.object(road_service.poi_search_service, 'find_milestones', new_callable=AsyncMock) as mock_find:
-            mock_find.return_value = []
+        # Mock the segment processing method
+        with patch.object(road_service, '_process_steps_into_segments') as mock_segments:
+            # Return empty segments and POIs for this unit test
+            mock_segments.return_value = ([], [])
 
             result = road_service.generate_linear_map(
                 origin="São Paulo, SP",

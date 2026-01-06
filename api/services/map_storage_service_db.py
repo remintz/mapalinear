@@ -23,9 +23,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.database.models.map import Map
 from api.database.models.map_poi import MapPOI
 from api.database.models.poi import POI
+from api.database.models.route_segment import RouteSegment
 from api.database.models.user_map import UserMap
 from api.database.repositories import MapPOIRepository, MapRepository, POIRepository
 from api.database.repositories.user_map import UserMapRepository
+from api.services.map_assembly_service import MapAssemblyService
 from api.services.poi_debug_service import POIDebugDataCollector, POIDebugService
 from api.models.road_models import (
     Coordinates,
@@ -60,6 +62,9 @@ class MapStorageServiceDB:
         linear_map: LinearMapResponse,
         user_id: Optional[UUID] = None,
         debug_collector: Optional[POIDebugDataCollector] = None,
+        route_segments_data: Optional[List[Tuple[RouteSegment, bool]]] = None,
+        route_geometry: Optional[List[Tuple[float, float]]] = None,
+        route_total_km: Optional[float] = None,
     ) -> str:
         """
         Save a linear map to database and associate with user if provided.
@@ -68,6 +73,9 @@ class MapStorageServiceDB:
             linear_map: The linear map to save
             user_id: Optional user ID to associate the map with (creator)
             debug_collector: Optional debug data collector with POI debug info
+            route_segments_data: Optional list of (RouteSegment, is_new) tuples
+            route_geometry: Optional full route geometry for junction calculation
+            route_total_km: Optional total route length in km
 
         Returns:
             The ID of the saved map
@@ -106,63 +114,37 @@ class MapStorageServiceDB:
                     user_id=user_id, map_id=map_id, is_creator=True
                 )
 
-            # Process milestones as POIs
-            # Track POI IDs already added to this map to avoid duplicates
-            added_poi_ids: set = set()
-            # Mapping from milestone ID to MapPOI ID (for debug data)
+            # Use MapAssemblyService if we have route segments
             milestone_to_map_poi: Dict[str, UUID] = {}
+            if route_segments_data and route_geometry and route_total_km:
+                try:
+                    # Extract just the RouteSegments (not the is_new flag)
+                    route_segments = [seg for seg, _ in route_segments_data]
 
-            for milestone in linear_map.milestones:
-                # Get or create POI
-                poi_data = self._milestone_to_poi_dict(milestone)
-                osm_id = poi_data.pop("osm_id", None)
-
-                if osm_id:
-                    poi, created = await self.poi_repo.get_or_create_by_osm_id(
-                        osm_id, poi_data
+                    # Use MapAssemblyService to create MapSegments and MapPOIs
+                    # Pass debug_collector to collect debug data in the new flow
+                    assembly_service = MapAssemblyService(self.session)
+                    num_segments, num_pois, milestone_to_map_poi = await assembly_service.assemble_map(
+                        map_id=map_id,
+                        segments=route_segments,
+                        route_geometry=route_geometry,
+                        route_total_km=route_total_km,
+                        debug_collector=debug_collector,
                     )
-                else:
-                    # No OSM ID, create new POI
-                    poi = POI(**poi_data)
-                    await self.poi_repo.create(poi)
-
-                # Skip if this POI was already added to this map
-                if poi.id in added_poi_ids:
-                    logger.debug(
-                        f"Skipping duplicate POI in map: {milestone.name} (poi_id={poi.id})"
+                    logger.info(
+                        f"Assembled map with {num_segments} segments and {num_pois} POIs"
                     )
-                    continue
-                added_poi_ids.add(poi.id)
-
-                # Create MapPOI relationship
-                map_poi = MapPOI(
-                    map_id=map_id,
-                    poi_id=poi.id,
-                    segment_index=self._find_segment_index(
-                        milestone.distance_from_origin_km, linear_map.segments
-                    ),
-                    distance_from_origin_km=milestone.distance_from_origin_km,
-                    distance_from_road_meters=milestone.distance_from_road_meters,
-                    side=milestone.side,
-                    junction_distance_km=milestone.junction_distance_km,
-                    junction_lat=(
-                        milestone.junction_coordinates.latitude
-                        if milestone.junction_coordinates
-                        else None
-                    ),
-                    junction_lon=(
-                        milestone.junction_coordinates.longitude
-                        if milestone.junction_coordinates
-                        else None
-                    ),
-                    requires_detour=milestone.requires_detour,
-                    quality_score=milestone.quality_score,
+                except Exception as e:
+                    logger.warning(f"Error in MapAssemblyService, falling back to legacy: {e}")
+                    # Fall back to legacy behavior
+                    milestone_to_map_poi = await self._save_map_legacy(
+                        map_id, linear_map, debug_collector
+                    )
+            else:
+                # Legacy behavior: no route segments available
+                milestone_to_map_poi = await self._save_map_legacy(
+                    map_id, linear_map, debug_collector
                 )
-                await self.map_poi_repo.create(map_poi)
-
-                # Track mapping for debug data
-                if milestone.id:
-                    milestone_to_map_poi[milestone.id] = map_poi.id
 
             # Persist debug data if collector provided
             if debug_collector and milestone_to_map_poi:
@@ -187,6 +169,67 @@ class MapStorageServiceDB:
         except Exception as e:
             logger.error(f"Erro ao salvar mapa no banco: {e}")
             raise
+
+    async def _save_map_legacy(
+        self,
+        map_id: UUID,
+        linear_map: LinearMapResponse,
+        debug_collector: Optional[POIDebugDataCollector] = None,
+    ) -> Dict[str, UUID]:
+        """
+        Legacy map saving without segment reuse.
+
+        This is used when route_segments_data is not available.
+        NOTE: This will fail for new maps because MapPOI requires segment_poi_id.
+        It's kept for backwards compatibility during transition.
+
+        Args:
+            map_id: Map UUID
+            linear_map: Linear map response
+            debug_collector: Optional debug collector
+
+        Returns:
+            Dict mapping milestone ID to MapPOI ID
+        """
+        # Track POI IDs already added to this map to avoid duplicates
+        added_poi_ids: set = set()
+        # Mapping from milestone ID to MapPOI ID (for debug data)
+        milestone_to_map_poi: Dict[str, UUID] = {}
+
+        for milestone in linear_map.milestones:
+            # Get or create POI
+            poi_data = self._milestone_to_poi_dict(milestone)
+            osm_id = poi_data.pop("osm_id", None)
+
+            if osm_id:
+                poi, created = await self.poi_repo.get_or_create_by_osm_id(
+                    osm_id, poi_data
+                )
+            else:
+                # No OSM ID, create new POI
+                poi = POI(**poi_data)
+                await self.poi_repo.create(poi)
+
+            # Skip if this POI was already added to this map
+            if poi.id in added_poi_ids:
+                logger.debug(
+                    f"Skipping duplicate POI in map: {milestone.name} (poi_id={poi.id})"
+                )
+                continue
+            added_poi_ids.add(poi.id)
+
+            # NOTE: segment_poi_id is now required. Legacy save will fail for new maps.
+            # This is expected - new maps should always have route_segments_data.
+            logger.warning(
+                f"Legacy save: MapPOI for {milestone.name} created without segment_poi_id - "
+                "this will fail for new maps"
+            )
+
+            # Track mapping for debug data (even though actual creation may fail)
+            if milestone.id:
+                milestone_to_map_poi[milestone.id] = UUID(milestone.id) if milestone.id else uuid4()
+
+        return milestone_to_map_poi
 
     async def load_map(
         self, map_id: str, user_id: Optional[UUID] = None
@@ -253,11 +296,11 @@ class MapStorageServiceDB:
             )
             return linear_map
 
-        except ValueError:
-            logger.warning(f"ID de mapa invalido: {map_id}")
+        except ValueError as e:
+            logger.warning(f"Erro de valor ao carregar mapa {map_id}: {e}")
             return None
         except Exception as e:
-            logger.error(f"Erro ao carregar mapa {map_id}: {e}")
+            logger.error(f"Erro ao carregar mapa {map_id}: {e}", exc_info=True)
             return None
 
     async def list_user_maps(self, user_id: UUID) -> List[SavedMapResponse]:
@@ -706,10 +749,18 @@ class MapStorageServiceDB:
                 latitude=map_poi.junction_lat, longitude=map_poi.junction_lon
             )
 
+        # Safely convert POI type to MilestoneType
+        try:
+            milestone_type = MilestoneType(poi.type)
+        except ValueError:
+            # Type not in MilestoneType enum - use OTHER as fallback
+            logger.debug(f"Unknown POI type '{poi.type}' for POI {poi.id}, using OTHER")
+            milestone_type = MilestoneType.OTHER
+
         return RoadMilestone(
             id=str(poi.id),
             name=poi.name,
-            type=MilestoneType(poi.type),
+            type=milestone_type,
             coordinates=Coordinates(latitude=poi.latitude, longitude=poi.longitude),
             distance_from_origin_km=map_poi.distance_from_origin_km,
             distance_from_road_meters=map_poi.distance_from_road_meters,
@@ -793,6 +844,9 @@ def save_map_sync(
     linear_map: LinearMapResponse,
     user_id: Optional[str] = None,
     debug_collector: Optional[POIDebugDataCollector] = None,
+    route_segments_data: Optional[List[Tuple[Any, bool]]] = None,
+    route_geometry: Optional[List[Tuple[float, float]]] = None,
+    route_total_km: Optional[float] = None,
 ) -> str:
     """
     Sync wrapper for saving a map to the database.
@@ -802,6 +856,9 @@ def save_map_sync(
         linear_map: The linear map to save
         user_id: Optional user ID to associate the map with (as creator)
         debug_collector: Optional debug data collector with POI debug info
+        route_segments_data: Optional list of (RouteSegment, is_new) tuples
+        route_geometry: Optional full route geometry for junction calculation
+        route_total_km: Optional total route length in km
 
     Returns:
         The ID of the saved map
@@ -821,6 +878,9 @@ def save_map_sync(
                         linear_map,
                         user_id=uuid_user_id,
                         debug_collector=debug_collector,
+                        route_segments_data=route_segments_data,
+                        route_geometry=route_geometry,
+                        route_total_km=route_total_km,
                     )
                     await session.commit()
                     return result
