@@ -669,6 +669,8 @@ class DatabaseStatsResponse(BaseModel):
     unreferenced_pois: int = Field(..., description="Orphan POIs not in any map")
     total_maps: int = Field(..., description="Total number of maps")
     total_map_pois: int = Field(..., description="Total map-POI relationships")
+    total_segments: int = Field(0, description="Total number of route segments")
+    orphan_segments: int = Field(0, description="Orphan segments not used by any map")
     pending_operations: int = Field(..., description="Operations in progress")
     stale_operations: int = Field(..., description="Stale operations (>2h)")
 
@@ -678,6 +680,8 @@ class MaintenanceResultResponse(BaseModel):
 
     orphan_pois_found: int = Field(..., description="Number of orphan POIs found")
     orphan_pois_deleted: int = Field(..., description="Number of orphan POIs deleted")
+    orphan_segments_found: int = Field(0, description="Number of orphan segments found")
+    orphan_segments_deleted: int = Field(0, description="Number of orphan segments deleted")
     is_referenced_fixed: int = Field(..., description="Number of is_referenced flags fixed")
     stale_operations_cleaned: int = Field(..., description="Number of stale operations cleaned")
     execution_time_ms: int = Field(..., description="Execution time in milliseconds")
@@ -714,6 +718,8 @@ async def get_database_stats(
         unreferenced_pois=stats.unreferenced_pois,
         total_maps=stats.total_maps,
         total_map_pois=stats.total_map_pois,
+        total_segments=stats.total_segments,
+        orphan_segments=stats.orphan_segments,
         pending_operations=stats.pending_operations,
         stale_operations=stats.stale_operations,
     )
@@ -755,6 +761,8 @@ async def run_maintenance(
     return MaintenanceResultResponse(
         orphan_pois_found=stats.orphan_pois_found,
         orphan_pois_deleted=stats.orphan_pois_deleted,
+        orphan_segments_found=stats.orphan_segments_found,
+        orphan_segments_deleted=stats.orphan_segments_deleted,
         is_referenced_fixed=stats.is_referenced_fixed,
         stale_operations_cleaned=stats.stale_operations_cleaned,
         execution_time_ms=stats.execution_time_ms,

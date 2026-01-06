@@ -56,6 +56,25 @@ class MapStorageServiceDB:
         self.poi_repo = POIRepository(session)
         self.map_poi_repo = MapPOIRepository(session)
         self.user_map_repo = UserMapRepository(session)
+        # Lazy-loaded repositories for segment operations
+        self._map_segment_repo = None
+        self._route_segment_repo = None
+
+    @property
+    def map_segment_repo(self):
+        """Lazy-load MapSegmentRepository."""
+        if self._map_segment_repo is None:
+            from api.database.repositories.map_segment import MapSegmentRepository
+            self._map_segment_repo = MapSegmentRepository(self.session)
+        return self._map_segment_repo
+
+    @property
+    def route_segment_repo(self):
+        """Lazy-load RouteSegmentRepository."""
+        if self._route_segment_repo is None:
+            from api.database.repositories.route_segment import RouteSegmentRepository
+            self._route_segment_repo = RouteSegmentRepository(self.session)
+        return self._route_segment_repo
 
     async def save_map(
         self,
@@ -621,6 +640,7 @@ class MapStorageServiceDB:
         """
         Permanently delete a map from database (admin only).
         This removes the map and all associated user_maps entries.
+        Also decrements usage_count on associated RouteSegments.
 
         Args:
             map_id: ID of the map to delete
@@ -630,6 +650,19 @@ class MapStorageServiceDB:
         """
         try:
             map_uuid = UUID(map_id)
+
+            # Get segment IDs before deletion to decrement their usage counts
+            segment_ids = await self.map_segment_repo.get_segment_ids_for_map(map_uuid)
+
+            # Decrement usage count for all segments used by this map
+            if segment_ids:
+                await self.route_segment_repo.bulk_decrement_usage(segment_ids)
+                logger.info(
+                    f"Decremented usage_count for {len(segment_ids)} segments "
+                    f"(map {map_id})"
+                )
+
+            # Delete the map (cascades to MapSegments, MapPOIs, etc.)
             deleted = await self.map_repo.delete_by_id(map_uuid)
 
             if deleted:

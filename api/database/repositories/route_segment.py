@@ -158,6 +158,101 @@ class RouteSegmentRepository(BaseRepository[RouteSegment]):
         )
         await self.session.flush()
 
+    async def decrement_usage_count(self, segment_id: UUID) -> None:
+        """
+        Decrement the usage count for a segment.
+
+        Args:
+            segment_id: Segment UUID
+        """
+        await self.session.execute(
+            update(RouteSegment)
+            .where(RouteSegment.id == segment_id)
+            .where(RouteSegment.usage_count > 0)  # Prevent negative counts
+            .values(usage_count=RouteSegment.usage_count - 1)
+        )
+        await self.session.flush()
+
+    async def bulk_decrement_usage(self, segment_ids: List[UUID]) -> None:
+        """
+        Decrement usage count for multiple segments.
+
+        Args:
+            segment_ids: List of segment UUIDs
+        """
+        if not segment_ids:
+            return
+
+        await self.session.execute(
+            update(RouteSegment)
+            .where(RouteSegment.id.in_(segment_ids))
+            .where(RouteSegment.usage_count > 0)  # Prevent negative counts
+            .values(usage_count=RouteSegment.usage_count - 1)
+        )
+        await self.session.flush()
+
+    async def find_orphan_segment_ids(self) -> List[UUID]:
+        """
+        Find segment IDs that are not referenced by any MapSegment.
+
+        Returns:
+            List of orphan segment UUIDs
+        """
+        from sqlalchemy import func
+        from api.database.models.map_segment import MapSegment
+
+        # Subquery to get all segment IDs that have at least one MapSegment
+        referenced_subquery = select(MapSegment.segment_id).distinct()
+
+        # Find segments not in the referenced set
+        result = await self.session.execute(
+            select(RouteSegment.id).where(~RouteSegment.id.in_(referenced_subquery))
+        )
+        return list(result.scalars().all())
+
+    async def count_orphan_segments(self) -> int:
+        """
+        Count segments that are not referenced by any MapSegment.
+
+        Returns:
+            Number of orphan segments
+        """
+        from sqlalchemy import func
+        from api.database.models.map_segment import MapSegment
+
+        referenced_subquery = select(MapSegment.segment_id).distinct()
+
+        result = await self.session.execute(
+            select(func.count(RouteSegment.id))
+            .where(~RouteSegment.id.in_(referenced_subquery))
+        )
+        return result.scalar() or 0
+
+    async def delete_orphan_segments(self) -> int:
+        """
+        Delete segments that are not referenced by any MapSegment.
+
+        This will also cascade delete associated SegmentPOIs.
+
+        Returns:
+            Number of segments deleted
+        """
+        from sqlalchemy import delete
+        from api.database.models.map_segment import MapSegment
+
+        # Get orphan IDs first
+        orphan_ids = await self.find_orphan_segment_ids()
+
+        if not orphan_ids:
+            return 0
+
+        # Delete orphan segments (SegmentPOIs will cascade delete)
+        result = await self.session.execute(
+            delete(RouteSegment).where(RouteSegment.id.in_(orphan_ids))
+        )
+
+        return result.rowcount
+
     async def get_statistics(self) -> dict:
         """
         Get statistics about route segments.
@@ -192,9 +287,13 @@ class RouteSegmentRepository(BaseRepository[RouteSegment]):
         )
         total_length_km = float(length_result.scalar() or 0)
 
+        # Orphan segments count
+        orphan_count = await self.count_orphan_segments()
+
         return {
             "total_segments": total,
             "segments_with_pois": with_pois,
             "total_usage": total_usage,
             "total_length_km": total_length_km,
+            "orphan_segments": orphan_count,
         }
