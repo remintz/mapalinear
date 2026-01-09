@@ -171,13 +171,20 @@ export function POICard({ poi, onClick, isPassed = false, isNext = false }: POIC
     }
   };
 
+  // Card is only visually clickable if it has a Google Maps link
+  const isClickable = hasGoogleMapsLink;
+
   // Build card classes based on state
   const cardClasses = [
-    'rounded-lg p-4 transition-all cursor-pointer active:scale-[0.98]',
+    'rounded-lg p-4 transition-all',
+    // Clickable styles
+    isClickable ? 'cursor-pointer active:scale-[0.98]' : '',
     // Base styles - different for passed vs active
     isPassed
       ? 'bg-gray-50 border border-gray-100 opacity-50'
-      : 'bg-white border border-gray-200 hover:shadow-md',
+      : 'bg-white border border-gray-200',
+    // Hover shadow only for clickable cards
+    isClickable && !isPassed ? 'hover:shadow-md' : '',
     // Next POI highlight
     isNext && !isPassed
       ? 'ring-2 ring-blue-500 ring-offset-2 border-blue-300'
