@@ -122,9 +122,9 @@ export default function Home() {
         </div>
 
         {/* CTA Section */}
-        <Card className="bg-gradient-to-r from-blue-600 to-blue-700 border-0 text-white">
+        <Card className="bg-gradient-to-r from-blue-500 to-blue-600 border-0 text-white">
           <CardContent className="py-12 text-center">
-            <h2 className="text-3xl font-bold mb-4">
+            <h2 className="text-3xl font-bold mb-4 text-white">
               Pronto para Planejar sua Viagem?
             </h2>
             <p className="text-blue-100 mb-8 text-lg max-w-2xl mx-auto">
@@ -133,7 +133,7 @@ export default function Home() {
             </p>
             <div className="flex gap-4 justify-center">
               <Link href="/search">
-                <Button size="lg" variant="secondary" className="text-lg px-8 py-4">
+                <Button size="lg" className="text-lg px-8 py-4 bg-white text-blue-700 hover:bg-blue-50">
                   Começar Agora →
                 </Button>
               </Link>
