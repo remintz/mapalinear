@@ -2,7 +2,7 @@
 Repository for application logs.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import delete, func, select
@@ -62,7 +62,7 @@ class ApplicationLogRepository(BaseRepository[ApplicationLog]):
             Created ApplicationLog instance
         """
         log = ApplicationLog(
-            timestamp=timestamp or datetime.now(),
+            timestamp=timestamp or datetime.now(timezone.utc),
             level=level,
             level_no=level_no,
             module=module,
@@ -244,7 +244,7 @@ class ApplicationLogRepository(BaseRepository[ApplicationLog]):
         Returns:
             Number of deleted records
         """
-        cutoff_date = datetime.now() - timedelta(days=days_to_keep)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_to_keep)
 
         result = await self.session.execute(
             delete(ApplicationLog).where(ApplicationLog.timestamp < cutoff_date)

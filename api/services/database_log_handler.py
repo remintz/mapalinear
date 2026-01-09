@@ -8,7 +8,7 @@ to the database in batches for better performance.
 import asyncio
 import logging
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from api.middleware.request_id import get_request_id, get_session_id, get_user_email
@@ -111,7 +111,7 @@ class DatabaseLogHandler(logging.Handler):
 
             # Create log entry dict
             log_entry = {
-                "timestamp": datetime.fromtimestamp(record.created),
+                "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc),
                 "level": record.levelname,
                 "level_no": record.levelno,
                 "module": record.name,
