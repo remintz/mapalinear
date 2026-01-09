@@ -110,8 +110,11 @@ class DatabaseLogHandler(logging.Handler):
             user_email = get_user_email()
 
             # Create log entry dict
+            # Convert to UTC timezone-aware datetime
+            timestamp_utc = datetime.fromtimestamp(record.created, tz=timezone.utc)
+            
             log_entry = {
-                "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc),
+                "timestamp": timestamp_utc,
                 "level": record.levelname,
                 "level_no": record.levelno,
                 "module": record.name,

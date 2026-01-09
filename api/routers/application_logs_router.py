@@ -94,7 +94,7 @@ async def get_logs(
     calculated_end = end_time
 
     if time_window and time_window != "custom":
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         calculated_end = now
 
         if time_window == "5m":
