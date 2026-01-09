@@ -236,7 +236,6 @@ class MapAssemblyService:
                     if poi.id in unique_pois:
                         filtered_out_count += 1
                         del unique_pois[poi.id]
-                        logger.debug(f"Filtering out POI '{poi.name}' in origin city '{poi.city}'")
                     continue
 
             filtered_segment_pois.append((segment_poi, map_segment))

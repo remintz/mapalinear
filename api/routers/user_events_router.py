@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.database.connection import get_db
@@ -48,6 +48,14 @@ class TrackEventRequest(BaseModel):
     latitude: Optional[float] = Field(None, description="User latitude")
     longitude: Optional[float] = Field(None, description="User longitude")
     duration_ms: Optional[int] = Field(None, description="Duration in ms (for performance events)")
+
+    @field_validator("duration_ms", mode="before")
+    @classmethod
+    def convert_duration_to_int(cls, v: Any) -> Optional[int]:
+        """Convert float duration to int (JavaScript may send floats)."""
+        if v is None:
+            return None
+        return int(v)
 
 
 class TrackEventsRequest(BaseModel):
