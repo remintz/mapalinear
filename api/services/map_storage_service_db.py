@@ -687,13 +687,26 @@ class MapStorageServiceDB:
                 latitude=map_poi.junction_lat, longitude=map_poi.junction_lon
             )
 
+        # Mapping for POI types that don't exist directly in MilestoneType
+        poi_type_mapping = {
+            "food": MilestoneType.RESTAURANT,
+            "fuel": MilestoneType.GAS_STATION,
+            "lodging": MilestoneType.HOTEL,
+        }
+
         # Safely convert POI type to MilestoneType
-        try:
-            milestone_type = MilestoneType(poi.type)
-        except ValueError:
-            # Type not in MilestoneType enum - use OTHER as fallback
-            logger.debug(f"Unknown POI type '{poi.type}' for POI {poi.id}, using OTHER")
-            milestone_type = MilestoneType.OTHER
+        poi_type = poi.type
+        if poi_type in poi_type_mapping:
+            milestone_type = poi_type_mapping[poi_type]
+        else:
+            try:
+                milestone_type = MilestoneType(poi_type)
+            except ValueError:
+                # Type not in MilestoneType enum - use OTHER as fallback
+                logger.debug(
+                    f"Unknown POI type '{poi_type}' for POI {poi.id}, using OTHER"
+                )
+                milestone_type = MilestoneType.OTHER
 
         return RoadMilestone(
             id=str(poi.id),
