@@ -75,6 +75,7 @@ class MapAssemblyService:
         route_geometry: List[Tuple[float, float]],
         route_total_km: float,
         debug_collector: Optional[POIDebugDataCollector] = None,
+        origin_city: Optional[str] = None,
     ) -> Tuple[int, int, Dict[str, UUID]]:
         """
         Assemble a map from a list of route segments.
@@ -84,7 +85,8 @@ class MapAssemblyService:
         2. Aggregates search points for junction calculation
         3. Creates MapPOI records with calculated junction data
         4. Deduplicates POIs that appear in multiple segments
-        5. Collects debug data if debug_collector is provided
+        5. Filters out POIs in the origin city
+        6. Collects debug data if debug_collector is provided
 
         Args:
             map_id: ID of the map to assemble
@@ -92,6 +94,7 @@ class MapAssemblyService:
             route_geometry: Full route geometry as [(lat, lon), ...]
             route_total_km: Total route length in km
             debug_collector: Optional collector for POI debug data
+            origin_city: Optional origin city name to filter out POIs
 
         Returns:
             Tuple of (num_map_segments_created, num_map_pois_created, poi_to_map_poi_mapping)
@@ -130,6 +133,7 @@ class MapAssemblyService:
             route_total_km=route_total_km,
             global_sps=global_sps,
             debug_collector=debug_collector,
+            origin_city=origin_city,
         )
 
         return len(map_segments), num_pois, poi_to_map_poi
@@ -173,6 +177,7 @@ class MapAssemblyService:
         route_total_km: float,
         global_sps: List[GlobalSearchPoint],
         debug_collector: Optional[POIDebugDataCollector] = None,
+        origin_city: Optional[str] = None,
     ) -> Tuple[int, Dict[str, UUID]]:
         """
         Create MapPOI records with junction calculation and deduplication.
@@ -184,19 +189,57 @@ class MapAssemblyService:
             route_total_km: Total route length
             global_sps: Aggregated search points
             debug_collector: Optional collector for POI debug data
+            origin_city: Optional origin city name to filter out POIs
 
         Returns:
             Tuple of (num_pois_created, poi_id_to_map_poi_id_mapping)
         """
-        # Track POIs we've already added to avoid duplicates
-        added_poi_ids: Set[UUID] = set()
-
-        # Store best junction for each POI (for deduplication)
-        best_junction_for_poi: Dict[UUID, Tuple[JunctionResult, SegmentPOI, MapSegment, POI]] = {}
-
-        # Process each SegmentPOI
-        skipped_pois = 0
+        # Step 1: Collect unique POIs and enrich with city BEFORE junction calculation
+        unique_pois: Dict[UUID, Tuple[POI, SegmentPOI, MapSegment]] = {}
         for segment_poi, map_segment in segment_pois_with_map_segments:
+            poi = segment_poi.poi
+            if not poi:
+                continue
+            # Keep first occurrence (will deduplicate later based on junction distance)
+            if poi.id not in unique_pois:
+                unique_pois[poi.id] = (poi, segment_poi, map_segment)
+
+        # Enrich POIs without city via reverse geocoding
+        pois_needing_city = [poi for poi, _, _ in unique_pois.values() if not poi.city]
+        if pois_needing_city and self.junction_service.geo_provider:
+            await self._enrich_pois_with_city(pois_needing_city)
+
+        # Step 2: Filter out POIs in origin city BEFORE junction calculation
+        filtered_out_count = 0
+        origin_city_lower = origin_city.lower().strip() if origin_city else None
+
+        filtered_segment_pois: List[Tuple[SegmentPOI, MapSegment]] = []
+        for segment_poi, map_segment in segment_pois_with_map_segments:
+            poi = segment_poi.poi
+            if not poi:
+                continue
+
+            # Check if POI is in origin city
+            if origin_city_lower:
+                poi_city = (poi.city or "").lower().strip()
+                if poi_city and poi_city == origin_city_lower:
+                    # Only count once per unique POI
+                    if poi.id in unique_pois:
+                        filtered_out_count += 1
+                        del unique_pois[poi.id]
+                        logger.debug(f"Filtering out POI '{poi.name}' in origin city '{poi.city}'")
+                    continue
+
+            filtered_segment_pois.append((segment_poi, map_segment))
+
+        if filtered_out_count > 0:
+            logger.info(f"Filtered out {filtered_out_count} POIs in origin city '{origin_city}'")
+
+        # Step 3: Calculate junctions only for filtered POIs
+        best_junction_for_poi: Dict[UUID, Tuple[JunctionResult, SegmentPOI, MapSegment, POI]] = {}
+        skipped_pois = 0
+
+        for segment_poi, map_segment in filtered_segment_pois:
             poi = segment_poi.poi
             if not poi:
                 continue
@@ -229,10 +272,8 @@ class MapAssemblyService:
         if skipped_pois > 0:
             logger.info(f"Skipped {skipped_pois} POIs due to failed junction calculation")
 
-        # Create MapPOI records for best junctions
+        # Step 4: Create MapPOI records for best junctions
         map_pois = []
-        pois_needing_city = []
-        # Mapping from POI ID string to MapPOI ID (for debug data)
         poi_to_map_poi: Dict[str, UUID] = {}
 
         for poi_id, (junction, segment_poi, map_segment, poi) in best_junction_for_poi.items():
@@ -252,10 +293,6 @@ class MapAssemblyService:
             )
             map_pois.append(map_poi)
 
-            # Track POIs that need city enrichment
-            if not poi.city:
-                pois_needing_city.append(poi)
-
             # Collect debug data if collector is provided
             if debug_collector:
                 self._collect_debug_data(
@@ -268,16 +305,11 @@ class MapAssemblyService:
                     global_sps=global_sps,
                 )
 
-        # Enrich POIs with city via reverse geocoding (only for POIs in final map)
-        if pois_needing_city and self.junction_service.geo_provider:
-            await self._enrich_pois_with_city(pois_needing_city)
-
         if map_pois:
             await self.map_poi_repo.bulk_create(map_pois)
 
         # Build the mapping after bulk_create (IDs are assigned)
         for map_poi in map_pois:
-            # Use POI ID as string key (consistent with legacy format)
             poi_to_map_poi[str(map_poi.poi_id)] = map_poi.id
 
         logger.info(

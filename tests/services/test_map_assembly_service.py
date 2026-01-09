@@ -275,6 +275,200 @@ class TestCreateMapPOIs:
         assert num_pois == 0
         assert poi_to_map_poi == {}
 
+    @pytest.mark.asyncio
+    async def test_filters_pois_in_origin_city(self, assembly_service, sample_route_geometry):
+        """Test that POIs in the origin city are filtered out."""
+        map_id = uuid4()
+        segment_id = uuid4()
+
+        # Create POI in origin city
+        poi_in_origin = MagicMock()
+        poi_in_origin.id = uuid4()
+        poi_in_origin.latitude = -23.5510
+        poi_in_origin.longitude = -46.6510
+        poi_in_origin.quality_score = 0.8
+        poi_in_origin.city = "São Paulo"
+        poi_in_origin.name = "Posto na Origem"
+
+        segment_poi1 = MagicMock()
+        segment_poi1.id = uuid4()
+        segment_poi1.segment_id = segment_id
+        segment_poi1.poi_id = poi_in_origin.id
+        segment_poi1.poi = poi_in_origin
+        segment_poi1.search_point_index = 2
+        segment_poi1.straight_line_distance_m = 300
+
+        # Create POI in another city
+        poi_other_city = MagicMock()
+        poi_other_city.id = uuid4()
+        poi_other_city.latitude = -23.6510
+        poi_other_city.longitude = -46.7510
+        poi_other_city.quality_score = 0.9
+        poi_other_city.city = "Campinas"
+        poi_other_city.name = "Posto em Campinas"
+
+        segment_poi2 = MagicMock()
+        segment_poi2.id = uuid4()
+        segment_poi2.segment_id = segment_id
+        segment_poi2.poi_id = poi_other_city.id
+        segment_poi2.poi = poi_other_city
+        segment_poi2.search_point_index = 5
+        segment_poi2.straight_line_distance_m = 200
+
+        map_segment = MagicMock()
+        map_segment.segment_id = segment_id
+        map_segment.sequence_order = 0
+        map_segment.distance_from_origin_km = Decimal("0.0")
+
+        segment_pois_with_map_segments = [
+            (segment_poi1, map_segment),
+            (segment_poi2, map_segment),
+        ]
+
+        result = await assembly_service._create_map_pois(
+            map_id=map_id,
+            segment_pois_with_map_segments=segment_pois_with_map_segments,
+            route_geometry=sample_route_geometry,
+            route_total_km=20.0,
+            global_sps=[],
+            origin_city="São Paulo",
+        )
+
+        # Should only have 1 POI (the one in Campinas)
+        num_pois, poi_to_map_poi = result
+        assert num_pois == 1
+        assert str(poi_other_city.id) in poi_to_map_poi
+        assert str(poi_in_origin.id) not in poi_to_map_poi
+
+    @pytest.mark.asyncio
+    async def test_filters_pois_case_insensitive(self, assembly_service, sample_route_geometry):
+        """Test that origin city filtering is case insensitive."""
+        map_id = uuid4()
+        segment_id = uuid4()
+
+        # Create POI with different case city name
+        poi = MagicMock()
+        poi.id = uuid4()
+        poi.latitude = -23.5510
+        poi.longitude = -46.6510
+        poi.quality_score = 0.8
+        poi.city = "SÃO PAULO"  # Uppercase
+        poi.name = "Posto"
+
+        segment_poi = MagicMock()
+        segment_poi.id = uuid4()
+        segment_poi.segment_id = segment_id
+        segment_poi.poi_id = poi.id
+        segment_poi.poi = poi
+        segment_poi.search_point_index = 2
+        segment_poi.straight_line_distance_m = 300
+
+        map_segment = MagicMock()
+        map_segment.segment_id = segment_id
+        map_segment.sequence_order = 0
+        map_segment.distance_from_origin_km = Decimal("0.0")
+
+        segment_pois_with_map_segments = [(segment_poi, map_segment)]
+
+        result = await assembly_service._create_map_pois(
+            map_id=map_id,
+            segment_pois_with_map_segments=segment_pois_with_map_segments,
+            route_geometry=sample_route_geometry,
+            route_total_km=20.0,
+            global_sps=[],
+            origin_city="são paulo",  # lowercase
+        )
+
+        # POI should be filtered (case insensitive match)
+        num_pois, _ = result
+        assert num_pois == 0
+
+    @pytest.mark.asyncio
+    async def test_no_filter_when_origin_city_not_provided(
+        self, assembly_service, sample_route_geometry
+    ):
+        """Test that POIs are not filtered when origin_city is None."""
+        map_id = uuid4()
+        segment_id = uuid4()
+
+        poi = MagicMock()
+        poi.id = uuid4()
+        poi.latitude = -23.5510
+        poi.longitude = -46.6510
+        poi.quality_score = 0.8
+        poi.city = "São Paulo"
+        poi.name = "Posto"
+
+        segment_poi = MagicMock()
+        segment_poi.id = uuid4()
+        segment_poi.segment_id = segment_id
+        segment_poi.poi_id = poi.id
+        segment_poi.poi = poi
+        segment_poi.search_point_index = 2
+        segment_poi.straight_line_distance_m = 300
+
+        map_segment = MagicMock()
+        map_segment.segment_id = segment_id
+        map_segment.sequence_order = 0
+        map_segment.distance_from_origin_km = Decimal("0.0")
+
+        segment_pois_with_map_segments = [(segment_poi, map_segment)]
+
+        result = await assembly_service._create_map_pois(
+            map_id=map_id,
+            segment_pois_with_map_segments=segment_pois_with_map_segments,
+            route_geometry=sample_route_geometry,
+            route_total_km=20.0,
+            global_sps=[],
+            origin_city=None,  # No origin city filter
+        )
+
+        # POI should NOT be filtered
+        num_pois, _ = result
+        assert num_pois == 1
+
+    @pytest.mark.asyncio
+    async def test_keeps_pois_without_city(self, assembly_service, sample_route_geometry):
+        """Test that POIs without city information are kept."""
+        map_id = uuid4()
+        segment_id = uuid4()
+
+        poi = MagicMock()
+        poi.id = uuid4()
+        poi.latitude = -23.5510
+        poi.longitude = -46.6510
+        poi.quality_score = 0.8
+        poi.city = None  # No city info
+        poi.name = "Posto sem cidade"
+
+        segment_poi = MagicMock()
+        segment_poi.id = uuid4()
+        segment_poi.segment_id = segment_id
+        segment_poi.poi_id = poi.id
+        segment_poi.poi = poi
+        segment_poi.search_point_index = 2
+        segment_poi.straight_line_distance_m = 300
+
+        map_segment = MagicMock()
+        map_segment.segment_id = segment_id
+        map_segment.sequence_order = 0
+        map_segment.distance_from_origin_km = Decimal("0.0")
+
+        segment_pois_with_map_segments = [(segment_poi, map_segment)]
+
+        result = await assembly_service._create_map_pois(
+            map_id=map_id,
+            segment_pois_with_map_segments=segment_pois_with_map_segments,
+            route_geometry=sample_route_geometry,
+            route_total_km=20.0,
+            global_sps=[],
+            origin_city="São Paulo",
+        )
+
+        # POI without city should be kept
+        num_pois, _ = result
+        assert num_pois == 1
+
 
 class TestAssembleMap:
     """Tests for the main assemble_map method."""

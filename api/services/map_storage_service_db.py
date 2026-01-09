@@ -146,6 +146,9 @@ class MapStorageServiceDB:
             # Extract just the RouteSegments (not the is_new flag)
             route_segments = [seg for seg, _ in route_segments_data]
 
+            # Extract origin city name for POI filtering
+            origin_city = self._extract_city_name(linear_map.origin)
+
             assembly_service = MapAssemblyService(self.session, geo_provider)
             num_segments, num_pois, milestone_to_map_poi = await assembly_service.assemble_map(
                 map_id=map_id,
@@ -153,6 +156,7 @@ class MapStorageServiceDB:
                 route_geometry=route_geometry,
                 route_total_km=route_total_km,
                 debug_collector=debug_collector,
+                origin_city=origin_city,
             )
             logger.info(
                 f"Assembled map with {num_segments} segments and {num_pois} POIs"
@@ -667,6 +671,22 @@ class MapStorageServiceDB:
         return await self.delete_map_permanently(map_id)
 
     # Helper methods for conversion
+
+    def _extract_city_name(self, location_string: str) -> str:
+        """
+        Extract city name from location string.
+
+        Args:
+            location_string: Location in format "City, State" (e.g., "Belo Horizonte, MG")
+
+        Returns:
+            City name (e.g., "Belo Horizonte")
+        """
+        return (
+            location_string.split(",")[0].strip()
+            if "," in location_string
+            else location_string.strip()
+        )
 
     def _segment_to_dict(self, segment: LinearRoadSegment) -> dict:
         """Convert LinearRoadSegment to dict for JSONB storage."""
