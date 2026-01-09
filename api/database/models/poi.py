@@ -15,6 +15,7 @@ from api.database.connection import Base
 
 if TYPE_CHECKING:
     from api.database.models.map_poi import MapPOI
+    from api.database.models.segment_poi import SegmentPOI
 
 
 class POI(Base):
@@ -107,6 +108,9 @@ class POI(Base):
     missing_tags: Mapped[list] = mapped_column(JSONB, default=list)
     # Required tags that are missing for this POI type (e.g., ["brand", "phone"])
 
+    # Admin control - disabled POIs are excluded from maps
+    is_disabled: Mapped[bool] = mapped_column(default=False, index=True)
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -116,6 +120,9 @@ class POI(Base):
     # Relationships
     map_pois: Mapped[List["MapPOI"]] = relationship(
         "MapPOI", back_populates="poi", cascade="all, delete-orphan"
+    )
+    segment_pois: Mapped[List["SegmentPOI"]] = relationship(
+        "SegmentPOI", back_populates="poi", cascade="all, delete-orphan"
     )
 
     # Indexes

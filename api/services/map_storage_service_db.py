@@ -23,9 +23,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.database.models.map import Map
 from api.database.models.map_poi import MapPOI
 from api.database.models.poi import POI
+from api.database.models.route_segment import RouteSegment
 from api.database.models.user_map import UserMap
 from api.database.repositories import MapPOIRepository, MapRepository, POIRepository
 from api.database.repositories.user_map import UserMapRepository
+from api.providers.base import GeoProvider
+from api.services.map_assembly_service import MapAssemblyService
 from api.services.poi_debug_service import POIDebugDataCollector, POIDebugService
 from api.models.road_models import (
     Coordinates,
@@ -54,20 +57,47 @@ class MapStorageServiceDB:
         self.poi_repo = POIRepository(session)
         self.map_poi_repo = MapPOIRepository(session)
         self.user_map_repo = UserMapRepository(session)
+        # Lazy-loaded repositories for segment operations
+        self._map_segment_repo = None
+        self._route_segment_repo = None
+
+    @property
+    def map_segment_repo(self):
+        """Lazy-load MapSegmentRepository."""
+        if self._map_segment_repo is None:
+            from api.database.repositories.map_segment import MapSegmentRepository
+            self._map_segment_repo = MapSegmentRepository(self.session)
+        return self._map_segment_repo
+
+    @property
+    def route_segment_repo(self):
+        """Lazy-load RouteSegmentRepository."""
+        if self._route_segment_repo is None:
+            from api.database.repositories.route_segment import RouteSegmentRepository
+            self._route_segment_repo = RouteSegmentRepository(self.session)
+        return self._route_segment_repo
 
     async def save_map(
         self,
         linear_map: LinearMapResponse,
+        geo_provider: GeoProvider,
         user_id: Optional[UUID] = None,
         debug_collector: Optional[POIDebugDataCollector] = None,
+        route_segments_data: Optional[List[Tuple[RouteSegment, bool]]] = None,
+        route_geometry: Optional[List[Tuple[float, float]]] = None,
+        route_total_km: Optional[float] = None,
     ) -> str:
         """
         Save a linear map to database and associate with user if provided.
 
         Args:
             linear_map: The linear map to save
+            geo_provider: Geographic provider for access route calculation
             user_id: Optional user ID to associate the map with (creator)
             debug_collector: Optional debug data collector with POI debug info
+            route_segments_data: Optional list of (RouteSegment, is_new) tuples
+            route_geometry: Optional full route geometry for junction calculation
+            route_total_km: Optional total route length in km
 
         Returns:
             The ID of the saved map
@@ -106,63 +136,31 @@ class MapStorageServiceDB:
                     user_id=user_id, map_id=map_id, is_creator=True
                 )
 
-            # Process milestones as POIs
-            # Track POI IDs already added to this map to avoid duplicates
-            added_poi_ids: set = set()
-            # Mapping from milestone ID to MapPOI ID (for debug data)
+            # Use MapAssemblyService to create MapSegments and MapPOIs
             milestone_to_map_poi: Dict[str, UUID] = {}
-
-            for milestone in linear_map.milestones:
-                # Get or create POI
-                poi_data = self._milestone_to_poi_dict(milestone)
-                osm_id = poi_data.pop("osm_id", None)
-
-                if osm_id:
-                    poi, created = await self.poi_repo.get_or_create_by_osm_id(
-                        osm_id, poi_data
-                    )
-                else:
-                    # No OSM ID, create new POI
-                    poi = POI(**poi_data)
-                    await self.poi_repo.create(poi)
-
-                # Skip if this POI was already added to this map
-                if poi.id in added_poi_ids:
-                    logger.debug(
-                        f"Skipping duplicate POI in map: {milestone.name} (poi_id={poi.id})"
-                    )
-                    continue
-                added_poi_ids.add(poi.id)
-
-                # Create MapPOI relationship
-                map_poi = MapPOI(
-                    map_id=map_id,
-                    poi_id=poi.id,
-                    segment_index=self._find_segment_index(
-                        milestone.distance_from_origin_km, linear_map.segments
-                    ),
-                    distance_from_origin_km=milestone.distance_from_origin_km,
-                    distance_from_road_meters=milestone.distance_from_road_meters,
-                    side=milestone.side,
-                    junction_distance_km=milestone.junction_distance_km,
-                    junction_lat=(
-                        milestone.junction_coordinates.latitude
-                        if milestone.junction_coordinates
-                        else None
-                    ),
-                    junction_lon=(
-                        milestone.junction_coordinates.longitude
-                        if milestone.junction_coordinates
-                        else None
-                    ),
-                    requires_detour=milestone.requires_detour,
-                    quality_score=milestone.quality_score,
+            if not route_segments_data or not route_geometry or not route_total_km:
+                raise ValueError(
+                    "route_segments_data, route_geometry, and route_total_km are required"
                 )
-                await self.map_poi_repo.create(map_poi)
 
-                # Track mapping for debug data
-                if milestone.id:
-                    milestone_to_map_poi[milestone.id] = map_poi.id
+            # Extract just the RouteSegments (not the is_new flag)
+            route_segments = [seg for seg, _ in route_segments_data]
+
+            # Extract origin city name for POI filtering
+            origin_city = self._extract_city_name(linear_map.origin)
+
+            assembly_service = MapAssemblyService(self.session, geo_provider)
+            num_segments, num_pois, milestone_to_map_poi = await assembly_service.assemble_map(
+                map_id=map_id,
+                segments=route_segments,
+                route_geometry=route_geometry,
+                route_total_km=route_total_km,
+                debug_collector=debug_collector,
+                origin_city=origin_city,
+            )
+            logger.info(
+                f"Assembled map with {num_segments} segments and {num_pois} POIs"
+            )
 
             # Persist debug data if collector provided
             if debug_collector and milestone_to_map_poi:
@@ -253,11 +251,11 @@ class MapStorageServiceDB:
             )
             return linear_map
 
-        except ValueError:
-            logger.warning(f"ID de mapa invalido: {map_id}")
+        except ValueError as e:
+            logger.warning(f"Erro de valor ao carregar mapa {map_id}: {e}")
             return None
         except Exception as e:
-            logger.error(f"Erro ao carregar mapa {map_id}: {e}")
+            logger.error(f"Erro ao carregar mapa {map_id}: {e}", exc_info=True)
             return None
 
     async def list_user_maps(self, user_id: UUID) -> List[SavedMapResponse]:
@@ -578,6 +576,7 @@ class MapStorageServiceDB:
         """
         Permanently delete a map from database (admin only).
         This removes the map and all associated user_maps entries.
+        Also decrements usage_count on associated RouteSegments.
 
         Args:
             map_id: ID of the map to delete
@@ -587,6 +586,19 @@ class MapStorageServiceDB:
         """
         try:
             map_uuid = UUID(map_id)
+
+            # Get segment IDs before deletion to decrement their usage counts
+            segment_ids = await self.map_segment_repo.get_segment_ids_for_map(map_uuid)
+
+            # Decrement usage count for all segments used by this map
+            if segment_ids:
+                await self.route_segment_repo.bulk_decrement_usage(segment_ids)
+                logger.info(
+                    f"Decremented usage_count for {len(segment_ids)} segments "
+                    f"(map {map_id})"
+                )
+
+            # Delete the map (cascades to MapSegments, MapPOIs, etc.)
             deleted = await self.map_repo.delete_by_id(map_uuid)
 
             if deleted:
@@ -660,6 +672,22 @@ class MapStorageServiceDB:
 
     # Helper methods for conversion
 
+    def _extract_city_name(self, location_string: str) -> str:
+        """
+        Extract city name from location string.
+
+        Args:
+            location_string: Location in format "City, State" (e.g., "Belo Horizonte, MG")
+
+        Returns:
+            City name (e.g., "Belo Horizonte")
+        """
+        return (
+            location_string.split(",")[0].strip()
+            if "," in location_string
+            else location_string.strip()
+        )
+
     def _segment_to_dict(self, segment: LinearRoadSegment) -> dict:
         """Convert LinearRoadSegment to dict for JSONB storage."""
         return segment.model_dump(mode="json")
@@ -667,33 +695,6 @@ class MapStorageServiceDB:
     def _dict_to_segment(self, data: dict) -> LinearRoadSegment:
         """Convert dict from JSONB to LinearRoadSegment."""
         return LinearRoadSegment(**data)
-
-    def _milestone_to_poi_dict(self, milestone: RoadMilestone) -> dict:
-        """Convert RoadMilestone to POI dict."""
-        # Extract OSM ID from tags if available
-        osm_id = milestone.tags.get("osm_id") or milestone.tags.get("id")
-        if osm_id and not isinstance(osm_id, str):
-            osm_id = str(osm_id)
-
-        return {
-            "osm_id": osm_id,
-            "name": milestone.name,
-            "type": milestone.type.value,
-            "latitude": milestone.coordinates.latitude,
-            "longitude": milestone.coordinates.longitude,
-            "city": milestone.city,
-            "operator": milestone.operator,
-            "brand": milestone.brand,
-            "opening_hours": milestone.opening_hours,
-            "phone": milestone.phone,
-            "website": milestone.website,
-            "cuisine": milestone.cuisine,
-            "amenities": milestone.amenities,
-            "tags": milestone.tags,
-            "rating": milestone.rating,
-            "rating_count": milestone.rating_count,
-            "google_maps_uri": milestone.google_maps_uri,
-        }
 
     def _map_poi_to_milestone(self, map_poi: MapPOI) -> RoadMilestone:
         """Convert MapPOI + POI to RoadMilestone."""
@@ -706,10 +707,31 @@ class MapStorageServiceDB:
                 latitude=map_poi.junction_lat, longitude=map_poi.junction_lon
             )
 
+        # Mapping for POI types that don't exist directly in MilestoneType
+        poi_type_mapping = {
+            "food": MilestoneType.RESTAURANT,
+            "fuel": MilestoneType.GAS_STATION,
+            "lodging": MilestoneType.HOTEL,
+        }
+
+        # Safely convert POI type to MilestoneType
+        poi_type = poi.type
+        if poi_type in poi_type_mapping:
+            milestone_type = poi_type_mapping[poi_type]
+        else:
+            try:
+                milestone_type = MilestoneType(poi_type)
+            except ValueError:
+                # Type not in MilestoneType enum - use OTHER as fallback
+                logger.debug(
+                    f"Unknown POI type '{poi_type}' for POI {poi.id}, using OTHER"
+                )
+                milestone_type = MilestoneType.OTHER
+
         return RoadMilestone(
             id=str(poi.id),
             name=poi.name,
-            type=MilestoneType(poi.type),
+            type=milestone_type,
             coordinates=Coordinates(latitude=poi.latitude, longitude=poi.longitude),
             distance_from_origin_km=map_poi.distance_from_origin_km,
             distance_from_road_meters=map_poi.distance_from_road_meters,
@@ -791,8 +813,12 @@ def _create_standalone_session():
 
 def save_map_sync(
     linear_map: LinearMapResponse,
+    geo_provider: GeoProvider,
     user_id: Optional[str] = None,
     debug_collector: Optional[POIDebugDataCollector] = None,
+    route_segments_data: Optional[List[Tuple[Any, bool]]] = None,
+    route_geometry: Optional[List[Tuple[float, float]]] = None,
+    route_total_km: Optional[float] = None,
 ) -> str:
     """
     Sync wrapper for saving a map to the database.
@@ -800,8 +826,12 @@ def save_map_sync(
 
     Args:
         linear_map: The linear map to save
+        geo_provider: Geographic provider for access route calculation
         user_id: Optional user ID to associate the map with (as creator)
         debug_collector: Optional debug data collector with POI debug info
+        route_segments_data: Optional list of (RouteSegment, is_new) tuples
+        route_geometry: Optional full route geometry for junction calculation
+        route_total_km: Optional total route length in km
 
     Returns:
         The ID of the saved map
@@ -819,8 +849,12 @@ def save_map_sync(
                     uuid_user_id = PyUUID(user_id) if user_id else None
                     result = await storage.save_map(
                         linear_map,
+                        geo_provider=geo_provider,
                         user_id=uuid_user_id,
                         debug_collector=debug_collector,
+                        route_segments_data=route_segments_data,
+                        route_geometry=route_geometry,
+                        route_total_km=route_total_km,
                     )
                     await session.commit()
                     return result
@@ -874,10 +908,12 @@ async def replace_map_data_async(
     """
     Replace the data of an original map with data from a temporary map.
 
-    This is used for map regeneration to:
+    This is used for map regeneration with segment versioning to:
     1. Keep the original map ID (preserving user associations)
     2. Update the map with fresh data from the regenerated temporary map
-    3. Delete the temporary map
+    3. Handle segment versioning (old segments have usage decremented,
+       new segments are moved to the original map)
+    4. Delete the temporary map
 
     Args:
         original_map_id: ID of the original map to update
@@ -889,12 +925,15 @@ async def replace_map_data_async(
     """
     from sqlalchemy import update, delete
     from api.database.models.poi_debug_data import POIDebugData
+    from api.database.models.map_segment import MapSegment
+    from api.database.repositories.route_segment import RouteSegmentRepository
 
     try:
         original_uuid = UUID(original_map_id)
         temp_uuid = UUID(temp_map_id)
 
         storage = MapStorageServiceDB(session)
+        route_segment_repo = RouteSegmentRepository(session)
 
         # 1. Load the temporary map to get its data
         temp_map = await storage.map_repo.get_by_id(temp_uuid)
@@ -907,8 +946,19 @@ async def replace_map_data_async(
             logger.error(f"Original map {original_map_id} not found")
             return False
 
-        # 2. Delete old data from original map (MapPOI and POIDebugData)
-        # The cascade should handle POIDebugData but let's be explicit
+        # 2. Get old segment IDs from original map (for usage count decrement)
+        old_segment_ids = await storage.map_segment_repo.get_segment_ids_for_map(
+            original_uuid
+        )
+        logger.info(f"Found {len(old_segment_ids)} old segments to decrement usage")
+
+        # 3. Decrement usage_count for old segments
+        # These segments may become orphans if no other map uses them
+        if old_segment_ids:
+            await route_segment_repo.bulk_decrement_usage(old_segment_ids)
+            logger.info(f"Decremented usage for {len(old_segment_ids)} old segments")
+
+        # 4. Delete old data from original map
         from api.database.repositories.poi_debug_data import POIDebugDataRepository
         debug_repo = POIDebugDataRepository(session)
 
@@ -918,7 +968,11 @@ async def replace_map_data_async(
         deleted_pois = await storage.map_poi_repo.delete_all_for_map(original_uuid)
         logger.info(f"Deleted {deleted_pois} MapPOI entries from original map")
 
-        # 3. Update original map metadata with temp map data
+        # 5. Delete old MapSegments from original map
+        deleted_map_segments = await storage.map_segment_repo.delete_by_map(original_uuid)
+        logger.info(f"Deleted {deleted_map_segments} MapSegment entries from original map")
+
+        # 6. Update original map metadata with temp map data
         original_map.total_length_km = temp_map.total_length_km
         original_map.segments = temp_map.segments
         original_map.metadata_ = temp_map.metadata_
@@ -926,7 +980,15 @@ async def replace_map_data_async(
         await session.flush()
         logger.info(f"Updated original map metadata")
 
-        # 4. Move MapPOI entries from temp to original (update map_id)
+        # 7. Move MapSegments from temp to original (new versioned segments)
+        await session.execute(
+            update(MapSegment)
+            .where(MapSegment.map_id == temp_uuid)
+            .values(map_id=original_uuid)
+        )
+        logger.info(f"Moved MapSegment entries from temp to original")
+
+        # 8. Move MapPOI entries from temp to original (update map_id)
         await session.execute(
             update(MapPOI)
             .where(MapPOI.map_id == temp_uuid)
@@ -934,7 +996,7 @@ async def replace_map_data_async(
         )
         logger.info(f"Moved MapPOI entries from temp to original")
 
-        # 5. Move POIDebugData entries from temp to original (update map_id)
+        # 9. Move POIDebugData entries from temp to original (update map_id)
         await session.execute(
             update(POIDebugData)
             .where(POIDebugData.map_id == temp_uuid)
@@ -942,11 +1004,13 @@ async def replace_map_data_async(
         )
         logger.info(f"Moved POIDebugData entries from temp to original")
 
-        # 6. Delete the temporary map (now empty of POIs)
+        # 10. Delete the temporary map (now empty)
         await storage.map_repo.delete_by_id(temp_uuid)
         logger.info(f"Deleted temporary map {temp_map_id}")
 
-        logger.info(f"Successfully replaced map data: {original_map_id}")
+        logger.info(
+            f"Successfully replaced map data with versioned segments: {original_map_id}"
+        )
         return True
 
     except Exception as e:

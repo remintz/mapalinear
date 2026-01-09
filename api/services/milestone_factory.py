@@ -35,8 +35,12 @@ POI_CATEGORY_TO_MILESTONE_TYPE = {
     POICategory.LODGING: MilestoneType.HOTEL,
     POICategory.CAMPING: MilestoneType.CAMPING,
     POICategory.HOSPITAL: MilestoneType.HOSPITAL,
-    POICategory.SERVICES: MilestoneType.OTHER,
+    POICategory.CITY: MilestoneType.CITY,
+    POICategory.TOWN: MilestoneType.TOWN,
+    POICategory.VILLAGE: MilestoneType.VILLAGE,
+    POICategory.POLICE: MilestoneType.POLICE,
     POICategory.PARKING: MilestoneType.OTHER,
+    POICategory.OTHER: MilestoneType.OTHER,
 }
 
 
@@ -101,9 +105,9 @@ class MilestoneFactory:
             POICategory.HOSPITAL,
         ]
 
-        # Cities/services based on parameter
+        # Cities/towns/villages based on parameter
         if include_cities:
-            categories.append(POICategory.SERVICES)
+            categories.extend([POICategory.CITY, POICategory.TOWN, POICategory.VILLAGE])
 
         return categories
 

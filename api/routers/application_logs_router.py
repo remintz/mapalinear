@@ -4,7 +4,7 @@ Router for application logs viewing and filtering.
 Provides admin endpoints for monitoring application logs stored in PostgreSQL.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -94,7 +94,7 @@ async def get_logs(
     calculated_end = end_time
 
     if time_window and time_window != "custom":
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         calculated_end = now
 
         if time_window == "5m":
@@ -164,7 +164,7 @@ async def get_log_stats(
     calculated_end = end_time
 
     if time_window and time_window != "custom":
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         calculated_end = now
 
         if time_window == "5m":

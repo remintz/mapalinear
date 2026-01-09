@@ -14,6 +14,7 @@ from api.database.connection import Base
 if TYPE_CHECKING:
     from api.database.models.map import Map
     from api.database.models.poi import POI
+    from api.database.models.segment_poi import SegmentPOI
 
 
 class MapPOI(Base):
@@ -41,6 +42,14 @@ class MapPOI(Base):
         index=True,
     )
 
+    # Reference to the segment-POI association (for traceability)
+    segment_poi_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("segment_pois.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+
     # Position data specific to this map
     segment_index: Mapped[Optional[int]] = mapped_column(nullable=True)
     distance_from_origin_km: Mapped[float] = mapped_column()
@@ -59,6 +68,7 @@ class MapPOI(Base):
     # Relationships
     map: Mapped["Map"] = relationship("Map", back_populates="map_pois")
     poi: Mapped["POI"] = relationship("POI", back_populates="map_pois")
+    segment_poi: Mapped["SegmentPOI"] = relationship("SegmentPOI")
 
     # Indexes for efficient queries
     __table_args__ = (

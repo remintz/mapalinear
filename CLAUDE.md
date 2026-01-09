@@ -25,6 +25,34 @@ Main components:
 - `docs/`: Technical documentation including PRDs
 - Asynchronous operations: Long-running tasks (data searches, map generation) are handled asynchronously with progress tracking
 
+### API Routers
+
+The API is organized into the following routers (registered in `api/main.py`):
+
+**Core Functionality:**
+- `auth_router` (`/api/auth`): Authentication endpoints (Google OAuth, JWT tokens, user info)
+- `operations_router` (`/api/operations`): Async operation management (create, poll status)
+- `maps_router` (`/api/maps`): Saved maps management (list, get, export PDF, adopt, delete, regenerate)
+- `export` (`/api/export`): Map export functionality
+
+**Administration:**
+- `admin_router` (`/api/admin`): User management, impersonation, database stats, maintenance
+- `admin_pois_router` (`/api/admin/pois`): POI management and statistics (admin only)
+- `settings_router` (`/api/settings`): System settings management
+- `api_logs_router` (`/api/api-logs`): API call logs and cost monitoring
+- `application_logs_router` (`/api/application-logs`): Application logs from database
+- `frontend_errors_router` (`/api/frontend-errors`): Frontend error logging and retrieval
+
+**Data Management:**
+- `municipalities_router` (`/api/municipalities`): Municipalities/cities data
+- `problem_types_router` (`/api/problem-types`): Problem type definitions
+- `problem_reports_router` (`/api/reports`): User problem reports with attachments
+- `poi_debug_router` (`/api/poi-debug`): POI debugging and analysis tools
+
+**Analytics & Monitoring:**
+- `session_activity_router` (`/api/session-activity`): User session tracking
+- `user_events_router` (`/api/user-events`): User event logging and analytics
+
 ### Authentication System
 - **Google OAuth**: Users authenticate via Google ID token
 - **JWT tokens**: Backend issues JWT for session management
@@ -451,18 +479,44 @@ The map generation process consists of multiple steps, each with configurable da
 **Important:** These are SYSTEM-LEVEL configurations (environment variables). In the future, user-level preferences will be added that affect only map VISUALIZATION, not data fetching.
 
 **Services involved (modular architecture):**
-- `api/services/road_service.py`: Main map generation orchestrator (~400 lines)
+
+**Map Generation Services:**
+- `api/services/road_service.py`: Main map generation orchestrator (~500 lines)
 - `api/services/poi_search_service.py`: POI search and junction calculation (~400 lines)
 - `api/services/poi_quality_service.py`: POI quality assessment and filtering (~100 lines)
 - `api/services/route_segmentation_service.py`: Route segmentation (~40 lines)
 - `api/services/route_statistics_service.py`: Route statistics and recommendations (~80 lines)
 - `api/services/milestone_factory.py`: Milestone creation from POIs (~90 lines)
-- `api/services/google_places_service.py`: Google Places enrichment
-- `api/services/here_enrichment_service.py`: HERE Maps enrichment
+- `api/services/junction_calculation_service.py`: Junction/entroncamento calculation for distant POIs
+- `api/services/segment_service.py`: Route segment management and reuse
+
+**Data Enrichment Services:**
+- `api/services/google_places_service.py`: Google Places enrichment (ratings)
+- `api/services/here_enrichment_service.py`: HERE Maps enrichment (contact info)
+
+**Storage & Assembly Services:**
+- `api/services/map_storage_service_db.py`: Map persistence to database
+- `api/services/map_assembly_service.py`: Assembling maps from segments and POIs
+- `api/services/poi_persistence_service.py`: POI persistence and deduplication
+
+**Infrastructure Services:**
+- `api/services/async_service.py`: Async operations lifecycle management
+- `api/services/auth_service.py`: Authentication and JWT token management
+- `api/services/api_call_logger.py`: API call logging for cost monitoring
+- `api/services/database_log_handler.py`: Database logging handler
+- `api/services/log_cleanup_service.py`: Automated log cleanup service
+- `api/services/database_maintenance_service.py`: Database maintenance operations
+- `api/services/user_event_logger.py`: User event tracking and logging
+
+**Utility & Support Services:**
+- `api/services/poi_debug_service.py`: POI debugging data collection
+- `api/services/audio_service.py`: Audio file processing (for problem reports)
+- `api/services/image_service.py`: Image file processing (for problem reports)
 
 **Utility modules:**
 - `api/utils/geo_utils.py`: Pure geographic calculations (Haversine, interpolation)
 - `api/utils/async_utils.py`: Async execution utilities
+- `api/utils/export_utils.py`: PDF export utilities
 
 **Database model:**
 - `api/database/models/poi.py`: POI model supports multi-provider data
@@ -492,6 +546,51 @@ Long-running operations use async tasks stored in PostgreSQL:
 - Stale in_progress operations (>2 hours) are marked as failed
 - Completed/failed operations older than 24 hours are automatically removed
 
+### Database Models Overview
+
+The system uses SQLAlchemy 2.0 with async support. Key models and their relationships:
+
+**Core Domain Models:**
+- `User`: User accounts (Google OAuth, admin flags, timestamps)
+- `Map`: Linear maps between locations (origin, destination, segments as JSONB, metadata)
+- `UserMap`: Junction table for user-map associations (many-to-many, supports map sharing)
+- `POI`: Points of interest (multi-provider support: osm_id, here_id, primary_provider, enriched_by)
+- `RouteSegment`: Reusable route segments (geometry, metadata, versioning)
+- `SegmentPOI`: POIs associated with route segments (many-to-many)
+- `MapSegment`: Segments associated with a specific map
+- `MapPOI`: POIs associated with a specific map (with junction data, distance from route)
+
+**Operational Models:**
+- `AsyncOperation`: Long-running async operations (status, progress, result)
+- `CacheEntry`: Unified cache entries (provider, operation, params, data, TTL)
+- `GooglePlacesCache`: Google Places API response cache
+- `ApiCallLog`: External API call logging (provider, operation, status, duration, cost tracking)
+- `ApplicationLog`: Application logs stored in database
+- `FrontendErrorLog`: Frontend error logs from users
+
+**Administrative Models:**
+- `SystemSettings`: Key-value system configuration
+- `ProblemType`: Problem type definitions for user reports
+- `ProblemReport`: User problem reports with status tracking
+- `ReportAttachment`: File attachments for problem reports (images, audio)
+- `ImpersonationSession`: Admin user impersonation sessions
+- `POIDebugData`: Debug data for POI analysis
+
+**Analytics Models:**
+- `UserEvent`: User event tracking (event_type, category, metadata)
+- `EventTypes`: Event type definitions and categorization
+
+**Model Relationships:**
+- User ↔ UserMap ↔ Map (many-to-many: users can have multiple maps, maps can belong to multiple users)
+- Map → MapSegment → RouteSegment (maps contain segments, segments can be reused)
+- Map → MapPOI → POI (maps have POIs, POIs can appear in multiple maps)
+- RouteSegment → SegmentPOI → POI (segments have POIs, POIs can appear in multiple segments)
+- User → ProblemReport → ProblemType (users create reports of specific types)
+- ProblemReport → ReportAttachment (reports can have multiple attachments)
+
+**Repository Pattern:**
+All models have corresponding repositories in `api/database/repositories/` that provide async CRUD operations and custom queries. Repositories extend `BaseRepository` for common operations.
+
 ## Important Notes
 
 ### Backend
@@ -512,10 +611,46 @@ Long-running operations use async tasks stored in PostgreSQL:
 - Push notifications can alert users about recommended stops (requires user permission)
 
 ### Logging System
+
+The system has multiple logging layers for different purposes:
+
+**File Logging:**
 - **Main log**: `logs/app.log` - rotating file handler (10MB max, 3 backups)
 - **Operation logs**: `logs/mapalinear_YYYYMMDD_HHMMSS.log` - per-operation logs for debugging specific map generation runs
 - Configuration: `api/config/logging_config.yaml`
 - Debug mode: Use `api/config/logging_config.debug.yaml` for verbose output
+
+**Database Logging:**
+- **Application Logs**: Stored in `application_logs` table via `DatabaseLogHandler`
+  - Logs are batched and written asynchronously for performance
+  - Accessible via `/api/application-logs` endpoints
+  - Automatic cleanup via `LogCleanupService` (runs every 24h)
+- **API Call Logs**: External API calls logged to `api_call_logs` table
+  - Tracks provider, operation, status, duration, bytes, cache hits
+  - Used for cost monitoring and analysis
+  - Accessible via `/api/api-logs` endpoints
+  - Default retention: 90 days
+- **Frontend Error Logs**: Client-side errors logged to `frontend_error_logs` table
+  - Includes error message, stack trace, user agent, user ID
+  - Accessible via `/api/frontend-errors` endpoints (admin only)
+- **User Events**: User actions logged to `user_events` table
+  - Tracks event types, categories, metadata
+  - Used for analytics and usage tracking
+  - Accessible via `/api/user-events` endpoints
+
+**Log Correlation:**
+- Request IDs are generated per request and included in all logs
+- Session IDs from frontend are captured and stored
+- User emails are included in log context when authenticated
+- Logs can be correlated using request_id and session_id fields
+
+**Key Files:**
+- `api/config/logging_config.yaml`: Logging configuration
+- `api/config/logging_setup.py`: Logging initialization
+- `api/services/database_log_handler.py`: Database log handler
+- `api/services/log_cleanup_service.py`: Automated cleanup service
+- `api/services/api_call_logger.py`: API call logging service
+- `api/services/user_event_logger.py`: User event logging service
 
 ### Express instructions from developer
 - Just commit code under my request

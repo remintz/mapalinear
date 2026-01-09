@@ -85,6 +85,8 @@ def sample_destination_location():
 @pytest.fixture
 def sample_route(sample_origin_location, sample_destination_location):
     """Sample route between SP and RJ."""
+    from api.providers.models import RouteStep
+
     return Route(
         origin=sample_origin_location,
         destination=sample_destination_location,
@@ -96,7 +98,34 @@ def sample_route(sample_origin_location, sample_destination_location):
             (-23.0000, -44.5000),  # Intermediate 2
             (-22.9068, -43.1729),  # Rio de Janeiro
         ],
-        road_names=["BR-116", "Via Dutra"]
+        road_names=["BR-116", "Via Dutra"],
+        steps=[
+            RouteStep(
+                distance_m=215000.0,
+                duration_s=10800.0,
+                geometry=[
+                    (-23.5505, -46.6333),
+                    (-23.2000, -45.5000),
+                    (-23.0000, -44.5000),
+                ],
+                road_name="BR-116",
+                maneuver_type="depart",
+                maneuver_modifier=None,
+                maneuver_location=(-23.5505, -46.6333),
+            ),
+            RouteStep(
+                distance_m=215500.0,
+                duration_s=10800.0,
+                geometry=[
+                    (-23.0000, -44.5000),
+                    (-22.9068, -43.1729),
+                ],
+                road_name="Via Dutra",
+                maneuver_type="arrive",
+                maneuver_modifier=None,
+                maneuver_location=(-23.0000, -44.5000),
+            ),
+        ],
     )
 
 
@@ -370,278 +399,6 @@ class TestExtractSearchPointsFromSegments:
 
 
 # =============================================================================
-# TEST: POI CATEGORY TO MILESTONE TYPE CONVERSION
-# =============================================================================
-
-class TestPOICategoryToMilestoneType:
-    """Test _poi_category_to_milestone_type method."""
-
-    def test_gas_station_mapping(self, road_service):
-        """It should map GAS_STATION to GAS_STATION."""
-        result = road_service._poi_category_to_milestone_type(POICategory.GAS_STATION)
-        assert result == MilestoneType.GAS_STATION
-
-    def test_restaurant_mapping(self, road_service):
-        """It should map RESTAURANT to RESTAURANT."""
-        result = road_service._poi_category_to_milestone_type(POICategory.RESTAURANT)
-        assert result == MilestoneType.RESTAURANT
-
-    def test_hotel_mapping(self, road_service):
-        """It should map HOTEL to HOTEL."""
-        result = road_service._poi_category_to_milestone_type(POICategory.HOTEL)
-        assert result == MilestoneType.HOTEL
-
-    def test_hospital_mapping(self, road_service):
-        """It should map HOSPITAL to HOSPITAL."""
-        result = road_service._poi_category_to_milestone_type(POICategory.HOSPITAL)
-        assert result == MilestoneType.HOSPITAL
-
-
-# =============================================================================
-# TEST: CREATE MILESTONE FROM POI
-# =============================================================================
-
-class TestCreateMilestoneFromPOI:
-    """Test _create_milestone_from_poi method."""
-
-    def test_creates_milestone_with_basic_info(self, road_service, sample_pois):
-        """It should create milestone with correct basic info."""
-        poi = sample_pois[0]  # Gas station
-        route_point = (-23.3000, -45.2000)
-
-        milestone = road_service._create_milestone_from_poi(
-            poi,
-            distance_from_origin=150.0,
-            route_point=route_point
-        )
-
-        assert milestone.id == poi.id
-        assert milestone.name == poi.name
-        assert milestone.type == MilestoneType.GAS_STATION
-        assert milestone.distance_from_origin_km == 150.0
-
-    def test_includes_coordinates(self, road_service, sample_pois):
-        """It should include POI coordinates."""
-        poi = sample_pois[0]
-
-        milestone = road_service._create_milestone_from_poi(
-            poi,
-            distance_from_origin=100.0,
-            route_point=(-23.3000, -45.2000)
-        )
-
-        assert milestone.coordinates.latitude == poi.location.latitude
-        assert milestone.coordinates.longitude == poi.location.longitude
-
-    def test_includes_amenities(self, road_service, sample_pois):
-        """It should include amenities from POI."""
-        poi = sample_pois[0]
-
-        milestone = road_service._create_milestone_from_poi(
-            poi,
-            distance_from_origin=100.0,
-            route_point=(-23.3000, -45.2000)
-        )
-
-        assert milestone.amenities == poi.amenities
-
-    def test_includes_phone(self, road_service, sample_pois):
-        """It should include phone from POI."""
-        poi = sample_pois[0]
-
-        milestone = road_service._create_milestone_from_poi(
-            poi,
-            distance_from_origin=100.0,
-            route_point=(-23.3000, -45.2000)
-        )
-
-        assert milestone.phone == poi.phone
-
-    def test_handles_junction_info(self, road_service):
-        """It should handle junction info for distant POIs."""
-        # Create POI that is far from route (> 500m)
-        distant_poi = POI(
-            id="node/999",
-            name="Posto Distante",
-            location=GeoLocation(latitude=-23.3100, longitude=-45.2100),  # ~1.5km from route
-            category=POICategory.GAS_STATION,
-            amenities=["24h"],
-            provider_data={'osm_tags': {'amenity': 'fuel'}}
-        )
-        # Route point is different from POI location (simulating distant POI)
-        route_point = (-23.3000, -45.2000)
-        junction_info = (150.0, (-23.2900, -45.1900), 2.5, "right")
-
-        milestone = road_service._create_milestone_from_poi(
-            distant_poi,
-            distance_from_origin=150.0,
-            route_point=route_point,
-            junction_info=junction_info
-        )
-
-        assert milestone.junction_distance_km == 150.0
-        assert milestone.junction_coordinates is not None
-        # requires_detour is based on distance_from_road > 500m
-        # The POI at (-23.31, -45.21) is ~1.5km from route_point (-23.30, -45.20)
-        assert milestone.requires_detour == True
-        assert milestone.side == "right"
-
-
-# =============================================================================
-# TEST: DETERMINE POI SIDE
-# =============================================================================
-
-class TestDeterminePOISide:
-    """Test _determine_poi_side method."""
-
-    def test_poi_on_right_side(self, road_service):
-        """It should detect POI on right side of road."""
-        # Road going north (increasing latitude)
-        geometry = [(-23.5, -46.6), (-23.4, -46.6), (-23.3, -46.6)]
-        junction = (-23.4, -46.6)
-        poi_right = (-23.4, -46.5)  # East of road = right when going north
-
-        side = road_service._determine_poi_side(geometry, junction, poi_right)
-
-        assert side == "right"
-
-    def test_poi_on_left_side(self, road_service):
-        """It should detect POI on left side of road."""
-        # Road going north (increasing latitude)
-        geometry = [(-23.5, -46.6), (-23.4, -46.6), (-23.3, -46.6)]
-        junction = (-23.4, -46.6)
-        poi_left = (-23.4, -46.7)  # West of road = left when going north
-
-        side = road_service._determine_poi_side(geometry, junction, poi_left)
-
-        assert side == "left"
-
-
-# =============================================================================
-# TEST: CALCULATE DISTANCE ALONG ROUTE
-# =============================================================================
-
-class TestCalculateDistanceAlongRoute:
-    """Test _calculate_distance_along_route method."""
-
-    def test_point_at_start_returns_zero(self, road_service):
-        """It should return 0 for point at route start."""
-        geometry = [(-23.55, -46.63), (-23.45, -46.53), (-23.35, -46.43)]
-        target = (-23.55, -46.63)
-
-        distance = road_service._calculate_distance_along_route(geometry, target)
-
-        assert distance < 1.0  # Should be close to 0
-
-    def test_empty_geometry_returns_zero(self, road_service):
-        """It should return 0 for empty geometry."""
-        distance = road_service._calculate_distance_along_route([], (-23.5, -46.6))
-        assert distance == 0.0
-
-
-# =============================================================================
-# TEST: FILTER EXCLUDED CITIES
-# =============================================================================
-
-class TestFilterExcludedCities:
-    """Test _filter_excluded_cities method."""
-
-    def test_filters_pois_in_excluded_city(self, road_service):
-        """It should filter POIs in excluded cities."""
-        milestones = [
-            RoadMilestone(
-                id="1", name="POI 1", type=MilestoneType.GAS_STATION,
-                coordinates=Coordinates(latitude=-23.5, longitude=-46.6),
-                distance_from_origin_km=10.0, distance_from_road_meters=100,
-                side="right", city="São Paulo"
-            ),
-            RoadMilestone(
-                id="2", name="POI 2", type=MilestoneType.RESTAURANT,
-                coordinates=Coordinates(latitude=-23.3, longitude=-45.5),
-                distance_from_origin_km=100.0, distance_from_road_meters=200,
-                side="left", city="Campinas"
-            ),
-        ]
-
-        filtered = road_service._filter_excluded_cities(milestones, ["são paulo"])
-
-        assert len(filtered) == 1
-        assert filtered[0].city == "Campinas"
-
-    def test_keeps_pois_without_city(self, road_service):
-        """It should keep POIs without city information."""
-        milestones = [
-            RoadMilestone(
-                id="1", name="POI 1", type=MilestoneType.GAS_STATION,
-                coordinates=Coordinates(latitude=-23.5, longitude=-46.6),
-                distance_from_origin_km=10.0, distance_from_road_meters=100,
-                side="right", city=None
-            ),
-        ]
-
-        filtered = road_service._filter_excluded_cities(milestones, ["são paulo"])
-
-        assert len(filtered) == 1
-
-    def test_empty_exclude_list_returns_all(self, road_service):
-        """It should return all milestones if exclude list is empty."""
-        milestones = [
-            RoadMilestone(
-                id="1", name="POI 1", type=MilestoneType.GAS_STATION,
-                coordinates=Coordinates(latitude=-23.5, longitude=-46.6),
-                distance_from_origin_km=10.0, distance_from_road_meters=100,
-                side="right", city="São Paulo"
-            ),
-        ]
-
-        filtered = road_service._filter_excluded_cities(milestones, [])
-
-        assert len(filtered) == 1
-
-
-# =============================================================================
-# TEST: ASSIGN MILESTONES TO SEGMENTS
-# =============================================================================
-
-class TestAssignMilestonesToSegments:
-    """Test _assign_milestones_to_segments method."""
-
-    def test_assigns_milestone_to_correct_segment(self, road_service):
-        """It should assign milestone to segment containing its distance."""
-        segments = [
-            LinearRoadSegment(
-                id="seg_1", name="Test", start_distance_km=0, end_distance_km=100,
-                length_km=100, milestones=[]
-            ),
-            LinearRoadSegment(
-                id="seg_2", name="Test", start_distance_km=100, end_distance_km=200,
-                length_km=100, milestones=[]
-            ),
-        ]
-        milestones = [
-            RoadMilestone(
-                id="1", name="POI", type=MilestoneType.GAS_STATION,
-                coordinates=Coordinates(latitude=-23.5, longitude=-46.6),
-                distance_from_origin_km=50.0, distance_from_road_meters=100,
-                side="right"
-            ),
-            RoadMilestone(
-                id="2", name="POI 2", type=MilestoneType.RESTAURANT,
-                coordinates=Coordinates(latitude=-23.3, longitude=-45.5),
-                distance_from_origin_km=150.0, distance_from_road_meters=200,
-                side="left"
-            ),
-        ]
-
-        road_service._assign_milestones_to_segments(segments, milestones)
-
-        assert len(segments[0].milestones) == 1
-        assert segments[0].milestones[0].id == "1"
-        assert len(segments[1].milestones) == 1
-        assert segments[1].milestones[0].id == "2"
-
-
-# =============================================================================
 # TEST: GENERATE LINEAR MAP (MAIN METHOD)
 # =============================================================================
 
@@ -664,9 +421,10 @@ class TestGenerateLinearMap:
         mock_geo_provider.calculate_route.return_value = sample_route
         mock_poi_provider.search_pois.return_value = sample_pois
 
-        # Mock the POI search service's find_milestones method
-        with patch.object(road_service.poi_search_service, 'find_milestones', new_callable=AsyncMock) as mock_find:
-            mock_find.return_value = []
+        # Mock the segment processing method
+        with patch.object(road_service, '_process_steps_into_segments') as mock_segments:
+            # Return empty segments and POIs for this unit test
+            mock_segments.return_value = ([], [])
 
             result = road_service.generate_linear_map(
                 origin="São Paulo, SP",
@@ -725,144 +483,6 @@ class TestGenerateLinearMap:
                 origin="São Paulo, SP",
                 destination="Rio de Janeiro, RJ"
             )
-
-
-# =============================================================================
-# TEST: BUILD MILESTONE CATEGORIES
-# =============================================================================
-
-class TestBuildMilestoneCategories:
-    """Test _build_milestone_categories method."""
-
-    def test_includes_services_when_cities_requested(self, road_service):
-        """It should include SERVICES category when include_cities=True."""
-        categories = road_service._build_milestone_categories(include_cities=True)
-
-        assert POICategory.SERVICES in categories
-
-    def test_excludes_services_when_cities_not_requested(self, road_service):
-        """It should exclude SERVICES category when include_cities=False."""
-        categories = road_service._build_milestone_categories(include_cities=False)
-
-        assert POICategory.SERVICES not in categories
-
-    def test_always_includes_pois(self, road_service):
-        """It should always include POI categories."""
-        categories_with = road_service._build_milestone_categories(include_cities=True)
-        categories_without = road_service._build_milestone_categories(include_cities=False)
-
-        # Both should include gas stations, restaurants, etc.
-        assert POICategory.GAS_STATION in categories_with
-        assert POICategory.GAS_STATION in categories_without
-        assert POICategory.RESTAURANT in categories_with
-        assert POICategory.RESTAURANT in categories_without
-
-
-# =============================================================================
-# TEST: IS POI ABANDONED
-# =============================================================================
-
-class TestIsPOIAbandoned:
-    """Test _is_poi_abandoned method."""
-
-    def test_detects_abandoned_yes(self, road_service):
-        """It should detect abandoned=yes."""
-        tags = {'abandoned': 'yes', 'amenity': 'fuel'}
-        assert road_service._is_poi_abandoned(tags) == True
-
-    def test_detects_disused_yes(self, road_service):
-        """It should detect disused=yes."""
-        tags = {'disused': 'yes', 'amenity': 'fuel'}
-        assert road_service._is_poi_abandoned(tags) == True
-
-    def test_detects_disused_prefix(self, road_service):
-        """It should detect disused: prefix in amenity."""
-        tags = {'disused:amenity': 'fuel'}
-        assert road_service._is_poi_abandoned(tags) == True
-
-    def test_normal_poi_not_abandoned(self, road_service):
-        """It should return False for normal POIs."""
-        tags = {'amenity': 'fuel', 'brand': 'Shell'}
-        assert road_service._is_poi_abandoned(tags) == False
-
-
-# =============================================================================
-# TEST: CALCULATE POI QUALITY SCORE
-# =============================================================================
-
-class TestCalculatePOIQualityScore:
-    """Test _calculate_poi_quality_score method."""
-
-    def test_empty_tags_returns_base_score(self, road_service):
-        """It should return base score for empty tags."""
-        score = road_service._calculate_poi_quality_score({})
-        assert score >= 0.0
-        assert score <= 1.0
-
-    def test_more_info_higher_score(self, road_service):
-        """It should give higher score to POIs with more info."""
-        basic_tags = {'amenity': 'fuel'}
-        rich_tags = {
-            'amenity': 'fuel',
-            'name': 'Posto Shell',
-            'brand': 'Shell',
-            'phone': '+55 11 1234',
-            'opening_hours': '24/7',
-            'website': 'https://shell.com'
-        }
-
-        basic_score = road_service._calculate_poi_quality_score(basic_tags)
-        rich_score = road_service._calculate_poi_quality_score(rich_tags)
-
-        assert rich_score > basic_score
-
-
-# =============================================================================
-# TEST: EXTRACT AMENITIES
-# =============================================================================
-
-class TestExtractAmenities:
-    """Test _extract_amenities method."""
-
-    def test_extracts_24h_from_opening_hours(self, road_service):
-        """It should detect 24h operation."""
-        tags = {'opening_hours': '24/7'}
-        amenities = road_service._extract_amenities(tags)
-        assert '24h' in amenities
-
-    def test_extracts_fuel_types(self, road_service):
-        """It should extract fuel type information."""
-        tags = {'fuel:diesel': 'yes', 'fuel:octane_95': 'yes'}
-        amenities = road_service._extract_amenities(tags)
-        # Should contain fuel-related amenities
-        assert any('diesel' in a.lower() or 'Diesel' in a for a in amenities)
-
-    def test_extracts_shop(self, road_service):
-        """It should detect convenience shop when marked as yes."""
-        # The _extract_amenities method checks if tag value is 'yes', 'true', '1', or 'available'
-        tags = {'shop': 'yes'}
-        amenities = road_service._extract_amenities(tags)
-        assert any('loja' in a.lower() for a in amenities)
-
-
-# =============================================================================
-# TEST: FORMAT OPENING HOURS
-# =============================================================================
-
-class TestFormatOpeningHours:
-    """Test _format_opening_hours method."""
-
-    def test_none_returns_none(self, road_service):
-        """It should return None for None input."""
-        result = road_service._format_opening_hours(None)
-        assert result is None
-
-    def test_dict_formats_correctly(self, road_service):
-        """It should format dict opening hours."""
-        hours = {'mon': '09:00-18:00', 'tue': '09:00-18:00'}
-        result = road_service._format_opening_hours(hours)
-        assert result is not None
-        assert 'mon' in result or '09:00' in result
 
 
 # =============================================================================
@@ -938,24 +558,3 @@ class TestAsyncMethods:
         )
 
         assert result == []
-
-    @pytest.mark.asyncio
-    async def test_enrich_milestones_with_cities(self, road_service, mock_geo_provider):
-        """It should enrich milestones with city information."""
-        milestones = [
-            RoadMilestone(
-                id="1", name="POI 1", type=MilestoneType.GAS_STATION,
-                coordinates=Coordinates(latitude=-23.5, longitude=-46.6),
-                distance_from_origin_km=10.0, distance_from_road_meters=100,
-                side="right", city=None  # No city initially
-            ),
-        ]
-
-        mock_geo_provider.reverse_geocode.return_value = GeoLocation(
-            latitude=-23.5, longitude=-46.6,
-            address="Test", city="São Paulo"
-        )
-
-        await road_service._enrich_milestones_with_cities(milestones)
-
-        assert milestones[0].city == "São Paulo"

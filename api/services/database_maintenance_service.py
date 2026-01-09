@@ -23,6 +23,8 @@ class MaintenanceStats:
     """Statistics from a maintenance run."""
     orphan_pois_found: int = 0
     orphan_pois_deleted: int = 0
+    orphan_segments_found: int = 0
+    orphan_segments_deleted: int = 0
     is_referenced_fixed: int = 0
     stale_operations_cleaned: int = 0
     execution_time_ms: int = 0
@@ -36,6 +38,8 @@ class DatabaseStats:
     unreferenced_pois: int = 0
     total_maps: int = 0
     total_map_pois: int = 0
+    total_segments: int = 0
+    orphan_segments: int = 0
     pending_operations: int = 0
     stale_operations: int = 0
 
@@ -80,6 +84,9 @@ class DatabaseMaintenanceService:
         )
         total_map_pois = total_map_pois_result.scalar() or 0
 
+        # Count segments and orphan segments
+        total_segments, orphan_segments = await self._count_segments()
+
         # Count pending operations
         pending_ops_result = await self.session.execute(
             select(func.count(AsyncOperation.id))
@@ -103,6 +110,8 @@ class DatabaseMaintenanceService:
             unreferenced_pois=unreferenced_pois,
             total_maps=total_maps,
             total_map_pois=total_map_pois,
+            total_segments=total_segments,
+            orphan_segments=orphan_segments,
             pending_operations=pending_operations,
             stale_operations=stale_operations,
         )
@@ -253,6 +262,100 @@ class DatabaseMaintenanceService:
             logger.info(f"Marked {count} stale operations as failed")
         return count
 
+    async def _count_segments(self) -> tuple[int, int]:
+        """
+        Count total segments and orphan segments.
+
+        Returns:
+            Tuple of (total_segments, orphan_segments)
+        """
+        try:
+            from api.database.models.route_segment import RouteSegment
+            from api.database.models.map_segment import MapSegment
+
+            # Count total segments
+            total_result = await self.session.execute(
+                select(func.count(RouteSegment.id))
+            )
+            total_segments = total_result.scalar() or 0
+
+            # Count orphan segments (not referenced by any MapSegment)
+            referenced_subquery = select(MapSegment.segment_id).distinct()
+            orphan_result = await self.session.execute(
+                select(func.count(RouteSegment.id))
+                .where(~RouteSegment.id.in_(referenced_subquery))
+            )
+            orphan_segments = orphan_result.scalar() or 0
+
+            return total_segments, orphan_segments
+        except Exception as e:
+            logger.warning(f"Error counting segments: {e}")
+            return 0, 0
+
+    async def find_orphan_segment_ids(self) -> List[str]:
+        """
+        Find segment IDs that are not referenced by any MapSegment.
+
+        Returns:
+            List of orphan segment UUIDs as strings.
+        """
+        try:
+            from api.database.models.route_segment import RouteSegment
+            from api.database.models.map_segment import MapSegment
+
+            referenced_subquery = select(MapSegment.segment_id).distinct()
+
+            result = await self.session.execute(
+                select(RouteSegment.id).where(~RouteSegment.id.in_(referenced_subquery))
+            )
+            return [str(segment_id) for segment_id in result.scalars().all()]
+        except Exception as e:
+            logger.warning(f"Error finding orphan segments: {e}")
+            return []
+
+    async def delete_orphan_segments(self, dry_run: bool = True) -> int:
+        """
+        Delete segments that are not referenced by any map.
+
+        This also cascade deletes associated SegmentPOIs.
+
+        Args:
+            dry_run: If True, only count but don't delete.
+
+        Returns:
+            Number of segments deleted (or would be deleted in dry run).
+        """
+        try:
+            from uuid import UUID
+            from api.database.models.route_segment import RouteSegment
+
+            # Get orphan segment IDs
+            orphan_ids = await self.find_orphan_segment_ids()
+            count = len(orphan_ids)
+
+            if count == 0:
+                logger.info("No orphan segments found")
+                return 0
+
+            if dry_run:
+                logger.info(f"Dry run: would delete {count} orphan segments")
+                return count
+
+            # Delete orphan segments (SegmentPOIs will cascade delete)
+            orphan_uuids = [UUID(sid) for sid in orphan_ids]
+
+            result = await self.session.execute(
+                delete(RouteSegment).where(RouteSegment.id.in_(orphan_uuids))
+            )
+            await self.session.commit()
+
+            deleted = result.rowcount
+            logger.info(f"Deleted {deleted} orphan segments")
+            return deleted
+        except Exception as e:
+            logger.warning(f"Error deleting orphan segments: {e}")
+            return 0
+
     async def run_full_maintenance(self, dry_run: bool = True) -> MaintenanceStats:
         """
         Run all maintenance tasks.
@@ -268,12 +371,19 @@ class DatabaseMaintenanceService:
 
         logger.info(f"Starting database maintenance (dry_run={dry_run})")
 
-        # Get initial orphan count
-        orphan_ids = await self.find_orphan_poi_ids()
-        stats.orphan_pois_found = len(orphan_ids)
+        # Get initial orphan POI count
+        orphan_poi_ids = await self.find_orphan_poi_ids()
+        stats.orphan_pois_found = len(orphan_poi_ids)
 
         # Delete orphan POIs
         stats.orphan_pois_deleted = await self.delete_orphan_pois(dry_run=dry_run)
+
+        # Get initial orphan segment count
+        orphan_segment_ids = await self.find_orphan_segment_ids()
+        stats.orphan_segments_found = len(orphan_segment_ids)
+
+        # Delete orphan segments
+        stats.orphan_segments_deleted = await self.delete_orphan_segments(dry_run=dry_run)
 
         # Fix is_referenced flags
         stats.is_referenced_fixed = await self.fix_is_referenced_flags(dry_run=dry_run)
@@ -286,7 +396,8 @@ class DatabaseMaintenanceService:
 
         logger.info(
             f"Maintenance completed in {stats.execution_time_ms}ms: "
-            f"orphans={stats.orphan_pois_deleted}, "
+            f"orphan_pois={stats.orphan_pois_deleted}, "
+            f"orphan_segments={stats.orphan_segments_deleted}, "
             f"flags_fixed={stats.is_referenced_fixed}, "
             f"stale_ops={stats.stale_operations_cleaned}"
         )

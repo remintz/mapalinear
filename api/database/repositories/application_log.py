@@ -2,7 +2,7 @@
 Repository for application logs.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import delete, func, select
@@ -61,8 +61,16 @@ class ApplicationLogRepository(BaseRepository[ApplicationLog]):
         Returns:
             Created ApplicationLog instance
         """
+        # Ensure timestamp is timezone-aware (UTC)
+        if timestamp:
+            if timestamp.tzinfo is None:
+                # Assume naive timestamps are UTC
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+        else:
+            timestamp = datetime.now(timezone.utc)
+        
         log = ApplicationLog(
-            timestamp=timestamp or datetime.now(),
+            timestamp=timestamp,
             level=level,
             level_no=level_no,
             module=module,
@@ -156,10 +164,16 @@ class ApplicationLogRepository(BaseRepository[ApplicationLog]):
             count_query = count_query.where(ApplicationLog.message.ilike(search_pattern))
 
         if start_time:
+            # Ensure timezone-aware (assume UTC if naive)
+            if start_time.tzinfo is None:
+                start_time = start_time.replace(tzinfo=timezone.utc)
             query = query.where(ApplicationLog.timestamp >= start_time)
             count_query = count_query.where(ApplicationLog.timestamp >= start_time)
 
         if end_time:
+            # Ensure timezone-aware (assume UTC if naive)
+            if end_time.tzinfo is None:
+                end_time = end_time.replace(tzinfo=timezone.utc)
             query = query.where(ApplicationLog.timestamp <= end_time)
             count_query = count_query.where(ApplicationLog.timestamp <= end_time)
 
@@ -209,8 +223,14 @@ class ApplicationLogRepository(BaseRepository[ApplicationLog]):
         )
 
         if start_time:
+            # Ensure timezone-aware (assume UTC if naive)
+            if start_time.tzinfo is None:
+                start_time = start_time.replace(tzinfo=timezone.utc)
             query = query.where(ApplicationLog.timestamp >= start_time)
         if end_time:
+            # Ensure timezone-aware (assume UTC if naive)
+            if end_time.tzinfo is None:
+                end_time = end_time.replace(tzinfo=timezone.utc)
             query = query.where(ApplicationLog.timestamp <= end_time)
 
         query = query.group_by(ApplicationLog.level)
@@ -244,7 +264,7 @@ class ApplicationLogRepository(BaseRepository[ApplicationLog]):
         Returns:
             Number of deleted records
         """
-        cutoff_date = datetime.now() - timedelta(days=days_to_keep)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_to_keep)
 
         result = await self.session.execute(
             delete(ApplicationLog).where(ApplicationLog.timestamp < cutoff_date)

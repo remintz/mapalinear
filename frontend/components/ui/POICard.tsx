@@ -56,7 +56,7 @@ function getPoiTypeName(type: string): string {
     police: 'Polícia',
     intersection: 'Cruzamento',
     exit: 'Saída',
-    other: 'Outro'
+    other: 'Desconhecido'
   };
   return typeNameMap[type] || type;
 }
@@ -83,7 +83,7 @@ function StarRating({ rating, count }: { rating: number; count?: number }) {
         ))}
       </div>
       <span className="text-sm font-medium text-zinc-700">{rating.toFixed(1)}</span>
-      {count !== undefined && (
+      {count != null && (
         <span className="text-xs text-zinc-500">({count.toLocaleString('pt-BR')})</span>
       )}
     </div>

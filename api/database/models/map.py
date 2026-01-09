@@ -14,6 +14,7 @@ from api.database.connection import Base
 
 if TYPE_CHECKING:
     from api.database.models.map_poi import MapPOI
+    from api.database.models.map_segment import MapSegment
     from api.database.models.user import User
     from api.database.models.user_map import UserMap
 
@@ -66,6 +67,9 @@ class Map(Base):
     )
     map_pois: Mapped[List["MapPOI"]] = relationship(
         "MapPOI", back_populates="map", cascade="all, delete-orphan"
+    )
+    map_segments: Mapped[List["MapSegment"]] = relationship(
+        "MapSegment", back_populates="map", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:

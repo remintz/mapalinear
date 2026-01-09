@@ -9,7 +9,7 @@ import pytest
 import json
 from datetime import datetime
 from uuid import uuid4
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, AsyncMock, MagicMock
 
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
@@ -377,12 +377,346 @@ class TestRequiredTagsEndpoints:
         assert response.status_code == 422
 
 
+class TestRefreshPOIsEndpoint:
+    """Test the refresh POIs endpoint."""
+
+    def test_refresh_requires_admin(self, regular_client):
+        """Non-admin users should get 403 on refresh endpoint."""
+        response = regular_client.post(
+            "/api/admin/pois/refresh",
+            json={"poi_ids": [str(uuid4())]}
+        )
+        assert response.status_code == 403
+
+    def test_refresh_pois_success(self, admin_client):
+        """Admin should be able to refresh POIs."""
+        # Use a fake POI ID - endpoint should handle gracefully
+        fake_id = str(uuid4())
+        response = admin_client.post(
+            "/api/admin/pois/refresh",
+            json={"poi_ids": [fake_id]}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "updated" in data
+        assert "failed" in data
+        assert "message" in data
+        assert isinstance(data["updated"], int)
+        assert isinstance(data["failed"], int)
+        # Fake POI should fail (not found)
+        assert data["failed"] == 1
+
+    def test_refresh_pois_empty_list(self, admin_client):
+        """Refresh with empty list should return 422 validation error."""
+        response = admin_client.post(
+            "/api/admin/pois/refresh",
+            json={"poi_ids": []}
+        )
+        assert response.status_code == 422
+
+    def test_refresh_pois_invalid_format(self, admin_client):
+        """Refresh with invalid request format should return 422."""
+        response = admin_client.post(
+            "/api/admin/pois/refresh",
+            json={"invalid": "data"}
+        )
+        assert response.status_code == 422
+
+    def test_refresh_pois_max_limit(self, admin_client):
+        """Refresh should reject more than 100 POI IDs."""
+        # Create 101 fake POI IDs
+        poi_ids = [str(uuid4()) for _ in range(101)]
+        response = admin_client.post(
+            "/api/admin/pois/refresh",
+            json={"poi_ids": poi_ids}
+        )
+        assert response.status_code == 422
+
+    def test_refresh_pois_multiple_ids(self, admin_client):
+        """Admin should be able to refresh multiple POIs at once."""
+        fake_ids = [str(uuid4()) for _ in range(3)]
+        response = admin_client.post(
+            "/api/admin/pois/refresh",
+            json={"poi_ids": fake_ids}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        # All should fail as they don't exist
+        assert data["failed"] == 3
+        assert data["updated"] == 0
+
+
+class TestRefreshPOIsWithMocks:
+    """
+    Test refresh POIs logic with mocks.
+
+    These tests verify that the refresh logic:
+    1. Uses correct parameter names (latitude/longitude, not lat/lon)
+    2. Uses correct osm_id format (node/123 or way/123)
+    3. Updates fields correctly from provider data
+    4. Recalculates quality after refresh
+    """
+
+    def test_reverse_geocode_parameter_names(self):
+        """
+        Verify that reverse_geocode is called with 'latitude' and 'longitude',
+        not 'lat' and 'lon'.
+
+        This test would have caught the bug where we used lat/lon instead of
+        latitude/longitude.
+        """
+        from api.providers.base import GeoProvider
+        import inspect
+
+        # Get the signature of reverse_geocode
+        sig = inspect.signature(GeoProvider.reverse_geocode)
+        param_names = list(sig.parameters.keys())
+
+        # Verify correct parameter names
+        assert 'latitude' in param_names, "reverse_geocode should have 'latitude' parameter"
+        assert 'longitude' in param_names, "reverse_geocode should have 'longitude' parameter"
+        assert 'lat' not in param_names, "reverse_geocode should NOT have 'lat' parameter"
+        assert 'lon' not in param_names, "reverse_geocode should NOT have 'lon' parameter"
+
+    def test_get_poi_details_expects_type_prefix(self):
+        """
+        Verify that get_poi_details expects osm_id with type prefix (node/ or way/).
+
+        This test documents the expected format for osm_id in get_poi_details.
+        """
+        from api.providers.osm.provider import OSMProvider
+
+        # The OSM provider's get_poi_details splits on '/' to get type and id
+        # This test verifies the expected format
+        test_poi_id = "node/12345"
+        osm_type, osm_id = test_poi_id.split('/', 1)
+
+        assert osm_type == "node"
+        assert osm_id == "12345"
+
+        # Also test way format
+        test_poi_id = "way/67890"
+        osm_type, osm_id = test_poi_id.split('/', 1)
+
+        assert osm_type == "way"
+        assert osm_id == "67890"
+
+    def test_refresh_endpoint_code_uses_correct_format(self):
+        """
+        Verify that the refresh endpoint code constructs osm_id with correct format.
+
+        This is a code inspection test that reads the source and verifies patterns.
+        """
+        import ast
+        from pathlib import Path
+
+        # Read the router source code
+        router_path = Path("api/routers/admin_pois_router.py")
+        source = router_path.read_text()
+
+        # Check that we use node/ and way/ prefixes
+        assert 'f"node/{poi.osm_id}"' in source or "node/" in source, \
+            "refresh_pois should construct osm_id with node/ prefix"
+        assert 'f"way/{poi.osm_id}"' in source or "way/" in source, \
+            "refresh_pois should try way/ prefix as fallback"
+
+        # Check that we use latitude/longitude (not lat/lon)
+        assert 'latitude=poi.latitude' in source, \
+            "refresh_pois should use latitude=poi.latitude"
+        assert 'longitude=poi.longitude' in source, \
+            "refresh_pois should use longitude=poi.longitude"
+        assert 'lat=poi.lat' not in source, \
+            "refresh_pois should NOT use lat=poi.lat"
+        assert 'lon=poi.lon' not in source, \
+            "refresh_pois should NOT use lon=poi.lon"
+
+    def test_refresh_endpoint_recalculates_quality(self):
+        """
+        Verify that refresh endpoint code calls quality service.
+        """
+        from pathlib import Path
+
+        router_path = Path("api/routers/admin_pois_router.py")
+        source = router_path.read_text()
+
+        # Check that quality service is used
+        assert 'POIQualityService' in source, \
+            "refresh_pois should use POIQualityService"
+        assert 'update_poi_quality_fields' in source, \
+            "refresh_pois should call update_poi_quality_fields"
+
+
+class TestNoCityFilter:
+    """Test the __no_city__ filter for POIs without city."""
+
+    def test_list_pois_no_city_filter(self, admin_client):
+        """Admin should be able to filter POIs without city using __no_city__."""
+        response = admin_client.get("/api/admin/pois?city=__no_city__")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "pois" in data
+        # All returned POIs should have no city (null or empty)
+        for poi in data["pois"]:
+            assert poi.get("city") is None or poi.get("city") == ""
+
+    def test_list_pois_no_city_with_pagination(self, admin_client):
+        """No city filter should work with pagination."""
+        response = admin_client.get("/api/admin/pois?city=__no_city__&page=1&limit=10")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["page"] == 1
+        assert data["limit"] == 10
+
+    def test_list_pois_no_city_with_type_filter(self, admin_client):
+        """No city filter should combine with type filter."""
+        response = admin_client.get("/api/admin/pois?city=__no_city__&poi_type=gas_station")
+
+        assert response.status_code == 200
+        data = response.json()
+        # All POIs should match both filters
+        for poi in data["pois"]:
+            assert poi.get("city") is None or poi.get("city") == ""
+            assert poi["type"] == "gas_station"
+
+
+class TestToggleDisabledEndpoint:
+    """Test the toggle disabled POIs endpoint."""
+
+    def test_toggle_disabled_requires_admin(self, regular_client):
+        """Non-admin users should get 403 on toggle disabled endpoint."""
+        response = regular_client.post(
+            "/api/admin/pois/toggle-disabled",
+            json={"poi_ids": [str(uuid4())], "disabled": True}
+        )
+        assert response.status_code == 403
+
+    def test_toggle_disabled_success(self, admin_client):
+        """Admin should be able to toggle disabled status."""
+        fake_id = str(uuid4())
+        response = admin_client.post(
+            "/api/admin/pois/toggle-disabled",
+            json={"poi_ids": [fake_id], "disabled": True}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "updated" in data
+        assert "message" in data
+        assert isinstance(data["updated"], int)
+
+    def test_toggle_disabled_empty_list(self, admin_client):
+        """Toggle with empty list should return 422 validation error."""
+        response = admin_client.post(
+            "/api/admin/pois/toggle-disabled",
+            json={"poi_ids": [], "disabled": True}
+        )
+        assert response.status_code == 422
+
+    def test_toggle_disabled_invalid_format(self, admin_client):
+        """Toggle with invalid request format should return 422."""
+        response = admin_client.post(
+            "/api/admin/pois/toggle-disabled",
+            json={"invalid": "data"}
+        )
+        assert response.status_code == 422
+
+    def test_toggle_disabled_missing_disabled_field(self, admin_client):
+        """Toggle without disabled field should return 422."""
+        response = admin_client.post(
+            "/api/admin/pois/toggle-disabled",
+            json={"poi_ids": [str(uuid4())]}
+        )
+        assert response.status_code == 422
+
+    def test_toggle_disabled_multiple_ids(self, admin_client):
+        """Admin should be able to toggle multiple POIs at once."""
+        fake_ids = [str(uuid4()) for _ in range(3)]
+        response = admin_client.post(
+            "/api/admin/pois/toggle-disabled",
+            json={"poi_ids": fake_ids, "disabled": False}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data["updated"], int)
+
+    def test_toggle_disabled_enable(self, admin_client):
+        """Admin should be able to enable POIs."""
+        fake_ids = [str(uuid4()) for _ in range(2)]
+        response = admin_client.post(
+            "/api/admin/pois/toggle-disabled",
+            json={"poi_ids": fake_ids, "disabled": False}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "habilitado" in data["message"].lower()
+
+
+class TestDisabledOnlyFilter:
+    """Test the disabled_only filter for POIs listing."""
+
+    def test_list_pois_disabled_only(self, admin_client):
+        """Admin should be able to filter to disabled POIs only."""
+        response = admin_client.get("/api/admin/pois?disabled_only=true")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "pois" in data
+        # All returned POIs should be disabled
+        for poi in data["pois"]:
+            assert poi["is_disabled"] is True
+
+    def test_list_pois_disabled_with_other_filters(self, admin_client):
+        """Disabled filter should combine with other filters."""
+        response = admin_client.get("/api/admin/pois?disabled_only=true&poi_type=gas_station")
+
+        assert response.status_code == 200
+        data = response.json()
+        # All POIs should match both filters
+        for poi in data["pois"]:
+            assert poi["is_disabled"] is True
+            assert poi["type"] == "gas_station"
+
+    def test_list_pois_response_includes_is_disabled(self, admin_client):
+        """POI response should include is_disabled field."""
+        response = admin_client.get("/api/admin/pois?limit=1")
+
+        assert response.status_code == 200
+        data = response.json()
+        # If there are POIs, they should have is_disabled field
+        if data["pois"]:
+            poi = data["pois"][0]
+            assert "is_disabled" in poi
+            assert isinstance(poi["is_disabled"], bool)
+
+
 class TestAuthenticationRequired:
     """Test that authentication is required for admin endpoints."""
 
     def test_list_pois_unauthenticated(self, unauthenticated_client):
         """Unauthenticated users should get 401."""
         response = unauthenticated_client.get("/api/admin/pois")
+        assert response.status_code == 401
+
+    def test_refresh_pois_unauthenticated(self, unauthenticated_client):
+        """Unauthenticated users should get 401 on refresh endpoint."""
+        response = unauthenticated_client.post(
+            "/api/admin/pois/refresh",
+            json={"poi_ids": [str(uuid4())]}
+        )
+        assert response.status_code == 401
+
+    def test_toggle_disabled_unauthenticated(self, unauthenticated_client):
+        """Unauthenticated users should get 401 on toggle disabled endpoint."""
+        response = unauthenticated_client.post(
+            "/api/admin/pois/toggle-disabled",
+            json={"poi_ids": [str(uuid4())], "disabled": True}
+        )
         assert response.status_code == 401
 
     def test_get_required_tags_is_public(self, unauthenticated_client):

@@ -9,7 +9,7 @@ import logging
 import time
 from typing import List, Optional, Dict, Any
 from ..base import GeoProvider, ProviderType
-from ..models import GeoLocation, Route, POI, POICategory
+from ..models import GeoLocation, Route, RouteStep, POI, POICategory
 from ..cache import UnifiedCache
 from api.services.api_call_logger import api_call_logger
 
@@ -63,7 +63,9 @@ class OSMProvider(GeoProvider):
             'parking': POICategory.PARKING,
             'food_court': POICategory.FOOD,
             'fast_food': POICategory.FOOD,
-            'cafe': POICategory.FOOD
+            'cafe': POICategory.FOOD,
+            'police': POICategory.POLICE,
+            'car_repair': POICategory.MECHANIC,
         }
     
     def _get_http_client(self):
@@ -338,6 +340,7 @@ class OSMProvider(GeoProvider):
                 total_distance=route_data['distance'] / 1000.0,  # Convert to km
                 total_duration=route_data['duration'] / 60.0,   # Convert to minutes
                 geometry=route_data['geometry'],
+                steps=route_data.get('steps', []),  # Include OSRM steps
                 waypoints=waypoints or []
             )
             
@@ -438,9 +441,9 @@ class OSMProvider(GeoProvider):
             return None
             
         except Exception as e:
-            logger.error(f"POI details error for {poi_id}: {e}")
+            logger.error(f"POI details error for {poi_id}: {type(e).__name__}: {e}")
             return None
-    
+
     @property
     def provider_type(self) -> ProviderType:
         """Return OSM provider type."""
@@ -490,17 +493,18 @@ class OSMProvider(GeoProvider):
         return None
 
     async def _calculate_osrm_api_route(
-        self, 
-        origin: GeoLocation, 
+        self,
+        origin: GeoLocation,
         destination: GeoLocation
     ) -> Optional[dict]:
-        """Calculate route using OSRM API."""
+        """Calculate route using OSRM API with step extraction."""
         # OSRM demo server - use with caution in production
         osrm_url = f"http://router.project-osrm.org/route/v1/driving/{origin.longitude},{origin.latitude};{destination.longitude},{destination.latitude}"
         params = {
             'overview': 'full',
             'geometries': 'geojson',
-            'annotations': 'true'
+            'annotations': 'true',
+            'steps': 'true'  # Request step-by-step navigation
         }
 
         start_time = time.time()
@@ -587,13 +591,21 @@ class OSMProvider(GeoProvider):
                 
                 route = data['routes'][0]
                 geometry = route['geometry']['coordinates']
-                
+
                 # Convert to (lat, lon) format
                 geometry_converted = [(coord[1], coord[0]) for coord in geometry]
-                
+
                 distance = route['distance']  # meters
                 duration = route['duration']  # seconds
-                
+
+                # Extract steps from all legs
+                steps: List[RouteStep] = []
+                for leg in route.get('legs', []):
+                    for step in leg.get('steps', []):
+                        route_step = self._parse_osrm_step(step)
+                        if route_step:
+                            steps.append(route_step)
+
                 result_count = len(geometry_converted)
 
                 # Log successful API call
@@ -612,11 +624,12 @@ class OSMProvider(GeoProvider):
                     response_size_bytes=response_size,
                     result_count=result_count,
                 )
-                
+
                 return {
                     'distance': distance,
-                    'duration': duration, 
-                    'geometry': geometry_converted
+                    'duration': duration,
+                    'geometry': geometry_converted,
+                    'steps': steps
                 }
             
         except Exception as e:
@@ -641,7 +654,44 @@ class OSMProvider(GeoProvider):
             )
             return None
 
-    
+    def _parse_osrm_step(self, step: dict) -> Optional[RouteStep]:
+        """
+        Parse an OSRM step into a RouteStep model.
+
+        Args:
+            step: OSRM step dictionary from route response
+
+        Returns:
+            RouteStep model or None if parsing fails
+        """
+        try:
+            # Extract geometry (GeoJSON format: [[lon, lat], ...])
+            step_geometry = step.get('geometry', {}).get('coordinates', [])
+            if not step_geometry:
+                return None
+
+            # Convert to (lat, lon) tuples
+            geometry_converted = [(coord[1], coord[0]) for coord in step_geometry]
+
+            # Extract maneuver information
+            maneuver = step.get('maneuver', {})
+            maneuver_location = maneuver.get('location', [0, 0])
+            # Convert [lon, lat] to (lat, lon)
+            maneuver_coords = (maneuver_location[1], maneuver_location[0])
+
+            return RouteStep(
+                distance_m=step.get('distance', 0),
+                duration_s=step.get('duration', 0),
+                geometry=geometry_converted,
+                road_name=step.get('name', '') or step.get('ref', '') or '',
+                maneuver_type=maneuver.get('type', 'unknown'),
+                maneuver_modifier=maneuver.get('modifier'),
+                maneuver_location=maneuver_coords
+            )
+        except Exception as e:
+            logger.warning(f"Failed to parse OSRM step: {e}")
+            return None
+
     def _generate_overpass_query(self, location: GeoLocation, radius: float, categories: List[POICategory]) -> str:
         """Generate Overpass query for POI search."""
 
@@ -656,9 +706,9 @@ class OSMProvider(GeoProvider):
             'east': location.longitude + radius_deg
         }
 
-        # Use larger radius for places (cities/towns/villages) - 5km instead of 1km
+        # Use larger radius for places (cities/towns/villages) - 3x the normal radius
         # City centers may be far from highways but still relevant
-        place_radius_deg = (radius * 5) / 111000
+        place_radius_deg = (radius * 3) / 111000
         bbox_places = {
             'south': location.latitude - place_radius_deg,
             'west': location.longitude - place_radius_deg,
@@ -671,8 +721,8 @@ class OSMProvider(GeoProvider):
         tourism_filters = set()
         include_places = False
         for category in categories:
-            if category == POICategory.SERVICES:
-                include_places = True  # SERVICES category includes cities/towns/villages
+            if category in (POICategory.SERVICES, POICategory.CITY, POICategory.TOWN, POICategory.VILLAGE):
+                include_places = True  # Include city/town/village searches
             osm_amenities = self._get_osm_amenities_for_category(category)
             osm_tourism = self._get_osm_tourism_tags_for_category(category)
             # logger.debug(f"🔧 Categoria {category.value} -> amenities OSM: {osm_amenities}")
@@ -698,11 +748,14 @@ class OSMProvider(GeoProvider):
             query_parts.append(f'  node["tourism"="{tourism}"]({bbox_str});')
             query_parts.append(f'  way["tourism"="{tourism}"]({bbox_str});')
 
-        # Add place searches with LARGER radius (cities, towns, villages)
+        # Add place searches - cities and towns with LARGER radius, villages with normal radius
         if include_places:
-            for place_type in ['city', 'town', 'village']:
+            for place_type in ['city', 'town']:
                 query_parts.append(f'  node["place"="{place_type}"]({bbox_places_str});')
                 query_parts.append(f'  way["place"="{place_type}"]({bbox_places_str});')
+            # Villages use normal radius
+            query_parts.append(f'  node["place"="village"]({bbox_str});')
+            query_parts.append(f'  way["place"="village"]({bbox_str});')
 
         query_parts.extend([');', 'out meta;'])
 
@@ -759,8 +812,8 @@ class OSMProvider(GeoProvider):
                 
             except Exception as e:
                 last_exception = e
-                error_msg = str(e)[:500]
-                logger.warning(f"🌐 Overpass endpoint {endpoint} failed: {e}")
+                error_msg = str(e)[:500] if str(e) else f"{type(e).__name__}"
+                logger.warning(f"🌐 Overpass endpoint {endpoint} failed: {type(e).__name__}: {e}")
                 
                 # Log failed API call
                 duration_ms = int((time.time() - start_time) * 1000)
@@ -788,7 +841,7 @@ class OSMProvider(GeoProvider):
         
         # All endpoints failed
         if last_exception:
-            logger.error(f"All Overpass endpoints failed. Last error: {last_exception}")
+            logger.error(f"All Overpass endpoints failed. Last error: {type(last_exception).__name__}: {last_exception}")
             raise last_exception
         else:
             raise RuntimeError("No Overpass endpoints available")
@@ -826,9 +879,12 @@ class OSMProvider(GeoProvider):
 
             # Determine category - try place first, then tourism, then amenity
             place_type = tags.get('place', '')
-            if place_type in ['city', 'town', 'village']:
-                # Map place types to POICategory.SERVICES
-                category = POICategory.SERVICES
+            if place_type == 'city':
+                category = POICategory.CITY
+            elif place_type == 'town':
+                category = POICategory.TOWN
+            elif place_type == 'village':
+                category = POICategory.VILLAGE
             else:
                 # Try tourism mapping first (for hotels, etc)
                 tourism_type = tags.get('tourism', '')
@@ -840,7 +896,7 @@ class OSMProvider(GeoProvider):
 
                 # Default category if nothing matches
                 if not category:
-                    category = POICategory.SERVICES
+                    category = POICategory.OTHER
 
             # Create POI
             poi_id = f"{element['type']}/{element['id']}"
@@ -934,7 +990,7 @@ class OSMProvider(GeoProvider):
             POICategory.ATM: ['atm'],
             POICategory.SHOPPING: ['shop'],
             POICategory.PARKING: ['parking'],
-            POICategory.SERVICES: ['police']  # Only police amenity for SERVICES category
+            POICategory.POLICE: ['police']  # Police stations
         }
         return category_to_amenities.get(category, [])
 

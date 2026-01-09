@@ -9,7 +9,10 @@ from api.database.models.google_places_cache import GooglePlacesCache
 from api.database.models.impersonation_session import ImpersonationSession
 from api.database.models.map import Map
 from api.database.models.map_poi import MapPOI
+from api.database.models.map_segment import MapSegment
 from api.database.models.poi import POI
+from api.database.models.route_segment import RouteSegment
+from api.database.models.segment_poi import SegmentPOI
 from api.database.models.user import User
 from api.database.models.user_map import UserMap
 from api.database.models.system_settings import SystemSettings
@@ -27,8 +30,11 @@ __all__ = [
     "AsyncOperation",
     "ImpersonationSession",
     "Map",
-    "POI",
     "MapPOI",
+    "MapSegment",
+    "POI",
+    "RouteSegment",
+    "SegmentPOI",
     "CacheEntry",
     "GooglePlacesCache",
     "User",

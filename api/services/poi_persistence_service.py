@@ -58,11 +58,13 @@ def _poi_category_to_type(category: POICategory) -> str:
         POICategory.PHARMACY: MilestoneType.PHARMACY,
         POICategory.HEALTH: MilestoneType.HOSPITAL,
         POICategory.CITY: MilestoneType.CITY,
-        POICategory.TOWN: MilestoneType.CITY,
-        POICategory.SERVICES: MilestoneType.GAS_STATION,
+        POICategory.TOWN: MilestoneType.TOWN,
+        POICategory.VILLAGE: MilestoneType.VILLAGE,
+        POICategory.POLICE: MilestoneType.POLICE,
+        POICategory.OTHER: MilestoneType.OTHER,
     }
 
-    milestone_type = mapping.get(category, MilestoneType.GAS_STATION)
+    milestone_type = mapping.get(category, MilestoneType.OTHER)
     return milestone_type.value
 
 

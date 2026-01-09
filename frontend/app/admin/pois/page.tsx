@@ -16,30 +16,69 @@ import {
   Loader2,
   Search,
   X,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiClient } from "@/lib/api";
 import { AdminPOI, AdminPOIFilters, AdminPOIStats } from "@/lib/types";
 
 const POI_TYPE_LABELS: Record<string, string> = {
+  // Main categories
   gas_station: "Posto de Combustível",
+  fuel: "Combustível",
   restaurant: "Restaurante",
+  food: "Alimentação",
+  fast_food: "Fast Food",
+  cafe: "Café",
   hotel: "Hotel",
+  lodging: "Hospedagem",
+  camping: "Camping",
   hospital: "Hospital",
-  toll_booth: "Pedágio",
+  pharmacy: "Farmácia",
+  bank: "Banco",
+  atm: "Caixa Eletrônico",
+  shopping: "Shopping",
+  supermarket: "Supermercado",
+  tourist_attraction: "Atração Turística",
   rest_area: "Área de Descanso",
+  parking: "Estacionamento",
+  toll_booth: "Pedágio",
+  police: "Polícia",
+  mechanic: "Mecânica",
+  other: "Desconhecido",
+  // Place types
   city: "Cidade",
-  town: "Cidade",
+  town: "Cidade Pequena",
   village: "Vila",
 };
 
 const POI_TYPE_ICONS: Record<string, string> = {
+  // Main categories
   gas_station: "⛽",
+  fuel: "⛽",
   restaurant: "🍽️",
+  food: "🍴",
+  fast_food: "🍔",
+  cafe: "☕",
   hotel: "🏨",
+  lodging: "🛏️",
+  camping: "⛺",
   hospital: "🏥",
-  toll_booth: "🚧",
+  pharmacy: "💊",
+  bank: "🏦",
+  atm: "💳",
+  shopping: "🛒",
+  supermarket: "🛒",
+  tourist_attraction: "🏛️",
   rest_area: "🅿️",
+  parking: "🅿️",
+  toll_booth: "🚧",
+  police: "👮",
+  mechanic: "🔧",
+  services: "🏢",
+  other: "📍",
+  // Place types
   city: "🏙️",
   town: "🏘️",
   village: "🏡",
@@ -61,6 +100,7 @@ function AdminPOIsPageContent() {
   const cityFilter = searchParams.get("city") || "";
   const typeFilter = searchParams.get("type") || "";
   const lowQualityOnly = searchParams.get("low_quality") === "true";
+  const disabledOnly = searchParams.get("disabled") === "true";
   const page = parseInt(searchParams.get("page") || "1", 10);
   const [limit] = useState(50);
 
@@ -71,6 +111,11 @@ function AdminPOIsPageContent() {
   const [loading, setLoading] = useState(true);
   const [loadingFilters, setLoadingFilters] = useState(true);
   const [recalculating, setRecalculating] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [toggling, setToggling] = useState(false);
+
+  // Selection state
+  const [selectedPois, setSelectedPois] = useState<Set<string>>(new Set());
 
   // Helper to update URL params
   const updateUrlParams = useCallback(
@@ -113,6 +158,10 @@ function AdminPOIsPageContent() {
 
   const setLowQualityOnly = (value: boolean) => {
     updateUrlParams({ low_quality: value ? "true" : null, page: "1" });
+  };
+
+  const setDisabledOnly = (value: boolean) => {
+    updateUrlParams({ disabled: value ? "true" : null, page: "1" });
   };
 
   const setPage = (newPage: number) => {
@@ -161,6 +210,7 @@ function AdminPOIsPageContent() {
         city: cityFilter || undefined,
         poi_type: typeFilter || undefined,
         low_quality_only: lowQualityOnly,
+        disabled_only: disabledOnly,
         page,
         limit,
       });
@@ -172,7 +222,7 @@ function AdminPOIsPageContent() {
     } finally {
       setLoading(false);
     }
-  }, [nameFilter, cityFilter, typeFilter, lowQualityOnly, page, limit]);
+  }, [nameFilter, cityFilter, typeFilter, lowQualityOnly, disabledOnly, page, limit]);
 
   // Auth check
   useEffect(() => {
@@ -217,6 +267,78 @@ function AdminPOIsPageContent() {
 
   const clearFilters = () => {
     router.push("/admin/pois", { scroll: false });
+  };
+
+  // Selection handlers
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedPois(new Set(pois.map((poi) => poi.id)));
+    } else {
+      setSelectedPois(new Set());
+    }
+  };
+
+  const handleSelectPoi = (poiId: string, checked: boolean) => {
+    const newSelection = new Set(selectedPois);
+    if (checked) {
+      newSelection.add(poiId);
+    } else {
+      newSelection.delete(poiId);
+    }
+    setSelectedPois(newSelection);
+  };
+
+  const isAllSelected = pois.length > 0 && pois.every((poi) => selectedPois.has(poi.id));
+  const isSomeSelected = pois.some((poi) => selectedPois.has(poi.id));
+
+  // Clear selection when POIs change (page change, filter change)
+  useEffect(() => {
+    setSelectedPois(new Set());
+  }, [pois]);
+
+  const handleUpdateSelected = async () => {
+    if (selectedPois.size === 0) return;
+
+    if (!confirm(`Atualizar informações de ${selectedPois.size} POI(s) selecionado(s)?`)) {
+      return;
+    }
+
+    try {
+      setUpdating(true);
+      const result = await apiClient.refreshPOIs(Array.from(selectedPois));
+      toast.success(result.message);
+      setSelectedPois(new Set());
+      // Reload data
+      await loadPOIs();
+    } catch (error) {
+      console.error("Error updating POIs:", error);
+      toast.error("Erro ao atualizar POIs");
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const handleToggleDisabled = async (disabled: boolean) => {
+    if (selectedPois.size === 0) return;
+
+    const action = disabled ? "desabilitar" : "habilitar";
+    if (!confirm(`${disabled ? "Desabilitar" : "Habilitar"} ${selectedPois.size} POI(s) selecionado(s)?`)) {
+      return;
+    }
+
+    try {
+      setToggling(true);
+      const result = await apiClient.togglePOIsDisabled(Array.from(selectedPois), disabled);
+      toast.success(result.message);
+      setSelectedPois(new Set());
+      // Reload data
+      await loadPOIs();
+    } catch (error) {
+      console.error(`Error ${action}ing POIs:`, error);
+      toast.error(`Erro ao ${action} POIs`);
+    } finally {
+      setToggling(false);
+    }
   };
 
   const totalPages = Math.ceil(total / limit);
@@ -271,7 +393,7 @@ function AdminPOIsPageContent() {
           <div className="flex items-center gap-2 mb-3">
             <Filter className="h-4 w-4 text-gray-500" />
             <span className="text-sm font-medium text-gray-700">Filtros</span>
-            {(nameFilter || cityFilter || typeFilter || lowQualityOnly) && (
+            {(nameFilter || cityFilter || typeFilter || lowQualityOnly || disabledOnly) && (
               <button
                 onClick={clearFilters}
                 className="ml-auto text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1"
@@ -316,6 +438,7 @@ function AdminPOIsPageContent() {
                 disabled={loadingFilters}
               >
                 <option value="">Todas</option>
+                <option value="__no_city__">Sem cidade</option>
                 {filters?.cities.map((city) => (
                   <option key={city} value={city}>
                     {city}
@@ -342,7 +465,7 @@ function AdminPOIsPageContent() {
               </select>
             </div>
 
-            {/* Low quality only + Results count */}
+            {/* Low quality only + Disabled only + Results count */}
             <div className="flex flex-col justify-end gap-2">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
@@ -353,12 +476,74 @@ function AdminPOIsPageContent() {
                 />
                 <span className="text-sm text-gray-700">Baixa qualidade</span>
               </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={disabledOnly}
+                  onChange={(e) => setDisabledOnly(e.target.checked)}
+                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                />
+                <span className="text-sm text-gray-700">Desabilitados</span>
+              </label>
               <span className="text-sm text-gray-500">
                 {total} resultado{total !== 1 ? "s" : ""}
               </span>
             </div>
           </div>
         </div>
+
+        {/* Selection Actions Bar */}
+        {selectedPois.size > 0 && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 flex items-center justify-between">
+            <span className="text-sm text-blue-800">
+              {selectedPois.size} POI{selectedPois.size !== 1 ? "s" : ""} selecionado{selectedPois.size !== 1 ? "s" : ""}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setSelectedPois(new Set())}
+                className="text-sm text-blue-600 hover:text-blue-700"
+              >
+                Limpar seleção
+              </button>
+              <button
+                onClick={() => handleToggleDisabled(true)}
+                disabled={toggling}
+                className="flex items-center gap-2 px-3 py-1.5 bg-amber-500 text-white text-sm rounded-lg hover:bg-amber-600 disabled:opacity-50"
+              >
+                {toggling ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <EyeOff className="h-4 w-4" />
+                )}
+                Desabilitar
+              </button>
+              <button
+                onClick={() => handleToggleDisabled(false)}
+                disabled={toggling}
+                className="flex items-center gap-2 px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50"
+              >
+                {toggling ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+                Habilitar
+              </button>
+              <button
+                onClick={handleUpdateSelected}
+                disabled={updating}
+                className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                {updating ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+                Atualizar
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* POI Table */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
@@ -370,7 +555,7 @@ function AdminPOIsPageContent() {
             <div className="flex flex-col items-center justify-center py-12 text-gray-500">
               <Search className="h-12 w-12 mb-3 text-gray-300" />
               <p>Nenhum POI encontrado</p>
-              {(nameFilter || cityFilter || typeFilter || lowQualityOnly) && (
+              {(nameFilter || cityFilter || typeFilter || lowQualityOnly || disabledOnly) && (
                 <button
                   onClick={clearFilters}
                   className="mt-2 text-sm text-blue-600 hover:text-blue-700"
@@ -384,6 +569,17 @@ function AdminPOIsPageContent() {
               <table className="w-full">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
+                    <th className="px-4 py-3 text-left">
+                      <input
+                        type="checkbox"
+                        checked={isAllSelected}
+                        ref={(el) => {
+                          if (el) el.indeterminate = isSomeSelected && !isAllSelected;
+                        }}
+                        onChange={(e) => handleSelectAll(e.target.checked)}
+                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                      />
+                    </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Nome
                     </th>
@@ -397,13 +593,24 @@ function AdminPOIsPageContent() {
                       Qualidade
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Ações
                     </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {pois.map((poi) => (
-                    <tr key={poi.id} className="hover:bg-gray-50">
+                    <tr key={poi.id} className={`hover:bg-gray-50 ${selectedPois.has(poi.id) ? "bg-blue-50" : ""} ${poi.is_disabled ? "opacity-60" : ""}`}>
+                      <td className="px-4 py-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedPois.has(poi.id)}
+                          onChange={(e) => handleSelectPoi(poi.id, e.target.checked)}
+                          className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        />
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <span className="text-lg">{POI_TYPE_ICONS[poi.type] || "📍"}</span>
@@ -435,6 +642,19 @@ function AdminPOIsPageContent() {
                           <div className="flex items-center gap-1">
                             <CheckCircle className="h-4 w-4 text-green-500" />
                             <span className="text-xs text-green-600">OK</span>
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {poi.is_disabled ? (
+                          <div className="flex items-center gap-1">
+                            <EyeOff className="h-4 w-4 text-gray-400" />
+                            <span className="text-xs text-gray-500">Desabilitado</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1">
+                            <Eye className="h-4 w-4 text-green-500" />
+                            <span className="text-xs text-green-600">Ativo</span>
                           </div>
                         )}
                       </td>

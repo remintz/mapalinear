@@ -35,6 +35,10 @@ class POICategory(Enum):
     POLICE = "police"
     MECHANIC = "mechanic"
     SUPERMARKET = "supermarket"
+    # Place types (cities, towns, villages)
+    CITY = "city"
+    TOWN = "town"
+    VILLAGE = "village"
     OTHER = "other"
 
 
@@ -57,10 +61,51 @@ class GeoLocation(BaseModel):
         frozen = True  # Make immutable
 
 
+class RouteStep(BaseModel):
+    """
+    A step from OSRM routing representing a maneuver point.
+
+    Each step corresponds to a navigation instruction and contains the geometry
+    from this maneuver to the next one. Steps are the natural unit for creating
+    reusable route segments.
+    """
+    distance_m: float = Field(..., ge=0, description="Distance in meters")
+    duration_s: float = Field(..., ge=0, description="Duration in seconds")
+    geometry: List[Tuple[float, float]] = Field(
+        ...,
+        description="Geometry as [(lat, lon), ...] coordinates from this step to next"
+    )
+    road_name: str = Field(default="", description="Name of the road")
+    maneuver_type: str = Field(..., description="Type of maneuver (turn, depart, arrive, etc.)")
+    maneuver_modifier: Optional[str] = Field(
+        None,
+        description="Modifier for maneuver (left, right, straight, etc.)"
+    )
+    maneuver_location: Tuple[float, float] = Field(
+        ...,
+        description="Location of the maneuver as (lat, lon)"
+    )
+
+    @property
+    def distance_km(self) -> float:
+        """Get distance in kilometers."""
+        return self.distance_m / 1000.0
+
+    @property
+    def start_coords(self) -> Tuple[float, float]:
+        """Get start coordinates (first point of geometry)."""
+        return self.geometry[0] if self.geometry else self.maneuver_location
+
+    @property
+    def end_coords(self) -> Tuple[float, float]:
+        """Get end coordinates (last point of geometry)."""
+        return self.geometry[-1] if self.geometry else self.maneuver_location
+
+
 class RouteSegment(BaseModel):
     """
     A segment of a route between two points.
-    
+
     Routes are composed of multiple segments, each representing a portion
     of the journey with specific characteristics.
     """
@@ -71,11 +116,11 @@ class RouteSegment(BaseModel):
     road_name: Optional[str] = Field(None, description="Name of the road/highway")
     road_type: Optional[str] = Field(None, description="Type of road (highway, arterial, etc.)")
     geometry: List[Tuple[float, float]] = Field(
-        default_factory=list, 
+        default_factory=list,
         description="Detailed geometry as [(lat, lon), ...] coordinates"
     )
     instructions: Optional[str] = Field(None, description="Navigation instructions")
-    
+
     @property
     def midpoint(self) -> GeoLocation:
         """Calculate the midpoint of this segment."""
@@ -87,7 +132,7 @@ class RouteSegment(BaseModel):
 class Route(BaseModel):
     """
     Unified route representation across all providers.
-    
+
     Contains the complete route information including geometry, segments,
     and metadata for travel between origin and destination.
     """
@@ -96,23 +141,27 @@ class Route(BaseModel):
     total_distance: float = Field(..., ge=0, description="Total distance in kilometers")
     total_duration: float = Field(..., ge=0, description="Total estimated time in minutes")
     geometry: List[Tuple[float, float]] = Field(
-        ..., 
-        min_items=2, 
+        ...,
+        min_length=2,
         description="Complete route geometry as [(lat, lon), ...] coordinates"
     )
     segments: List[RouteSegment] = Field(
-        default_factory=list, 
+        default_factory=list,
         description="Route broken down into segments"
     )
+    steps: List[RouteStep] = Field(
+        default_factory=list,
+        description="OSRM steps with maneuver information for reusable segments"
+    )
     waypoints: List[GeoLocation] = Field(
-        default_factory=list, 
+        default_factory=list,
         description="Intermediate waypoints if any"
     )
     road_names: List[str] = Field(
-        default_factory=list, 
+        default_factory=list,
         description="Names of roads/highways used in this route"
     )
-    
+
     class Config:
         """Pydantic configuration."""
         validate_assignment = True

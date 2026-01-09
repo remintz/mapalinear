@@ -10,7 +10,7 @@ from typing import Optional
 from uuid import uuid4
 
 from sqlalchemy import Index, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from api.database.connection import Base
@@ -30,8 +30,10 @@ class ApplicationLog(Base):
         UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
     )
 
-    # Timestamp when the log was created
-    timestamp: Mapped[datetime] = mapped_column(default=func.now(), index=True)
+    # Timestamp when the log was created (with timezone)
+    timestamp: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), default=func.now(), index=True
+    )
 
     # Log level as string (DEBUG, INFO, WARNING, ERROR, CRITICAL)
     level: Mapped[str] = mapped_column(String(20), index=True)

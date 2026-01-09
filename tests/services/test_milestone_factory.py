@@ -85,14 +85,18 @@ class TestBuildMilestoneCategories:
         assert POICategory.HOTEL in categories
 
     def test_includes_cities_by_default(self):
-        """Should include SERVICES (cities) by default."""
+        """Should include place categories (city, town, village) by default."""
         categories = build_milestone_categories()
-        assert POICategory.SERVICES in categories
+        assert POICategory.CITY in categories
+        assert POICategory.TOWN in categories
+        assert POICategory.VILLAGE in categories
 
     def test_excludes_cities_when_disabled(self):
-        """Should exclude SERVICES when include_cities=False."""
+        """Should exclude place categories when include_cities=False."""
         categories = build_milestone_categories(include_cities=False)
-        assert POICategory.SERVICES not in categories
+        assert POICategory.CITY not in categories
+        assert POICategory.TOWN not in categories
+        assert POICategory.VILLAGE not in categories
 
     def test_includes_all_fuel_types(self):
         """Should include both GAS_STATION and FUEL categories."""
