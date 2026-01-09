@@ -137,3 +137,24 @@ class ProblemReportRepository(BaseRepository[ProblemReport]):
             .limit(limit)
         )
         return list(result.scalars().all())
+
+    async def clear_map_reference(self, map_id: UUID) -> int:
+        """
+        Clear map_id for all reports associated with a map.
+
+        This should be called before deleting a map to avoid foreign key violations.
+
+        Args:
+            map_id: The map ID to clear from reports
+
+        Returns:
+            Number of reports updated
+        """
+        from sqlalchemy import update
+
+        result = await self.session.execute(
+            update(ProblemReport)
+            .where(ProblemReport.map_id == map_id)
+            .values(map_id=None)
+        )
+        return result.rowcount

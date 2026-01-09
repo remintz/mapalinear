@@ -243,7 +243,8 @@ class TestMapStorageServiceDeleteSegmentUsage:
     """Tests for segment usage tracking during map deletion."""
 
     @pytest.mark.asyncio
-    async def test_delete_map_decrements_usage_count(self):
+    @patch("api.database.repositories.problem_report.ProblemReportRepository")
+    async def test_delete_map_decrements_usage_count(self, mock_problem_report_repo_class):
         """Test that deleting a map decrements segment usage counts."""
         from api.services.map_storage_service_db import MapStorageServiceDB
 
@@ -251,6 +252,11 @@ class TestMapStorageServiceDeleteSegmentUsage:
         mock_session.execute = AsyncMock()
         mock_session.flush = AsyncMock()
         mock_session.commit = AsyncMock()
+
+        # Mock ProblemReportRepository
+        mock_problem_report_repo = MagicMock()
+        mock_problem_report_repo.clear_map_reference = AsyncMock(return_value=0)
+        mock_problem_report_repo_class.return_value = mock_problem_report_repo
 
         service = MapStorageServiceDB(mock_session)
 
@@ -276,7 +282,8 @@ class TestMapStorageServiceDeleteSegmentUsage:
         )
 
     @pytest.mark.asyncio
-    async def test_delete_map_no_segments(self):
+    @patch("api.database.repositories.problem_report.ProblemReportRepository")
+    async def test_delete_map_no_segments(self, mock_problem_report_repo_class):
         """Test that deleting a map without segments still works."""
         from api.services.map_storage_service_db import MapStorageServiceDB
 
@@ -284,6 +291,11 @@ class TestMapStorageServiceDeleteSegmentUsage:
         mock_session.execute = AsyncMock()
         mock_session.flush = AsyncMock()
         mock_session.commit = AsyncMock()
+
+        # Mock ProblemReportRepository
+        mock_problem_report_repo = MagicMock()
+        mock_problem_report_repo.clear_map_reference = AsyncMock(return_value=0)
+        mock_problem_report_repo_class.return_value = mock_problem_report_repo
 
         service = MapStorageServiceDB(mock_session)
 

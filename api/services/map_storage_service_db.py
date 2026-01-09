@@ -598,6 +598,16 @@ class MapStorageServiceDB:
                     f"(map {map_id})"
                 )
 
+            # Clear map_id from problem_reports to avoid FK violation
+            from api.database.repositories.problem_report import ProblemReportRepository
+            problem_report_repo = ProblemReportRepository(self.session)
+            cleared_reports = await problem_report_repo.clear_map_reference(map_uuid)
+            if cleared_reports > 0:
+                logger.info(
+                    f"Cleared map reference from {cleared_reports} problem reports "
+                    f"(map {map_id})"
+                )
+
             # Delete the map (cascades to MapSegments, MapPOIs, etc.)
             deleted = await self.map_repo.delete_by_id(map_uuid)
 
