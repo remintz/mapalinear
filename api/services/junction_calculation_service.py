@@ -57,6 +57,7 @@ class JunctionResult:
         side: Side of road ("left", "right", "center")
         access_distance_km: Distance from junction to POI
         requires_detour: Whether reaching this POI requires leaving the route
+        access_route_geometry: Geometry of access route from lookback to POI
     """
     junction_lat: float
     junction_lon: float
@@ -64,6 +65,7 @@ class JunctionResult:
     side: str
     access_distance_km: float
     requires_detour: bool
+    access_route_geometry: Optional[List[Tuple[float, float]]] = None
 
 
 class JunctionCalculationService:
@@ -179,7 +181,7 @@ class JunctionCalculationService:
         route_geometry: List[Tuple[float, float]],
         route_total_km: float,
         global_sps: List[GlobalSearchPoint],
-    ) -> JunctionResult:
+    ) -> Optional[JunctionResult]:
         """
         Calculate junction point, side, and access distance for a POI.
 
@@ -198,7 +200,7 @@ class JunctionCalculationService:
             global_sps: All search points with global distances
 
         Returns:
-            JunctionResult with calculated junction data
+            JunctionResult with calculated junction data, or None if calculation fails
         """
         # Calculate approximate POI distance from origin
         segment_start_km = float(map_segment.distance_from_origin_km)
@@ -214,12 +216,12 @@ class JunctionCalculationService:
                 break
 
         if not discovery_sp:
-            # Fallback: estimate POI distance based on segment start + search point index
+            # Estimate POI distance based on segment start + search point index
             poi_approx_distance_km = segment_start_km + (sp_index * 1.0)  # 1km per SP
         else:
             poi_approx_distance_km = discovery_sp.distance_from_map_origin_km
 
-        # Check if POI is close enough to not need junction calculation
+        # Check if POI is close enough to not need access route calculation
         if straight_line_distance_m <= self.NEARBY_THRESHOLD_M:
             # For nearby POIs, junction is the closest point on route
             junction_coords = self._find_closest_route_point(
@@ -241,57 +243,32 @@ class JunctionCalculationService:
                 requires_detour=False,
             )
 
-        # For distant POIs, find lookback point and calculate proper junction
+        # For distant POIs, must calculate access route
         lookback_sp = self.find_lookback_point(
             poi_approx_distance_km, global_sps, self.DEFAULT_LOOKBACK_KM
         )
 
-        if lookback_sp:
-            lookback_coords = (lookback_sp.lat, lookback_sp.lon)
-        else:
-            # Fallback: use route origin
-            lookback_coords = route_geometry[0] if route_geometry else (poi_lat, poi_lon)
+        if not lookback_sp:
+            logger.warning(f"No lookback point found for POI at ({poi_lat}, {poi_lon})")
+            return None
 
-        # Calculate junction using routing if provider available
-        if self.geo_provider:
-            junction_result = await self._calculate_junction_with_routing(
-                poi_lat, poi_lon,
-                lookback_coords,
-                route_geometry,
-                route_total_km,
-            )
-            if junction_result:
-                return junction_result
+        lookback_coords = (lookback_sp.lat, lookback_sp.lon)
 
-        # Fallback: calculate simple junction (closest point approach)
-        junction_coords = self._find_closest_route_point(
-            poi_lat, poi_lon, route_geometry
-        )
-        junction_distance_km = self._calculate_distance_along_route(
-            junction_coords, route_geometry, route_total_km
-        )
-        side = self._determine_side(
-            poi_lat, poi_lon, junction_coords, route_geometry
-        )
-
-        # Estimate access distance (straight line for fallback)
-        access_distance_km = calculate_distance_meters(
+        # Calculate junction using routing - required for distant POIs
+        junction_result = await self._calculate_junction_with_routing(
             poi_lat, poi_lon,
-            junction_coords[0], junction_coords[1]
-        ) / 1000.0
-
-        # Determine if detour is needed based on final access distance
-        access_distance_m = access_distance_km * 1000
-        requires_detour = access_distance_m > self.NEARBY_THRESHOLD_M
-
-        return JunctionResult(
-            junction_lat=junction_coords[0],
-            junction_lon=junction_coords[1],
-            junction_distance_km=junction_distance_km,
-            side=side,
-            access_distance_km=access_distance_km,
-            requires_detour=requires_detour,
+            lookback_coords,
+            route_geometry,
+            route_total_km,
         )
+
+        if not junction_result:
+            logger.warning(
+                f"Failed to calculate access route for POI at ({poi_lat}, {poi_lon})"
+            )
+            return None
+
+        return junction_result
 
     def _find_closest_route_point(
         self,
@@ -464,6 +441,7 @@ class JunctionCalculationService:
                 side=side,
                 access_distance_km=access_distance_km,
                 requires_detour=requires_detour,
+                access_route_geometry=access_route.geometry,
             )
 
         except Exception as e:

@@ -35,6 +35,10 @@ class POICategory(Enum):
     POLICE = "police"
     MECHANIC = "mechanic"
     SUPERMARKET = "supermarket"
+    # Place types (cities, towns, villages)
+    CITY = "city"
+    TOWN = "town"
+    VILLAGE = "village"
     OTHER = "other"
 
 

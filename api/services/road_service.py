@@ -358,9 +358,8 @@ class RoadService:
         milestone_categories: List[POICategory],
         max_distance_from_road: float,
         force_poi_refresh: bool = False,
+        force_new_segments: bool = False,
     ) -> Tuple[List[Tuple[RouteSegmentDB, bool]], List[Tuple[Any, int, int, RouteSegmentDB]]]:
-        # Note: force_poi_refresh is currently not used but reserved for future
-        # implementation where we can mark segments for re-fetching POIs
         """
         Process OSRM steps into reusable RouteSegments.
 
@@ -373,6 +372,9 @@ class RoadService:
             milestone_categories: POI categories to search for
             max_distance_from_road: Maximum POI search radius
             force_poi_refresh: If True, re-search POIs even for existing segments
+            force_new_segments: If True, always create new segment versions
+                               (for map regeneration with versioning). All segments
+                               will be new and will need POI search.
 
         Returns:
             Tuple of:
@@ -419,7 +421,10 @@ class RoadService:
                         poi_repo = POIRepository(session)
 
                         # Bulk get or create segments
-                        results = await segment_service.bulk_get_or_create_segments(steps)
+                        # When force_new_segments=True, creates new versioned segments
+                        results = await segment_service.bulk_get_or_create_segments(
+                            steps, force_new=force_new_segments
+                        )
 
                         # For each segment, get or search POIs
                         for segment, is_new in results:
@@ -588,6 +593,7 @@ class RoadService:
         progress_callback: Optional[Callable[[float], None]] = None,
         segment_length_km: float = 1.0,
         user_id: Optional[str] = None,
+        force_new_segments: bool = False,
     ) -> LinearMapResponse:
         """
         Generate a linear map of a route between origin and destination.
@@ -612,6 +618,8 @@ class RoadService:
             progress_callback: Callback for progress updates (0-100)
             segment_length_km: Target length for each segment
             user_id: Optional user ID to associate the map with
+            force_new_segments: If True, always create new segment versions
+                               (used during map regeneration for versioning)
 
         Returns:
             LinearMapResponse with segments and milestones
@@ -629,6 +637,7 @@ class RoadService:
                 segment_length_km=segment_length_km,
                 user_id=user_id,
                 cache_stats=cache_stats,
+                force_new_segments=force_new_segments,
             )
 
     def _generate_linear_map_impl(
@@ -643,6 +652,7 @@ class RoadService:
         segment_length_km: float,
         user_id: Optional[str],
         cache_stats,
+        force_new_segments: bool = False,
     ) -> LinearMapResponse:
         """Internal implementation of generate_linear_map with cache stats tracking."""
         from api.services.cache_stats_collector import CacheStatsCollector
@@ -695,6 +705,7 @@ class RoadService:
             route.steps,
             milestone_categories=milestone_categories,
             max_distance_from_road=max_distance_from_road,
+            force_new_segments=force_new_segments,
         )
         logger.info(
             f"Created/reused {len(route_segments_data)} route segments "
@@ -755,6 +766,7 @@ class RoadService:
 
             map_id = save_map_sync(
                 linear_map,
+                geo_provider=self.geo_provider,
                 user_id=user_id,
                 debug_collector=debug_collector,
                 route_segments_data=route_segments_data,

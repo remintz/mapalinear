@@ -56,7 +56,7 @@ function getPoiTypeName(type: string): string {
     police: 'Polícia',
     intersection: 'Cruzamento',
     exit: 'Saída',
-    other: 'Outro'
+    other: 'Desconhecido'
   };
   return typeNameMap[type] || type;
 }

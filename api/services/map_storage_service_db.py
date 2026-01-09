@@ -27,6 +27,7 @@ from api.database.models.route_segment import RouteSegment
 from api.database.models.user_map import UserMap
 from api.database.repositories import MapPOIRepository, MapRepository, POIRepository
 from api.database.repositories.user_map import UserMapRepository
+from api.providers.base import GeoProvider
 from api.services.map_assembly_service import MapAssemblyService
 from api.services.poi_debug_service import POIDebugDataCollector, POIDebugService
 from api.models.road_models import (
@@ -79,6 +80,7 @@ class MapStorageServiceDB:
     async def save_map(
         self,
         linear_map: LinearMapResponse,
+        geo_provider: GeoProvider,
         user_id: Optional[UUID] = None,
         debug_collector: Optional[POIDebugDataCollector] = None,
         route_segments_data: Optional[List[Tuple[RouteSegment, bool]]] = None,
@@ -90,6 +92,7 @@ class MapStorageServiceDB:
 
         Args:
             linear_map: The linear map to save
+            geo_provider: Geographic provider for access route calculation
             user_id: Optional user ID to associate the map with (creator)
             debug_collector: Optional debug data collector with POI debug info
             route_segments_data: Optional list of (RouteSegment, is_new) tuples
@@ -142,7 +145,7 @@ class MapStorageServiceDB:
 
                     # Use MapAssemblyService to create MapSegments and MapPOIs
                     # Pass debug_collector to collect debug data in the new flow
-                    assembly_service = MapAssemblyService(self.session)
+                    assembly_service = MapAssemblyService(self.session, geo_provider)
                     num_segments, num_pois, milestone_to_map_poi = await assembly_service.assemble_map(
                         map_id=map_id,
                         segments=route_segments,
@@ -875,6 +878,7 @@ def _create_standalone_session():
 
 def save_map_sync(
     linear_map: LinearMapResponse,
+    geo_provider: GeoProvider,
     user_id: Optional[str] = None,
     debug_collector: Optional[POIDebugDataCollector] = None,
     route_segments_data: Optional[List[Tuple[Any, bool]]] = None,
@@ -887,6 +891,7 @@ def save_map_sync(
 
     Args:
         linear_map: The linear map to save
+        geo_provider: Geographic provider for access route calculation
         user_id: Optional user ID to associate the map with (as creator)
         debug_collector: Optional debug data collector with POI debug info
         route_segments_data: Optional list of (RouteSegment, is_new) tuples
@@ -909,6 +914,7 @@ def save_map_sync(
                     uuid_user_id = PyUUID(user_id) if user_id else None
                     result = await storage.save_map(
                         linear_map,
+                        geo_provider=geo_provider,
                         user_id=uuid_user_id,
                         debug_collector=debug_collector,
                         route_segments_data=route_segments_data,
@@ -967,10 +973,12 @@ async def replace_map_data_async(
     """
     Replace the data of an original map with data from a temporary map.
 
-    This is used for map regeneration to:
+    This is used for map regeneration with segment versioning to:
     1. Keep the original map ID (preserving user associations)
     2. Update the map with fresh data from the regenerated temporary map
-    3. Delete the temporary map
+    3. Handle segment versioning (old segments have usage decremented,
+       new segments are moved to the original map)
+    4. Delete the temporary map
 
     Args:
         original_map_id: ID of the original map to update
@@ -982,12 +990,15 @@ async def replace_map_data_async(
     """
     from sqlalchemy import update, delete
     from api.database.models.poi_debug_data import POIDebugData
+    from api.database.models.map_segment import MapSegment
+    from api.database.repositories.route_segment import RouteSegmentRepository
 
     try:
         original_uuid = UUID(original_map_id)
         temp_uuid = UUID(temp_map_id)
 
         storage = MapStorageServiceDB(session)
+        route_segment_repo = RouteSegmentRepository(session)
 
         # 1. Load the temporary map to get its data
         temp_map = await storage.map_repo.get_by_id(temp_uuid)
@@ -1000,8 +1011,19 @@ async def replace_map_data_async(
             logger.error(f"Original map {original_map_id} not found")
             return False
 
-        # 2. Delete old data from original map (MapPOI and POIDebugData)
-        # The cascade should handle POIDebugData but let's be explicit
+        # 2. Get old segment IDs from original map (for usage count decrement)
+        old_segment_ids = await storage.map_segment_repo.get_segment_ids_for_map(
+            original_uuid
+        )
+        logger.info(f"Found {len(old_segment_ids)} old segments to decrement usage")
+
+        # 3. Decrement usage_count for old segments
+        # These segments may become orphans if no other map uses them
+        if old_segment_ids:
+            await route_segment_repo.bulk_decrement_usage(old_segment_ids)
+            logger.info(f"Decremented usage for {len(old_segment_ids)} old segments")
+
+        # 4. Delete old data from original map
         from api.database.repositories.poi_debug_data import POIDebugDataRepository
         debug_repo = POIDebugDataRepository(session)
 
@@ -1011,7 +1033,11 @@ async def replace_map_data_async(
         deleted_pois = await storage.map_poi_repo.delete_all_for_map(original_uuid)
         logger.info(f"Deleted {deleted_pois} MapPOI entries from original map")
 
-        # 3. Update original map metadata with temp map data
+        # 5. Delete old MapSegments from original map
+        deleted_map_segments = await storage.map_segment_repo.delete_by_map(original_uuid)
+        logger.info(f"Deleted {deleted_map_segments} MapSegment entries from original map")
+
+        # 6. Update original map metadata with temp map data
         original_map.total_length_km = temp_map.total_length_km
         original_map.segments = temp_map.segments
         original_map.metadata_ = temp_map.metadata_
@@ -1019,7 +1045,15 @@ async def replace_map_data_async(
         await session.flush()
         logger.info(f"Updated original map metadata")
 
-        # 4. Move MapPOI entries from temp to original (update map_id)
+        # 7. Move MapSegments from temp to original (new versioned segments)
+        await session.execute(
+            update(MapSegment)
+            .where(MapSegment.map_id == temp_uuid)
+            .values(map_id=original_uuid)
+        )
+        logger.info(f"Moved MapSegment entries from temp to original")
+
+        # 8. Move MapPOI entries from temp to original (update map_id)
         await session.execute(
             update(MapPOI)
             .where(MapPOI.map_id == temp_uuid)
@@ -1027,7 +1061,7 @@ async def replace_map_data_async(
         )
         logger.info(f"Moved MapPOI entries from temp to original")
 
-        # 5. Move POIDebugData entries from temp to original (update map_id)
+        # 9. Move POIDebugData entries from temp to original (update map_id)
         await session.execute(
             update(POIDebugData)
             .where(POIDebugData.map_id == temp_uuid)
@@ -1035,11 +1069,13 @@ async def replace_map_data_async(
         )
         logger.info(f"Moved POIDebugData entries from temp to original")
 
-        # 6. Delete the temporary map (now empty of POIs)
+        # 10. Delete the temporary map (now empty)
         await storage.map_repo.delete_by_id(temp_uuid)
         logger.info(f"Deleted temporary map {temp_map_id}")
 
-        logger.info(f"Successfully replaced map data: {original_map_id}")
+        logger.info(
+            f"Successfully replaced map data with versioned segments: {original_map_id}"
+        )
         return True
 
     except Exception as e:

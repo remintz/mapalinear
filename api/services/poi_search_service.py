@@ -201,6 +201,10 @@ class POISearchService:
                             point[1],
                         )
 
+                        # Filter out POIs beyond maximum distance
+                        if poi_distance_from_road > max_distance_from_road:
+                            continue
+
                         # For nearby POIs (<500m), add directly as milestone
                         if poi_distance_from_road <= 500 or not main_route:
                             milestone = self.milestone_factory.create_from_poi(
@@ -393,6 +397,9 @@ class POISearchService:
             )
 
         distant_pois_added = 0
+        # Cities and towns get 3x max detour distance (villages use normal limit)
+        locality_categories = (POICategory.CITY, POICategory.TOWN)
+
         for poi_id, (
             junction_info,
             dist_from_origin,
@@ -404,7 +411,12 @@ class POISearchService:
 
             junction_distance_km, _, access_route_distance_km, _ = junction_info
 
-            if access_route_distance_km <= max_detour_distance_km:
+            # Apply 3x multiplier for localities
+            effective_max_detour = max_detour_distance_km
+            if poi.category in locality_categories:
+                effective_max_detour = max_detour_distance_km * 3
+
+            if access_route_distance_km <= effective_max_detour:
                 distant_pois_added += 1
                 milestone = self.milestone_factory.create_from_poi(
                     poi, junction_distance_km, search_pt, junction_info

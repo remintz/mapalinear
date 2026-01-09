@@ -764,17 +764,21 @@ class TestGenerateLinearMap:
 class TestBuildMilestoneCategories:
     """Test _build_milestone_categories method."""
 
-    def test_includes_services_when_cities_requested(self, road_service):
-        """It should include SERVICES category when include_cities=True."""
+    def test_includes_places_when_cities_requested(self, road_service):
+        """It should include CITY, TOWN, VILLAGE categories when include_cities=True."""
         categories = road_service._build_milestone_categories(include_cities=True)
 
-        assert POICategory.SERVICES in categories
+        assert POICategory.CITY in categories
+        assert POICategory.TOWN in categories
+        assert POICategory.VILLAGE in categories
 
-    def test_excludes_services_when_cities_not_requested(self, road_service):
-        """It should exclude SERVICES category when include_cities=False."""
+    def test_excludes_places_when_cities_not_requested(self, road_service):
+        """It should exclude CITY, TOWN, VILLAGE categories when include_cities=False."""
         categories = road_service._build_milestone_categories(include_cities=False)
 
-        assert POICategory.SERVICES not in categories
+        assert POICategory.CITY not in categories
+        assert POICategory.TOWN not in categories
+        assert POICategory.VILLAGE not in categories
 
     def test_always_includes_pois(self, road_service):
         """It should always include POI categories."""

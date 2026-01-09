@@ -59,17 +59,21 @@ class SegmentService:
         start_lon: float,
         end_lat: float,
         end_lon: float,
+        version_suffix: Optional[str] = None,
     ) -> str:
         """
         Calculate a unique hash for a segment based on coordinates.
 
         Uses 4 decimal places (~11m precision) as per PRD specification.
+        When version_suffix is provided, creates a unique version of the
+        segment (used during map regeneration to force new segment creation).
 
         Args:
             start_lat: Start latitude
             start_lon: Start longitude
             end_lat: End latitude
             end_lon: End longitude
+            version_suffix: Optional suffix to create versioned hash
 
         Returns:
             MD5 hash string (32 characters)
@@ -78,6 +82,8 @@ class SegmentService:
         coords_str = (
             f"{start_lat:.4f},{start_lon:.4f}|{end_lat:.4f},{end_lon:.4f}"
         )
+        if version_suffix:
+            coords_str += f"|{version_suffix}"
         return hashlib.md5(coords_str.encode()).hexdigest()
 
     @staticmethod
@@ -247,31 +253,51 @@ class SegmentService:
         return created_segment, True
 
     async def bulk_get_or_create_segments(
-        self, steps: List[RouteStep]
+        self,
+        steps: List[RouteStep],
+        force_new: bool = False,
     ) -> List[Tuple[RouteSegment, bool]]:
         """
         Process multiple steps and get or create segments for each.
 
         Args:
             steps: List of RouteSteps from OSRM
+            force_new: If True, always create new segments (for regeneration).
+                       This generates unique version suffix and skips lookup.
 
         Returns:
             List of (RouteSegment, is_new) tuples in same order as input
         """
         results = []
 
-        # Calculate all hashes first
+        # Generate version suffix if forcing new segments
+        version_suffix: Optional[str] = None
+        if force_new:
+            version_suffix = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
+            logger.info(
+                f"Force new segments enabled, version suffix: {version_suffix}"
+            )
+
+        # Calculate all hashes (with version suffix if force_new)
         hashes = []
         for step in steps:
             start = step.start_coords
             end = step.end_coords
             hash_val = self.calculate_segment_hash(
-                start[0], start[1], end[0], end[1]
+                start[0], start[1], end[0], end[1],
+                version_suffix=version_suffix,
             )
             hashes.append(hash_val)
 
-        # Bulk fetch existing segments
-        existing_segments = await self.segment_repo.bulk_get_by_hashes(hashes)
+        # If force_new, skip lookup - all segments will be new
+        if force_new:
+            existing_segments: Dict[str, RouteSegment] = {}
+            logger.info(
+                f"Skipping segment lookup - creating {len(steps)} new segments"
+            )
+        else:
+            # Bulk fetch existing segments
+            existing_segments = await self.segment_repo.bulk_get_by_hashes(hashes)
 
         # Process each step
         for i, step in enumerate(steps):
@@ -282,12 +308,52 @@ class SegmentService:
                 await self.segment_repo.increment_usage_count(segment.id)
                 results.append((segment, False))
             else:
-                segment, is_new = await self.get_or_create_segment(step)
-                results.append((segment, is_new))
+                # Create new segment with versioned hash
+                segment = await self._create_segment_from_step(step, hash_val)
+                results.append((segment, True))
                 # Add to existing_segments to handle duplicate steps
                 existing_segments[hash_val] = segment
 
         return results
+
+    async def _create_segment_from_step(
+        self,
+        step: RouteStep,
+        segment_hash: str,
+    ) -> RouteSegment:
+        """
+        Create a new RouteSegment from a RouteStep.
+
+        Args:
+            step: RouteStep from OSRM
+            segment_hash: Pre-calculated hash for the segment
+
+        Returns:
+            Created RouteSegment
+        """
+        start_coords = step.start_coords
+        end_coords = step.end_coords
+        length_km = step.distance_km
+        search_points = self.generate_search_points(step.geometry, length_km)
+
+        segment = RouteSegment(
+            segment_hash=segment_hash,
+            start_lat=Decimal(str(start_coords[0])),
+            start_lon=Decimal(str(start_coords[1])),
+            end_lat=Decimal(str(end_coords[0])),
+            end_lon=Decimal(str(end_coords[1])),
+            road_name=step.road_name or None,
+            length_km=Decimal(str(length_km)),
+            geometry=list(step.geometry),
+            search_points=search_points,
+            osrm_instruction=None,
+            osrm_maneuver_type=step.maneuver_type,
+            usage_count=1,
+            pois_fetched_at=None,
+        )
+
+        created_segment = await self.segment_repo.create(segment)
+        return created_segment
 
     async def associate_pois_to_segment(
         self,

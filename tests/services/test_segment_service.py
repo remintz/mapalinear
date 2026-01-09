@@ -101,6 +101,60 @@ class TestCalculateSegmentHash:
 
         assert hash_value == expected_hash
 
+    def test_hash_with_version_suffix(self):
+        """Test that version suffix creates different hash."""
+        coords = {
+            "start_lat": -23.5505,
+            "start_lon": -46.6333,
+            "end_lat": -23.5605,
+            "end_lon": -46.6433,
+        }
+
+        hash_without_version = SegmentService.calculate_segment_hash(**coords)
+        hash_with_version = SegmentService.calculate_segment_hash(
+            **coords, version_suffix="20260108120000123456"
+        )
+
+        # Hashes should be different
+        assert hash_without_version != hash_with_version
+        # Both should be valid MD5 hashes
+        assert len(hash_without_version) == 32
+        assert len(hash_with_version) == 32
+
+    def test_hash_with_different_version_suffixes(self):
+        """Test that different version suffixes produce different hashes."""
+        coords = {
+            "start_lat": -23.5505,
+            "start_lon": -46.6333,
+            "end_lat": -23.5605,
+            "end_lon": -46.6433,
+        }
+
+        hash_v1 = SegmentService.calculate_segment_hash(
+            **coords, version_suffix="v1"
+        )
+        hash_v2 = SegmentService.calculate_segment_hash(
+            **coords, version_suffix="v2"
+        )
+
+        assert hash_v1 != hash_v2
+
+    def test_hash_with_version_suffix_format(self):
+        """Test that hash with version suffix matches expected format."""
+        hash_value = SegmentService.calculate_segment_hash(
+            start_lat=-23.5505,
+            start_lon=-46.6333,
+            end_lat=-23.5605,
+            end_lon=-46.6433,
+            version_suffix="test_version",
+        )
+
+        # Manually calculate expected hash
+        coords_str = "-23.5505,-46.6333|-23.5605,-46.6433|test_version"
+        expected_hash = hashlib.md5(coords_str.encode()).hexdigest()
+
+        assert hash_value == expected_hash
+
 
 class TestGenerateSearchPoints:
     """Tests for the generate_search_points static method."""
@@ -500,3 +554,81 @@ class TestBulkGetOrCreateSegments:
         assert results[0][1] is False
         # Second should be new (is_new=True)
         assert results[1][1] is True
+
+    @pytest.mark.asyncio
+    async def test_bulk_force_new_creates_all_new_segments(
+        self, segment_service, sample_steps
+    ):
+        """Test that force_new=True creates all new segments, even if they exist."""
+        existing_segment = MagicMock()
+        existing_segment.id = uuid4()
+
+        # Calculate hash for first step (without version suffix)
+        step = sample_steps[0]
+        hash1 = SegmentService.calculate_segment_hash(
+            step.start_coords[0], step.start_coords[1],
+            step.end_coords[0], step.end_coords[1]
+        )
+
+        # Existing segment would be found if we were doing normal lookup
+        segment_service.segment_repo.bulk_get_by_hashes = AsyncMock(
+            return_value={hash1: existing_segment}
+        )
+        segment_service.segment_repo.create = AsyncMock(
+            side_effect=lambda s: s  # Return the segment passed in
+        )
+
+        results = await segment_service.bulk_get_or_create_segments(
+            sample_steps, force_new=True
+        )
+
+        assert len(results) == 2
+        # ALL segments should be new when force_new=True
+        assert all(is_new for _, is_new in results)
+        # bulk_get_by_hashes should NOT be called when force_new=True
+        segment_service.segment_repo.bulk_get_by_hashes.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_bulk_force_new_generates_unique_hashes(
+        self, segment_service, sample_steps
+    ):
+        """Test that force_new=True generates unique versioned hashes."""
+        created_segments = []
+
+        async def capture_create(segment):
+            created_segments.append(segment)
+            return segment
+
+        segment_service.segment_repo.bulk_get_by_hashes = AsyncMock(return_value={})
+        segment_service.segment_repo.get_by_hash = AsyncMock(return_value=None)
+        segment_service.segment_repo.create = AsyncMock(side_effect=capture_create)
+
+        # First call without force_new
+        await segment_service.bulk_get_or_create_segments(sample_steps, force_new=False)
+        hashes_without_version = [s.segment_hash for s in created_segments]
+        created_segments.clear()
+
+        # Second call with force_new - should generate different hashes
+        await segment_service.bulk_get_or_create_segments(sample_steps, force_new=True)
+        hashes_with_version = [s.segment_hash for s in created_segments]
+
+        # Hashes should be different due to version suffix
+        for h1, h2 in zip(hashes_without_version, hashes_with_version):
+            assert h1 != h2
+
+    @pytest.mark.asyncio
+    async def test_bulk_force_new_skips_lookup(self, segment_service, sample_steps):
+        """Test that force_new=True skips the database lookup entirely."""
+        segment_service.segment_repo.bulk_get_by_hashes = AsyncMock(return_value={})
+        segment_service.segment_repo.create = AsyncMock(
+            side_effect=lambda s: s
+        )
+
+        await segment_service.bulk_get_or_create_segments(
+            sample_steps, force_new=True
+        )
+
+        # Should NOT call bulk_get_by_hashes when force_new=True
+        segment_service.segment_repo.bulk_get_by_hashes.assert_not_called()
+        # Should still create segments
+        assert segment_service.segment_repo.create.call_count == 2

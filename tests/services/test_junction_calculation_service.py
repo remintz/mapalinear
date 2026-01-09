@@ -514,10 +514,10 @@ class TestCalculateJunction:
         assert result.access_distance_km < 1.0
 
     @pytest.mark.asyncio
-    async def test_distant_poi_without_provider_uses_fallback(
+    async def test_distant_poi_without_provider_returns_none(
         self, junction_service, sample_data
     ):
-        """Test that distant POI without geo provider uses fallback calculation."""
+        """Test that distant POI without geo provider returns None (no fallback)."""
         # Create segment_poi with large distance
         sample_data["segment_poi"].straight_line_distance_m = 2000
 
@@ -531,8 +531,8 @@ class TestCalculateJunction:
             global_sps=sample_data["global_sps"],
         )
 
-        assert isinstance(result, JunctionResult)
-        assert result.requires_detour is True
+        # Without geo_provider, distant POIs cannot calculate access route and return None
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_junction_has_valid_coordinates(self, junction_service, sample_data):

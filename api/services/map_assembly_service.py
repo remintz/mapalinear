@@ -195,6 +195,7 @@ class MapAssemblyService:
         best_junction_for_poi: Dict[UUID, Tuple[JunctionResult, SegmentPOI, MapSegment, POI]] = {}
 
         # Process each SegmentPOI
+        skipped_pois = 0
         for segment_poi, map_segment in segment_pois_with_map_segments:
             poi = segment_poi.poi
             if not poi:
@@ -211,6 +212,11 @@ class MapAssemblyService:
                 global_sps=global_sps,
             )
 
+            # Skip POI if junction calculation failed
+            if junction is None:
+                skipped_pois += 1
+                continue
+
             # Check if we already have a better junction for this POI
             if poi.id in best_junction_for_poi:
                 existing_junction, _, _, _ = best_junction_for_poi[poi.id]
@@ -219,6 +225,9 @@ class MapAssemblyService:
                     best_junction_for_poi[poi.id] = (junction, segment_poi, map_segment, poi)
             else:
                 best_junction_for_poi[poi.id] = (junction, segment_poi, map_segment, poi)
+
+        if skipped_pois > 0:
+            logger.info(f"Skipped {skipped_pois} POIs due to failed junction calculation")
 
         # Create MapPOI records for best junctions
         map_pois = []
@@ -391,6 +400,14 @@ class MapAssemblyService:
                 "access_route_total_km": junction.access_distance_km,
             }
 
+            # Use access route geometry from junction calculation
+            access_route_geometry = None
+            if junction.access_route_geometry:
+                # Convert tuples to lists for JSON serialization
+                access_route_geometry = [
+                    [coord[0], coord[1]] for coord in junction.access_route_geometry
+                ]
+
             debug_collector.collect_poi_data(
                 poi_id=str(poi.id),  # Use POI ID as string for consistency
                 poi_name=poi.name or "Sem nome",
@@ -403,7 +420,7 @@ class MapAssemblyService:
                 junction_lat=junction.junction_lat,
                 junction_lon=junction.junction_lon,
                 junction_distance_km=junction.junction_distance_km,
-                access_route_geometry=None,  # Not calculated in segment-based flow
+                access_route_geometry=access_route_geometry,
                 access_route_distance_km=junction.access_distance_km,
                 side_calculation=side_calculation,
                 lookback_data=lookback_data,

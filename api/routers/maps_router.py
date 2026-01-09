@@ -361,13 +361,17 @@ async def regenerate_map(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Regenerate a saved map (admin only).
+    Regenerate a saved map with segment versioning (admin only).
 
-    This endpoint regenerates a map while preserving user associations:
-    1. Creates a temporary map with fresh data
-    2. Users continue accessing the original map during regeneration
-    3. On success, atomically replaces original map data with new data
-    4. On failure, deletes temporary map and keeps original intact
+    This endpoint regenerates a map creating NEW versions of all segments:
+    1. Creates new segment versions (never reuses existing segments)
+    2. Completely recalculates route, POIs, junctions, and sides
+    3. Generates debug information for POI calculations
+    4. Atomically replaces original map data with new versioned data
+    5. Cleans up orphan segments after successful regeneration
+
+    The original map ID is preserved, maintaining all user associations.
+    Other maps using the same route segments continue using the old versions.
 
     Args:
         map_id: ID of the map to regenerate
@@ -398,6 +402,7 @@ async def regenerate_map(
             initial_result={
                 "origin": origin,
                 "destination": destination,
+                "message": "Creating new segment versions...",
             },
         )
 
@@ -406,30 +411,40 @@ async def regenerate_map(
             temp_map_id = None
             try:
                 logger.info(
-                    f"Starting regeneration for map {map_id}: {origin} -> {destination}"
+                    f"Starting VERSIONED regeneration for map {map_id}: "
+                    f"{origin} -> {destination}"
                 )
 
-                # Generate new temporary map (this will save it to DB via save_map_sync)
-                # The original map remains accessible to users during this process
+                # Generate new temporary map with NEW segment versions
+                # force_new_segments=True ensures all segments are new versions
                 linear_map = road_service.generate_linear_map(
                     origin=origin,
                     destination=destination,
-                    max_distance_from_road=3000,  # Default value
+                    max_distance_from_road=3000,
                     progress_callback=progress_callback,
                     user_id=user_id,
+                    force_new_segments=True,  # Create new segment versions
                 )
                 temp_map_id = linear_map.id
-                logger.info(f"Temporary map created: {temp_map_id}")
+                logger.info(
+                    f"Temporary map created with new segment versions: {temp_map_id}"
+                )
 
                 # Replace original map data with temporary map data
                 # This preserves the original map ID and user associations
+                # Old segments have usage decremented, new segments are linked
                 from ..services.map_storage_service_db import replace_map_data_sync
 
                 success = replace_map_data_sync(map_id, temp_map_id)
                 if not success:
                     raise Exception("Failed to replace map data")
 
-                logger.info(f"Map {map_id} successfully regenerated")
+                logger.info(
+                    f"Map {map_id} successfully regenerated with new segment versions"
+                )
+
+                # Clean up orphan segments in the background
+                _cleanup_orphan_segments()
 
                 # Result uses original map_id (unchanged for users)
                 result = {
@@ -443,6 +458,10 @@ async def regenerate_map(
                     "milestones": [
                         m.model_dump(mode="json") for m in linear_map.milestones
                     ],
+                    "versioning": {
+                        "new_segments_created": True,
+                        "old_segments_orphaned": True,
+                    },
                 }
 
                 return result
@@ -475,3 +494,61 @@ async def regenerate_map(
     except Exception as e:
         logger.error(f"Error starting map regeneration for {map_id}: {e}")
         raise HTTPException(status_code=500, detail="Error starting map regeneration")
+
+
+def _cleanup_orphan_segments():
+    """
+    Clean up orphan segments after map regeneration.
+
+    Orphan segments are RouteSegments that are not referenced by any MapSegment.
+    This typically happens after map regeneration when old segment versions
+    are no longer used by any map.
+    """
+    import asyncio
+    from sqlalchemy.ext.asyncio import (
+        AsyncSession,
+        async_sessionmaker,
+        create_async_engine,
+    )
+    from api.database.repositories.route_segment import RouteSegmentRepository
+    from api.providers.settings import get_settings
+
+    settings = get_settings()
+
+    async def _cleanup():
+        database_url = (
+            f"postgresql+asyncpg://{settings.postgres_user}:{settings.postgres_password}"
+            f"@{settings.postgres_host}:{settings.postgres_port}/{settings.postgres_database}"
+        )
+        engine = create_async_engine(
+            database_url,
+            pool_size=1,
+            max_overflow=0,
+            pool_pre_ping=True,
+        )
+        session_maker = async_sessionmaker(
+            engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+
+        try:
+            async with session_maker() as session:
+                try:
+                    repo = RouteSegmentRepository(session)
+                    deleted = await repo.delete_orphan_segments()
+                    await session.commit()
+                    if deleted > 0:
+                        logger.info(
+                            f"Orphan cleanup: deleted {deleted} unused segments"
+                        )
+                except Exception as e:
+                    await session.rollback()
+                    logger.warning(f"Orphan cleanup failed: {e}")
+        finally:
+            await engine.dispose()
+
+    try:
+        asyncio.run(_cleanup())
+    except Exception as e:
+        logger.warning(f"Error running orphan cleanup: {e}")

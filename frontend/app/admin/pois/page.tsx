@@ -44,11 +44,10 @@ const POI_TYPE_LABELS: Record<string, string> = {
   toll_booth: "Pedágio",
   police: "Polícia",
   mechanic: "Mecânica",
-  services: "Serviços",
-  other: "Outro",
+  other: "Desconhecido",
   // Place types
   city: "Cidade",
-  town: "Cidade",
+  town: "Cidade Pequena",
   village: "Vila",
 };
 

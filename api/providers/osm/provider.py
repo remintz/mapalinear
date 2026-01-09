@@ -706,9 +706,9 @@ class OSMProvider(GeoProvider):
             'east': location.longitude + radius_deg
         }
 
-        # Use larger radius for places (cities/towns/villages) - 5km instead of 1km
+        # Use larger radius for places (cities/towns/villages) - 3x the normal radius
         # City centers may be far from highways but still relevant
-        place_radius_deg = (radius * 5) / 111000
+        place_radius_deg = (radius * 3) / 111000
         bbox_places = {
             'south': location.latitude - place_radius_deg,
             'west': location.longitude - place_radius_deg,
@@ -721,8 +721,8 @@ class OSMProvider(GeoProvider):
         tourism_filters = set()
         include_places = False
         for category in categories:
-            if category == POICategory.SERVICES:
-                include_places = True  # SERVICES category includes cities/towns/villages
+            if category in (POICategory.SERVICES, POICategory.CITY, POICategory.TOWN, POICategory.VILLAGE):
+                include_places = True  # Include city/town/village searches
             osm_amenities = self._get_osm_amenities_for_category(category)
             osm_tourism = self._get_osm_tourism_tags_for_category(category)
             # logger.debug(f"🔧 Categoria {category.value} -> amenities OSM: {osm_amenities}")
@@ -748,11 +748,14 @@ class OSMProvider(GeoProvider):
             query_parts.append(f'  node["tourism"="{tourism}"]({bbox_str});')
             query_parts.append(f'  way["tourism"="{tourism}"]({bbox_str});')
 
-        # Add place searches with LARGER radius (cities, towns, villages)
+        # Add place searches - cities and towns with LARGER radius, villages with normal radius
         if include_places:
-            for place_type in ['city', 'town', 'village']:
+            for place_type in ['city', 'town']:
                 query_parts.append(f'  node["place"="{place_type}"]({bbox_places_str});')
                 query_parts.append(f'  way["place"="{place_type}"]({bbox_places_str});')
+            # Villages use normal radius
+            query_parts.append(f'  node["place"="village"]({bbox_str});')
+            query_parts.append(f'  way["place"="village"]({bbox_str});')
 
         query_parts.extend([');', 'out meta;'])
 
@@ -876,9 +879,12 @@ class OSMProvider(GeoProvider):
 
             # Determine category - try place first, then tourism, then amenity
             place_type = tags.get('place', '')
-            if place_type in ['city', 'town', 'village']:
-                # Map place types to POICategory.SERVICES
-                category = POICategory.SERVICES
+            if place_type == 'city':
+                category = POICategory.CITY
+            elif place_type == 'town':
+                category = POICategory.TOWN
+            elif place_type == 'village':
+                category = POICategory.VILLAGE
             else:
                 # Try tourism mapping first (for hotels, etc)
                 tourism_type = tags.get('tourism', '')
@@ -890,7 +896,7 @@ class OSMProvider(GeoProvider):
 
                 # Default category if nothing matches
                 if not category:
-                    category = POICategory.SERVICES
+                    category = POICategory.OTHER
 
             # Create POI
             poi_id = f"{element['type']}/{element['id']}"
@@ -984,7 +990,7 @@ class OSMProvider(GeoProvider):
             POICategory.ATM: ['atm'],
             POICategory.SHOPPING: ['shop'],
             POICategory.PARKING: ['parking'],
-            POICategory.SERVICES: ['police']  # Only police amenity for SERVICES category
+            POICategory.POLICE: ['police']  # Police stations
         }
         return category_to_amenities.get(category, [])
 
