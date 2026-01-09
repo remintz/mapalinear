@@ -136,37 +136,27 @@ class MapStorageServiceDB:
                     user_id=user_id, map_id=map_id, is_creator=True
                 )
 
-            # Use MapAssemblyService if we have route segments
+            # Use MapAssemblyService to create MapSegments and MapPOIs
             milestone_to_map_poi: Dict[str, UUID] = {}
-            if route_segments_data and route_geometry and route_total_km:
-                try:
-                    # Extract just the RouteSegments (not the is_new flag)
-                    route_segments = [seg for seg, _ in route_segments_data]
-
-                    # Use MapAssemblyService to create MapSegments and MapPOIs
-                    # Pass debug_collector to collect debug data in the new flow
-                    assembly_service = MapAssemblyService(self.session, geo_provider)
-                    num_segments, num_pois, milestone_to_map_poi = await assembly_service.assemble_map(
-                        map_id=map_id,
-                        segments=route_segments,
-                        route_geometry=route_geometry,
-                        route_total_km=route_total_km,
-                        debug_collector=debug_collector,
-                    )
-                    logger.info(
-                        f"Assembled map with {num_segments} segments and {num_pois} POIs"
-                    )
-                except Exception as e:
-                    logger.warning(f"Error in MapAssemblyService, falling back to legacy: {e}")
-                    # Fall back to legacy behavior
-                    milestone_to_map_poi = await self._save_map_legacy(
-                        map_id, linear_map, debug_collector
-                    )
-            else:
-                # Legacy behavior: no route segments available
-                milestone_to_map_poi = await self._save_map_legacy(
-                    map_id, linear_map, debug_collector
+            if not route_segments_data or not route_geometry or not route_total_km:
+                raise ValueError(
+                    "route_segments_data, route_geometry, and route_total_km are required"
                 )
+
+            # Extract just the RouteSegments (not the is_new flag)
+            route_segments = [seg for seg, _ in route_segments_data]
+
+            assembly_service = MapAssemblyService(self.session, geo_provider)
+            num_segments, num_pois, milestone_to_map_poi = await assembly_service.assemble_map(
+                map_id=map_id,
+                segments=route_segments,
+                route_geometry=route_geometry,
+                route_total_km=route_total_km,
+                debug_collector=debug_collector,
+            )
+            logger.info(
+                f"Assembled map with {num_segments} segments and {num_pois} POIs"
+            )
 
             # Persist debug data if collector provided
             if debug_collector and milestone_to_map_poi:
@@ -191,67 +181,6 @@ class MapStorageServiceDB:
         except Exception as e:
             logger.error(f"Erro ao salvar mapa no banco: {e}")
             raise
-
-    async def _save_map_legacy(
-        self,
-        map_id: UUID,
-        linear_map: LinearMapResponse,
-        debug_collector: Optional[POIDebugDataCollector] = None,
-    ) -> Dict[str, UUID]:
-        """
-        Legacy map saving without segment reuse.
-
-        This is used when route_segments_data is not available.
-        NOTE: This will fail for new maps because MapPOI requires segment_poi_id.
-        It's kept for backwards compatibility during transition.
-
-        Args:
-            map_id: Map UUID
-            linear_map: Linear map response
-            debug_collector: Optional debug collector
-
-        Returns:
-            Dict mapping milestone ID to MapPOI ID
-        """
-        # Track POI IDs already added to this map to avoid duplicates
-        added_poi_ids: set = set()
-        # Mapping from milestone ID to MapPOI ID (for debug data)
-        milestone_to_map_poi: Dict[str, UUID] = {}
-
-        for milestone in linear_map.milestones:
-            # Get or create POI
-            poi_data = self._milestone_to_poi_dict(milestone)
-            osm_id = poi_data.pop("osm_id", None)
-
-            if osm_id:
-                poi, created = await self.poi_repo.get_or_create_by_osm_id(
-                    osm_id, poi_data
-                )
-            else:
-                # No OSM ID, create new POI
-                poi = POI(**poi_data)
-                await self.poi_repo.create(poi)
-
-            # Skip if this POI was already added to this map
-            if poi.id in added_poi_ids:
-                logger.debug(
-                    f"Skipping duplicate POI in map: {milestone.name} (poi_id={poi.id})"
-                )
-                continue
-            added_poi_ids.add(poi.id)
-
-            # NOTE: segment_poi_id is now required. Legacy save will fail for new maps.
-            # This is expected - new maps should always have route_segments_data.
-            logger.warning(
-                f"Legacy save: MapPOI for {milestone.name} created without segment_poi_id - "
-                "this will fail for new maps"
-            )
-
-            # Track mapping for debug data (even though actual creation may fail)
-            if milestone.id:
-                milestone_to_map_poi[milestone.id] = UUID(milestone.id) if milestone.id else uuid4()
-
-        return milestone_to_map_poi
 
     async def load_map(
         self, map_id: str, user_id: Optional[UUID] = None
@@ -746,33 +675,6 @@ class MapStorageServiceDB:
     def _dict_to_segment(self, data: dict) -> LinearRoadSegment:
         """Convert dict from JSONB to LinearRoadSegment."""
         return LinearRoadSegment(**data)
-
-    def _milestone_to_poi_dict(self, milestone: RoadMilestone) -> dict:
-        """Convert RoadMilestone to POI dict."""
-        # Extract OSM ID from tags if available
-        osm_id = milestone.tags.get("osm_id") or milestone.tags.get("id")
-        if osm_id and not isinstance(osm_id, str):
-            osm_id = str(osm_id)
-
-        return {
-            "osm_id": osm_id,
-            "name": milestone.name,
-            "type": milestone.type.value,
-            "latitude": milestone.coordinates.latitude,
-            "longitude": milestone.coordinates.longitude,
-            "city": milestone.city,
-            "operator": milestone.operator,
-            "brand": milestone.brand,
-            "opening_hours": milestone.opening_hours,
-            "phone": milestone.phone,
-            "website": milestone.website,
-            "cuisine": milestone.cuisine,
-            "amenities": milestone.amenities,
-            "tags": milestone.tags,
-            "rating": milestone.rating,
-            "rating_count": milestone.rating_count,
-            "google_maps_uri": milestone.google_maps_uri,
-        }
 
     def _map_poi_to_milestone(self, map_poi: MapPOI) -> RoadMilestone:
         """Convert MapPOI + POI to RoadMilestone."""

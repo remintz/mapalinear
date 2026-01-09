@@ -455,36 +455,70 @@ class JunctionCalculationService:
         main_total_km: float,
     ) -> Tuple[Optional[Tuple[float, float]], float]:
         """
-        Find where access route intersects main route.
+        Find the divergence point where access route leaves the main route.
+
+        This method finds the LAST point where the access route is still on the
+        main route before permanently diverging towards the POI. This ensures
+        we find the actual junction point, not the lookback point.
+
+        The algorithm:
+        1. Iterates through access route points in order
+        2. For each point, checks if it's within 50m of any main route point
+        3. Tracks all overlapping segments
+        4. Returns the end of the LAST overlapping segment (closest to POI)
 
         Returns the intersection point and its distance along main route.
         """
         if not access_geometry or not main_geometry:
             return None, 0.0
 
-        # Find the closest point on main route to any point on access route
-        best_intersection = None
-        best_distance = float('inf')
-        best_main_distance_km = 0.0
+        # Pre-calculate cumulative distances along main route
+        main_cumulative_distances = [0.0]
+        for i in range(1, len(main_geometry)):
+            prev = main_geometry[i - 1]
+            curr = main_geometry[i]
+            segment_dist = calculate_distance_meters(
+                prev[0], prev[1], curr[0], curr[1]
+            )
+            main_cumulative_distances.append(
+                main_cumulative_distances[-1] + segment_dist / 1000.0
+            )
 
-        cumulative_distance = 0.0
-        for i, main_point in enumerate(main_geometry):
-            if i > 0:
-                prev = main_geometry[i - 1]
-                segment_dist = calculate_distance_meters(
-                    prev[0], prev[1], main_point[0], main_point[1]
-                )
-                cumulative_distance += segment_dist / 1000.0
+        # Track the last (most recent) point where routes overlap
+        last_intersection = None
+        last_intersection_distance_km = 0.0
+        in_overlapping_segment = False
 
-            for access_point in access_geometry:
+        # Iterate through access route points to find where it leaves the main route
+        for access_point in access_geometry:
+            # Find closest point on main route
+            closest_distance = float('inf')
+            closest_main_point = None
+            closest_main_distance_km = 0.0
+
+            for i, main_point in enumerate(main_geometry):
                 dist = calculate_distance_meters(
                     main_point[0], main_point[1],
                     access_point[0], access_point[1]
                 )
-                # Consider intersection if within 50m
-                if dist < 50 and dist < best_distance:
-                    best_distance = dist
-                    best_intersection = main_point
-                    best_main_distance_km = cumulative_distance
+                if dist < closest_distance:
+                    closest_distance = dist
+                    closest_main_point = main_point
+                    closest_main_distance_km = main_cumulative_distances[i]
 
-        return best_intersection, best_main_distance_km
+            # Check if this access point is within tolerance of main route
+            is_within_tolerance = closest_distance < 50 and closest_main_point is not None
+
+            if is_within_tolerance:
+                in_overlapping_segment = True
+                # Always update to track the most recent overlapping point
+                last_intersection = closest_main_point
+                last_intersection_distance_km = closest_main_distance_km
+            else:
+                # We've left the main route
+                if in_overlapping_segment:
+                    # Mark that we left, but continue iterating
+                    # The route may rejoin closer to the POI
+                    in_overlapping_segment = False
+
+        return last_intersection, last_intersection_distance_km

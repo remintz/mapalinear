@@ -227,131 +227,6 @@ class RoadService:
                 f"lon={route.geometry[-1][1]:.6f}"
             )
 
-    def _log_milestone_statistics(self, milestones: List[RoadMilestone]):
-        """Log statistics about found milestones."""
-        pass
-
-    def _create_milestones_from_segment_pois(
-        self,
-        route_segments_data: List[Tuple[RouteSegmentDB, bool]],
-        all_pois_with_segments: List[Tuple[Any, int, int, RouteSegmentDB]],
-        route: Route,
-        exclude_cities: List[str],
-        max_detour_distance_km: float,
-    ) -> List[RoadMilestone]:
-        """
-        Create RoadMilestones from POIs discovered in segments.
-
-        This method converts POI data from the segment-based discovery into
-        RoadMilestone objects suitable for the LinearMapResponse.
-
-        Args:
-            route_segments_data: List of (RouteSegment, is_new) tuples in route order
-            all_pois_with_segments: List of (POI, search_point_index, distance_m, segment) tuples
-            route: The complete Route object with geometry
-            exclude_cities: Cities to exclude from milestones
-            max_detour_distance_km: Maximum detour distance for junction calculation
-
-        Returns:
-            List of RoadMilestone objects sorted by distance_from_origin
-        """
-        from decimal import Decimal
-
-        milestones: List[RoadMilestone] = []
-
-        # Build segment order map: segment_id -> (order_index, cumulative_distance_km)
-        segment_distances: Dict[Any, Tuple[int, float]] = {}
-        cumulative_distance = 0.0
-        for idx, (segment, _) in enumerate(route_segments_data):
-            segment_distances[segment.id] = (idx, cumulative_distance)
-            cumulative_distance += float(segment.length_km)
-
-        # Track seen POIs for deduplication (keep one with shorter access)
-        seen_pois: Dict[str, Tuple[RoadMilestone, float]] = {}  # poi_id -> (milestone, distance_m)
-
-        for poi, sp_index, distance_m, segment in all_pois_with_segments:
-            segment_info = segment_distances.get(segment.id)
-            if not segment_info:
-                logger.warning(f"Segment {segment.id} not found in route order")
-                continue
-
-            segment_order, segment_start_distance = segment_info
-
-            # Get search point data for this POI
-            sp_data = None
-            if segment.search_points:
-                for sp in segment.search_points:
-                    if sp.get("index") == sp_index:
-                        sp_data = sp
-                        break
-
-            if not sp_data:
-                # Fallback: estimate based on segment start
-                distance_from_origin = segment_start_distance
-                route_point = (float(segment.start_lat), float(segment.start_lon))
-            else:
-                # Calculate distance from origin
-                sp_distance = sp_data.get("distance_from_segment_start_km", 0.0)
-                distance_from_origin = segment_start_distance + sp_distance
-                route_point = (sp_data["lat"], sp_data["lon"])
-
-            # Calculate junction info for distant POIs (> 500m from road)
-            junction_info = None
-            if distance_m > 500:
-                # Use simple junction calculation (POI is accessed from route_point)
-                poi_coords = (poi.location.latitude, poi.location.longitude)
-
-                # Determine side
-                side = self._determine_poi_side(route.geometry, route_point, poi_coords)
-                if isinstance(side, tuple):
-                    side = side[0]  # If debug info returned, extract just side
-
-                # Calculate access route distance (straight line for now)
-                access_km = distance_m / 1000.0
-
-                # Junction is at route_point, access distance is straight line
-                junction_info = (distance_from_origin, route_point, access_km, side)
-
-            # Create milestone
-            try:
-                milestone = self.milestone_factory.create_from_poi(
-                    poi=poi,
-                    distance_from_origin=distance_from_origin,
-                    route_point=route_point,
-                    junction_info=junction_info,
-                )
-
-                # Deduplication: keep POI with shorter access distance
-                poi_id = poi.id
-                if poi_id in seen_pois:
-                    existing_milestone, existing_distance = seen_pois[poi_id]
-                    if distance_m < existing_distance:
-                        # Replace with closer one
-                        seen_pois[poi_id] = (milestone, distance_m)
-                else:
-                    seen_pois[poi_id] = (milestone, distance_m)
-
-            except Exception as e:
-                logger.warning(f"Error creating milestone for POI {poi.id}: {e}")
-                continue
-
-        # Collect deduplicated milestones
-        milestones = [milestone for milestone, _ in seen_pois.values()]
-
-        # Filter excluded cities
-        if exclude_cities:
-            milestones = self._filter_excluded_cities(milestones, exclude_cities)
-
-        # Sort by distance from origin
-        milestones.sort(key=lambda m: m.distance_from_origin_km)
-
-        logger.info(
-            f"Created {len(milestones)} milestones from segment POIs "
-            f"(deduplicated from {len(all_pois_with_segments)} total)"
-        )
-
-        return milestones
-
     def _process_steps_into_segments(
         self,
         steps: List,
@@ -722,43 +597,19 @@ class RoadService:
         except Exception as e:
             logger.warning(f"Error checking debug config: {e}")
 
-        # Step 4: Create milestones from segment POIs
-        all_milestones = self._create_milestones_from_segment_pois(
-            route_segments_data=route_segments_data,
-            all_pois_with_segments=all_pois_with_segments,
-            route=route,
-            exclude_cities=[origin_city],
-            max_detour_distance_km=max_detour_distance_km,
-        )
-
-        # Step 5: Assign milestones to display segments
-        self.milestone_factory.assign_to_segments(linear_segments, all_milestones)
-
-        # Step 6: Enrich with Google Places ratings
-        try:
-            from .google_places_service import enrich_milestones_sync
-
-            all_milestones = enrich_milestones_sync(all_milestones)
-            logger.info("Milestones enriched with Google Places data")
-        except Exception as e:
-            logger.warning(f"Error enriching with Google Places: {e}")
-
-        # Create response
+        # Create response (milestones are empty - they are created when map is saved
+        # and loaded from database via MapAssemblyService)
         linear_map = LinearMapResponse(
             origin=origin,
             destination=destination,
             total_length_km=route.total_distance,
             segments=linear_segments,
-            milestones=all_milestones,
+            milestones=[],
             road_id=road_id or f"route_{hash(origin + destination)}",
         )
 
         # Log final statistics
-        logger.info(
-            f"Linear map complete: {len(linear_segments)} segments, "
-            f"{len(all_milestones)} milestones"
-        )
-        self._log_milestone_statistics(all_milestones)
+        logger.info(f"Linear map complete: {len(linear_segments)} segments")
 
         # Save linear map to database
         try:
@@ -1019,114 +870,3 @@ class RoadService:
     ) -> List[Tuple[Tuple[float, float], float]]:
         """Extract search points from segments."""
         return self.segmentation_service.extract_search_points_from_segments(segments)
-
-    def _build_milestone_categories(self, include_cities: bool) -> List[POICategory]:
-        """Build list of POI categories for milestone search."""
-        return self.milestone_factory.build_milestone_categories(include_cities)
-
-    def _assign_milestones_to_segments(
-        self, segments: List[LinearRoadSegment], milestones: List[RoadMilestone]
-    ):
-        """Assign milestones to segments."""
-        self.milestone_factory.assign_to_segments(segments, milestones)
-
-    def _poi_category_to_milestone_type(self, category: POICategory):
-        """Convert POI category to milestone type."""
-        return self.milestone_factory.get_milestone_type(category)
-
-    def _create_milestone_from_poi(
-        self,
-        poi,
-        distance_from_origin: float,
-        route_point: Tuple[float, float],
-        junction_info=None,
-    ) -> RoadMilestone:
-        """Create a milestone from a POI."""
-        return self.milestone_factory.create_from_poi(
-            poi, distance_from_origin, route_point, junction_info
-        )
-
-    def _is_poi_abandoned(self, tags: Dict[str, Any]) -> bool:
-        """Check if a POI is abandoned."""
-        return self.quality_service.is_poi_abandoned(tags)
-
-    def _calculate_poi_quality_score(self, tags: Dict[str, Any]) -> float:
-        """Calculate quality score for a POI."""
-        return self.quality_service.calculate_quality_score(tags)
-
-    def _meets_quality_threshold(
-        self, tags: Dict[str, Any], quality_score: float
-    ) -> bool:
-        """Check if POI meets quality threshold."""
-        return self.quality_service.meets_quality_threshold(tags, quality_score)
-
-    def _extract_amenities(self, tags: Dict[str, Any]) -> List[str]:
-        """Extract amenities from POI tags."""
-        return self.quality_service.extract_amenities(tags)
-
-    def _format_opening_hours(
-        self, opening_hours: Optional[Dict[str, str]]
-    ) -> Optional[str]:
-        """Format opening hours to string."""
-        return self.quality_service.format_opening_hours(opening_hours)
-
-    def _filter_excluded_cities(
-        self, milestones: List[RoadMilestone], exclude_cities: List[str]
-    ) -> List[RoadMilestone]:
-        """Filter milestones by excluded cities."""
-        return self.quality_service.filter_by_excluded_cities(milestones, exclude_cities)
-
-    def _determine_poi_side(
-        self,
-        main_route_geometry: List[Tuple[float, float]],
-        junction_point: Tuple[float, float],
-        poi_location: Tuple[float, float],
-        return_debug: bool = False,
-    ):
-        """Determine POI side relative to road."""
-        return self.poi_search_service.determine_poi_side(
-            main_route_geometry, junction_point, poi_location, return_debug
-        )
-
-    async def _enrich_milestones_with_cities(
-        self, milestones: List[RoadMilestone]
-    ) -> None:
-        """Enrich milestones with city information."""
-        await self.milestone_factory.enrich_with_cities(milestones)
-
-    def _run_async_safe(self, coro):
-        """Execute async coroutine safely."""
-        return run_async_safe(coro)
-
-    def _calculate_distance_along_route(
-        self,
-        geometry: List[Tuple[float, float]],
-        target_point: Tuple[float, float],
-    ) -> float:
-        """Calculate distance along route to target point."""
-        from api.utils.geo_utils import calculate_distance_along_route
-
-        return calculate_distance_along_route(geometry, target_point)
-
-    async def _find_milestones_from_segments(
-        self,
-        segments: List[LinearRoadSegment],
-        categories: List[POICategory],
-        max_distance_from_road: float,
-        max_detour_distance_km: float = 5.0,
-        exclude_cities: Optional[List[Optional[str]]] = None,
-        progress_callback: Optional[Callable[[float], None]] = None,
-        main_route: Optional[Route] = None,
-        debug_collector: Optional[POIDebugDataCollector] = None,
-    ) -> List[RoadMilestone]:
-        """Find milestones along the route (delegates to poi_search_service)."""
-        return await self.poi_search_service.find_milestones(
-            segments=segments,
-            categories=categories,
-            max_distance_from_road=max_distance_from_road,
-            max_detour_distance_km=max_detour_distance_km,
-            exclude_cities=exclude_cities,
-            progress_callback=progress_callback,
-            main_route=main_route,
-            debug_collector=debug_collector,
-        )
