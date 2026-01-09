@@ -348,6 +348,7 @@ export interface AdminPOI {
   city?: string;
   quality_score?: number;
   is_low_quality: boolean;
+  is_disabled: boolean;
   missing_tags: string[];
   quality_issues: string[];
   brand?: string;

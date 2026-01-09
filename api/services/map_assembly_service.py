@@ -209,14 +209,23 @@ class MapAssemblyService:
         if pois_needing_city and self.junction_service.geo_provider:
             await self._enrich_pois_with_city(pois_needing_city)
 
-        # Step 2: Filter out POIs in origin city BEFORE junction calculation
+        # Step 2: Filter out POIs in origin city and disabled POIs BEFORE junction calculation
         filtered_out_count = 0
+        disabled_count = 0
         origin_city_lower = origin_city.lower().strip() if origin_city else None
 
         filtered_segment_pois: List[Tuple[SegmentPOI, MapSegment]] = []
         for segment_poi, map_segment in segment_pois_with_map_segments:
             poi = segment_poi.poi
             if not poi:
+                continue
+
+            # Check if POI is disabled
+            if poi.is_disabled:
+                if poi.id in unique_pois:
+                    disabled_count += 1
+                    del unique_pois[poi.id]
+                    logger.debug(f"Filtering out disabled POI '{poi.name}'")
                 continue
 
             # Check if POI is in origin city
@@ -232,6 +241,8 @@ class MapAssemblyService:
 
             filtered_segment_pois.append((segment_poi, map_segment))
 
+        if disabled_count > 0:
+            logger.info(f"Filtered out {disabled_count} disabled POIs")
         if filtered_out_count > 0:
             logger.info(f"Filtered out {filtered_out_count} POIs in origin city '{origin_city}'")
 

@@ -293,6 +293,8 @@ class TestPOIDeduplication:
         poi.latitude = -23.5510
         poi.longitude = -46.6510
         poi.quality_score = 0.8
+        poi.is_disabled = False
+        poi.city = None
 
         # First occurrence - further from road (500m)
         segment_poi1 = MagicMock()

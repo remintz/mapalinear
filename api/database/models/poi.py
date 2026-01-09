@@ -108,6 +108,9 @@ class POI(Base):
     missing_tags: Mapped[list] = mapped_column(JSONB, default=list)
     # Required tags that are missing for this POI type (e.g., ["brand", "phone"])
 
+    # Admin control - disabled POIs are excluded from maps
+    is_disabled: Mapped[bool] = mapped_column(default=False, index=True)
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

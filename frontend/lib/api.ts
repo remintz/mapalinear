@@ -611,6 +611,7 @@ class APIClient {
     city?: string;
     poi_type?: string;
     low_quality_only?: boolean;
+    disabled_only?: boolean;
     page?: number;
     limit?: number;
   }): Promise<AdminPOIListResponse> {
@@ -657,6 +658,17 @@ class APIClient {
     const { data } = await this.client.post<{ updated: number; failed: number; message: string }>(
       '/admin/pois/refresh',
       { poi_ids: poiIds }
+    );
+    return data;
+  }
+
+  /**
+   * Toggle disabled status for multiple POIs (admin).
+   */
+  async togglePOIsDisabled(poiIds: string[], disabled: boolean): Promise<{ updated: number; message: string }> {
+    const { data } = await this.client.post<{ updated: number; message: string }>(
+      '/admin/pois/toggle-disabled',
+      { poi_ids: poiIds, disabled }
     );
     return data;
   }

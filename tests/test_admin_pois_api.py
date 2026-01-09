@@ -583,6 +583,118 @@ class TestNoCityFilter:
             assert poi["type"] == "gas_station"
 
 
+class TestToggleDisabledEndpoint:
+    """Test the toggle disabled POIs endpoint."""
+
+    def test_toggle_disabled_requires_admin(self, regular_client):
+        """Non-admin users should get 403 on toggle disabled endpoint."""
+        response = regular_client.post(
+            "/api/admin/pois/toggle-disabled",
+            json={"poi_ids": [str(uuid4())], "disabled": True}
+        )
+        assert response.status_code == 403
+
+    def test_toggle_disabled_success(self, admin_client):
+        """Admin should be able to toggle disabled status."""
+        fake_id = str(uuid4())
+        response = admin_client.post(
+            "/api/admin/pois/toggle-disabled",
+            json={"poi_ids": [fake_id], "disabled": True}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "updated" in data
+        assert "message" in data
+        assert isinstance(data["updated"], int)
+
+    def test_toggle_disabled_empty_list(self, admin_client):
+        """Toggle with empty list should return 422 validation error."""
+        response = admin_client.post(
+            "/api/admin/pois/toggle-disabled",
+            json={"poi_ids": [], "disabled": True}
+        )
+        assert response.status_code == 422
+
+    def test_toggle_disabled_invalid_format(self, admin_client):
+        """Toggle with invalid request format should return 422."""
+        response = admin_client.post(
+            "/api/admin/pois/toggle-disabled",
+            json={"invalid": "data"}
+        )
+        assert response.status_code == 422
+
+    def test_toggle_disabled_missing_disabled_field(self, admin_client):
+        """Toggle without disabled field should return 422."""
+        response = admin_client.post(
+            "/api/admin/pois/toggle-disabled",
+            json={"poi_ids": [str(uuid4())]}
+        )
+        assert response.status_code == 422
+
+    def test_toggle_disabled_multiple_ids(self, admin_client):
+        """Admin should be able to toggle multiple POIs at once."""
+        fake_ids = [str(uuid4()) for _ in range(3)]
+        response = admin_client.post(
+            "/api/admin/pois/toggle-disabled",
+            json={"poi_ids": fake_ids, "disabled": False}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data["updated"], int)
+
+    def test_toggle_disabled_enable(self, admin_client):
+        """Admin should be able to enable POIs."""
+        fake_ids = [str(uuid4()) for _ in range(2)]
+        response = admin_client.post(
+            "/api/admin/pois/toggle-disabled",
+            json={"poi_ids": fake_ids, "disabled": False}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "habilitado" in data["message"].lower()
+
+
+class TestDisabledOnlyFilter:
+    """Test the disabled_only filter for POIs listing."""
+
+    def test_list_pois_disabled_only(self, admin_client):
+        """Admin should be able to filter to disabled POIs only."""
+        response = admin_client.get("/api/admin/pois?disabled_only=true")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "pois" in data
+        # All returned POIs should be disabled
+        for poi in data["pois"]:
+            assert poi["is_disabled"] is True
+
+    def test_list_pois_disabled_with_other_filters(self, admin_client):
+        """Disabled filter should combine with other filters."""
+        response = admin_client.get("/api/admin/pois?disabled_only=true&poi_type=gas_station")
+
+        assert response.status_code == 200
+        data = response.json()
+        # All POIs should match both filters
+        for poi in data["pois"]:
+            assert poi["is_disabled"] is True
+            assert poi["type"] == "gas_station"
+
+    def test_list_pois_response_includes_is_disabled(self, admin_client):
+        """POI response should include is_disabled field."""
+        response = admin_client.get("/api/admin/pois?limit=1")
+
+        assert response.status_code == 200
+        data = response.json()
+        # If there are POIs, they should have is_disabled field
+        if data["pois"]:
+            poi = data["pois"][0]
+            assert "is_disabled" in poi
+            assert isinstance(poi["is_disabled"], bool)
+
+
 class TestAuthenticationRequired:
     """Test that authentication is required for admin endpoints."""
 
@@ -596,6 +708,14 @@ class TestAuthenticationRequired:
         response = unauthenticated_client.post(
             "/api/admin/pois/refresh",
             json={"poi_ids": [str(uuid4())]}
+        )
+        assert response.status_code == 401
+
+    def test_toggle_disabled_unauthenticated(self, unauthenticated_client):
+        """Unauthenticated users should get 401 on toggle disabled endpoint."""
+        response = unauthenticated_client.post(
+            "/api/admin/pois/toggle-disabled",
+            json={"poi_ids": [str(uuid4())], "disabled": True}
         )
         assert response.status_code == 401
 

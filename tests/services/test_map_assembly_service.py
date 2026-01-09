@@ -147,6 +147,8 @@ class TestCreateMapPOIs:
         poi.latitude = -23.5510
         poi.longitude = -46.6510
         poi.quality_score = 0.8
+        poi.is_disabled = False  # POI is enabled by default
+        poi.city = None
 
         # Create mock SegmentPOI
         segment_poi = MagicMock()
@@ -199,6 +201,8 @@ class TestCreateMapPOIs:
         poi.latitude = -23.5510
         poi.longitude = -46.6510
         poi.quality_score = 0.8
+        poi.is_disabled = False
+        poi.city = None
 
         # First occurrence - further from road
         segment_poi1 = MagicMock()
@@ -289,6 +293,7 @@ class TestCreateMapPOIs:
         poi_in_origin.quality_score = 0.8
         poi_in_origin.city = "São Paulo"
         poi_in_origin.name = "Posto na Origem"
+        poi_in_origin.is_disabled = False
 
         segment_poi1 = MagicMock()
         segment_poi1.id = uuid4()
@@ -306,6 +311,7 @@ class TestCreateMapPOIs:
         poi_other_city.quality_score = 0.9
         poi_other_city.city = "Campinas"
         poi_other_city.name = "Posto em Campinas"
+        poi_other_city.is_disabled = False
 
         segment_poi2 = MagicMock()
         segment_poi2.id = uuid4()
@@ -354,6 +360,7 @@ class TestCreateMapPOIs:
         poi.quality_score = 0.8
         poi.city = "SÃO PAULO"  # Uppercase
         poi.name = "Posto"
+        poi.is_disabled = False
 
         segment_poi = MagicMock()
         segment_poi.id = uuid4()
@@ -398,6 +405,7 @@ class TestCreateMapPOIs:
         poi.quality_score = 0.8
         poi.city = "São Paulo"
         poi.name = "Posto"
+        poi.is_disabled = False
 
         segment_poi = MagicMock()
         segment_poi.id = uuid4()
@@ -440,6 +448,7 @@ class TestCreateMapPOIs:
         poi.quality_score = 0.8
         poi.city = None  # No city info
         poi.name = "Posto sem cidade"
+        poi.is_disabled = False
 
         segment_poi = MagicMock()
         segment_poi.id = uuid4()
@@ -468,6 +477,159 @@ class TestCreateMapPOIs:
         # POI without city should be kept
         num_pois, _ = result
         assert num_pois == 1
+
+    @pytest.mark.asyncio
+    async def test_filters_disabled_pois(self, assembly_service, sample_route_geometry):
+        """Test that disabled POIs are filtered out."""
+        map_id = uuid4()
+        segment_id = uuid4()
+
+        # Create enabled POI
+        poi_enabled = MagicMock()
+        poi_enabled.id = uuid4()
+        poi_enabled.latitude = -23.5510
+        poi_enabled.longitude = -46.6510
+        poi_enabled.quality_score = 0.8
+        poi_enabled.city = "Campinas"
+        poi_enabled.name = "Posto Habilitado"
+        poi_enabled.is_disabled = False
+
+        segment_poi1 = MagicMock()
+        segment_poi1.id = uuid4()
+        segment_poi1.segment_id = segment_id
+        segment_poi1.poi_id = poi_enabled.id
+        segment_poi1.poi = poi_enabled
+        segment_poi1.search_point_index = 2
+        segment_poi1.straight_line_distance_m = 300
+
+        # Create disabled POI
+        poi_disabled = MagicMock()
+        poi_disabled.id = uuid4()
+        poi_disabled.latitude = -23.6510
+        poi_disabled.longitude = -46.7510
+        poi_disabled.quality_score = 0.9
+        poi_disabled.city = "São Paulo"
+        poi_disabled.name = "Posto Desabilitado"
+        poi_disabled.is_disabled = True  # This POI is disabled
+
+        segment_poi2 = MagicMock()
+        segment_poi2.id = uuid4()
+        segment_poi2.segment_id = segment_id
+        segment_poi2.poi_id = poi_disabled.id
+        segment_poi2.poi = poi_disabled
+        segment_poi2.search_point_index = 5
+        segment_poi2.straight_line_distance_m = 200
+
+        map_segment = MagicMock()
+        map_segment.segment_id = segment_id
+        map_segment.sequence_order = 0
+        map_segment.distance_from_origin_km = Decimal("0.0")
+
+        segment_pois_with_map_segments = [
+            (segment_poi1, map_segment),
+            (segment_poi2, map_segment),
+        ]
+
+        result = await assembly_service._create_map_pois(
+            map_id=map_id,
+            segment_pois_with_map_segments=segment_pois_with_map_segments,
+            route_geometry=sample_route_geometry,
+            route_total_km=20.0,
+            global_sps=[],
+        )
+
+        # Should only have 1 POI (the enabled one)
+        num_pois, poi_to_map_poi = result
+        assert num_pois == 1
+        assert str(poi_enabled.id) in poi_to_map_poi
+        assert str(poi_disabled.id) not in poi_to_map_poi
+
+    @pytest.mark.asyncio
+    async def test_filters_disabled_before_origin_city(self, assembly_service, sample_route_geometry):
+        """Test that disabled filtering happens alongside origin city filtering."""
+        map_id = uuid4()
+        segment_id = uuid4()
+
+        # Create enabled POI in origin city (should be filtered by origin city)
+        poi_origin = MagicMock()
+        poi_origin.id = uuid4()
+        poi_origin.latitude = -23.5510
+        poi_origin.longitude = -46.6510
+        poi_origin.quality_score = 0.8
+        poi_origin.city = "São Paulo"
+        poi_origin.name = "Posto na Origem"
+        poi_origin.is_disabled = False
+
+        segment_poi1 = MagicMock()
+        segment_poi1.id = uuid4()
+        segment_poi1.segment_id = segment_id
+        segment_poi1.poi_id = poi_origin.id
+        segment_poi1.poi = poi_origin
+        segment_poi1.search_point_index = 2
+        segment_poi1.straight_line_distance_m = 300
+
+        # Create disabled POI in another city (should be filtered by disabled)
+        poi_disabled = MagicMock()
+        poi_disabled.id = uuid4()
+        poi_disabled.latitude = -23.6510
+        poi_disabled.longitude = -46.7510
+        poi_disabled.quality_score = 0.9
+        poi_disabled.city = "Campinas"
+        poi_disabled.name = "Posto Desabilitado"
+        poi_disabled.is_disabled = True
+
+        segment_poi2 = MagicMock()
+        segment_poi2.id = uuid4()
+        segment_poi2.segment_id = segment_id
+        segment_poi2.poi_id = poi_disabled.id
+        segment_poi2.poi = poi_disabled
+        segment_poi2.search_point_index = 5
+        segment_poi2.straight_line_distance_m = 200
+
+        # Create enabled POI in another city (should pass)
+        poi_valid = MagicMock()
+        poi_valid.id = uuid4()
+        poi_valid.latitude = -23.7510
+        poi_valid.longitude = -46.8510
+        poi_valid.quality_score = 0.85
+        poi_valid.city = "Jundiaí"
+        poi_valid.name = "Posto Válido"
+        poi_valid.is_disabled = False
+
+        segment_poi3 = MagicMock()
+        segment_poi3.id = uuid4()
+        segment_poi3.segment_id = segment_id
+        segment_poi3.poi_id = poi_valid.id
+        segment_poi3.poi = poi_valid
+        segment_poi3.search_point_index = 8
+        segment_poi3.straight_line_distance_m = 250
+
+        map_segment = MagicMock()
+        map_segment.segment_id = segment_id
+        map_segment.sequence_order = 0
+        map_segment.distance_from_origin_km = Decimal("0.0")
+
+        segment_pois_with_map_segments = [
+            (segment_poi1, map_segment),
+            (segment_poi2, map_segment),
+            (segment_poi3, map_segment),
+        ]
+
+        result = await assembly_service._create_map_pois(
+            map_id=map_id,
+            segment_pois_with_map_segments=segment_pois_with_map_segments,
+            route_geometry=sample_route_geometry,
+            route_total_km=20.0,
+            global_sps=[],
+            origin_city="São Paulo",
+        )
+
+        # Should only have 1 POI (poi_valid - the enabled one not in origin city)
+        num_pois, poi_to_map_poi = result
+        assert num_pois == 1
+        assert str(poi_valid.id) in poi_to_map_poi
+        assert str(poi_origin.id) not in poi_to_map_poi  # Filtered by origin city
+        assert str(poi_disabled.id) not in poi_to_map_poi  # Filtered by disabled
 
 
 class TestAssembleMap:

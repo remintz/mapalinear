@@ -49,6 +49,9 @@ class POIResponse(BaseModel):
     missing_tags: List[str] = Field(default_factory=list, description="Required tags that are missing")
     quality_issues: List[str] = Field(default_factory=list, description="Legacy quality issues")
 
+    # Admin control
+    is_disabled: bool = Field(False, description="Whether POI is disabled (excluded from maps)")
+
     # Enriched data
     brand: Optional[str] = Field(None, description="Brand name")
     operator: Optional[str] = Field(None, description="Operator name")
@@ -81,6 +84,7 @@ class POIDetailResponse(POIResponse):
     google_maps_uri: Optional[str] = Field(None, description="Google Maps URI")
     is_referenced: bool = Field(False, description="Used in any map")
     amenities: List[str] = Field(default_factory=list, description="Amenities list")
+    # Note: is_disabled is inherited from POIResponse
 
 
 class POIListResponse(BaseModel):
@@ -130,6 +134,20 @@ class RefreshPOIsResponse(BaseModel):
     message: str = Field(..., description="Status message")
 
 
+class ToggleDisabledRequest(BaseModel):
+    """Request to enable/disable POIs."""
+
+    poi_ids: List[str] = Field(..., description="List of POI UUIDs to toggle", min_length=1, max_length=500)
+    disabled: bool = Field(..., description="True to disable, False to enable")
+
+
+class ToggleDisabledResponse(BaseModel):
+    """Response for toggle disabled endpoint."""
+
+    updated: int = Field(..., description="Number of POIs updated")
+    message: str = Field(..., description="Status message")
+
+
 def _poi_to_response(poi: POI) -> POIResponse:
     """Convert POI model to response."""
     return POIResponse(
@@ -145,6 +163,7 @@ def _poi_to_response(poi: POI) -> POIResponse:
         is_low_quality=poi.is_low_quality,
         missing_tags=poi.missing_tags or [],
         quality_issues=poi.quality_issues or [],
+        is_disabled=poi.is_disabled,
         brand=poi.brand,
         operator=poi.operator,
         phone=poi.phone,
@@ -181,6 +200,7 @@ def _poi_to_detail_response(poi: POI) -> POIDetailResponse:
         is_low_quality=poi.is_low_quality,
         missing_tags=poi.missing_tags or [],
         quality_issues=poi.quality_issues or [],
+        is_disabled=poi.is_disabled,
         brand=poi.brand,
         operator=poi.operator,
         phone=poi.phone,
@@ -211,6 +231,7 @@ async def list_pois(
     city: Optional[str] = Query(None, description="Filter by city name (partial match)"),
     poi_type: Optional[str] = Query(None, description="Filter by POI type"),
     low_quality_only: bool = Query(False, description="Show only low quality POIs"),
+    disabled_only: bool = Query(False, description="Show only disabled POIs"),
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(50, ge=1, le=200, description="Items per page"),
     admin_user: User = Depends(get_current_admin),
@@ -229,6 +250,7 @@ async def list_pois(
         city_filter=city,
         type_filter=poi_type,
         low_quality_only=low_quality_only,
+        disabled_only=disabled_only,
         limit=limit,
         offset=offset
     )
@@ -237,7 +259,8 @@ async def list_pois(
         name_filter=name,
         city_filter=city,
         type_filter=poi_type,
-        low_quality_only=low_quality_only
+        low_quality_only=low_quality_only,
+        disabled_only=disabled_only
     )
 
     return POIListResponse(
@@ -491,6 +514,50 @@ async def refresh_pois(
         updated=updated_count,
         failed=failed_count,
         message=f"{updated_count} POI(s) atualizado(s). {failed_count} falha(s)."
+    )
+
+
+@router.post("/toggle-disabled", response_model=ToggleDisabledResponse)
+async def toggle_disabled(
+    request: ToggleDisabledRequest,
+    admin_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+) -> ToggleDisabledResponse:
+    """
+    Enable or disable multiple POIs.
+
+    Disabled POIs are excluded from map generation.
+
+    Requires admin privileges.
+    """
+    poi_repo = POIRepository(db)
+
+    # Convert string IDs to UUIDs
+    poi_uuids = []
+    for poi_id_str in request.poi_ids:
+        try:
+            poi_uuids.append(UUID(poi_id_str))
+        except ValueError:
+            logger.warning(f"Invalid POI ID format: {poi_id_str}")
+
+    if not poi_uuids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No valid POI IDs provided"
+        )
+
+    updated_count = await poi_repo.bulk_set_disabled(poi_uuids, request.disabled)
+    await db.commit()
+
+    action = "desabilitado" if request.disabled else "habilitado"
+    logger.info(
+        f"POIs {action}s by {admin_user.email}: "
+        f"{updated_count} out of {len(poi_uuids)}"
+    )
+
+    return ToggleDisabledResponse(
+        updated=updated_count,
+        message=f"{updated_count} POI(s) {action}(s)."
     )
 
 

@@ -617,6 +617,7 @@ class POIRepository(BaseRepository[POI]):
         city_filter: Optional[str] = None,
         type_filter: Optional[str] = None,
         low_quality_only: bool = False,
+        disabled_only: bool = False,
         limit: int = 50,
         offset: int = 0
     ) -> List[POI]:
@@ -629,6 +630,7 @@ class POIRepository(BaseRepository[POI]):
                          Use "__no_city__" to filter POIs without city.
             type_filter: Filter by POI type
             low_quality_only: Show only low quality POIs
+            disabled_only: Show only disabled POIs
             limit: Maximum number of results
             offset: Offset for pagination
 
@@ -652,6 +654,9 @@ class POIRepository(BaseRepository[POI]):
         if low_quality_only:
             conditions.append(POI.is_low_quality == True)
 
+        if disabled_only:
+            conditions.append(POI.is_disabled == True)
+
         # Order by name alphabetically (nulls last)
         query = select(POI).order_by(POI.name.asc().nulls_last()).offset(offset).limit(limit)
 
@@ -666,7 +671,8 @@ class POIRepository(BaseRepository[POI]):
         name_filter: Optional[str] = None,
         city_filter: Optional[str] = None,
         type_filter: Optional[str] = None,
-        low_quality_only: bool = False
+        low_quality_only: bool = False,
+        disabled_only: bool = False
     ) -> int:
         """
         Count all POIs with optional filters.
@@ -677,6 +683,7 @@ class POIRepository(BaseRepository[POI]):
                          Use "__no_city__" to filter POIs without city.
             type_filter: Filter by POI type
             low_quality_only: Count only low quality POIs
+            disabled_only: Count only disabled POIs
 
         Returns:
             Count of matching POIs
@@ -699,6 +706,9 @@ class POIRepository(BaseRepository[POI]):
 
         if low_quality_only:
             conditions.append(POI.is_low_quality == True)
+
+        if disabled_only:
+            conditions.append(POI.is_disabled == True)
 
         query = select(func.count(POI.id))
 
@@ -736,6 +746,27 @@ class POIRepository(BaseRepository[POI]):
             .order_by(POI.type)
         )
         return [row[0] for row in result.all()]
+
+    async def bulk_set_disabled(self, poi_ids: List[UUID], disabled: bool) -> int:
+        """
+        Set disabled status for multiple POIs.
+
+        Args:
+            poi_ids: List of POI UUIDs
+            disabled: True to disable, False to enable
+
+        Returns:
+            Number of POIs updated
+        """
+        from sqlalchemy import update
+
+        result = await self.session.execute(
+            update(POI)
+            .where(POI.id.in_(poi_ids))
+            .values(is_disabled=disabled)
+        )
+        await self.session.flush()
+        return result.rowcount
 
     async def get_statistics(self) -> dict:
         """
