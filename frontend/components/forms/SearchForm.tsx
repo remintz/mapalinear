@@ -141,7 +141,7 @@ export function SearchForm({
                   ></div>
                 </div>
                 <div className="flex justify-between text-xs text-gray-600">
-                  <span>{progressPercent}%</span>
+                  <span>{Math.round(progressPercent)}%</span>
                   {estimatedCompletion && (() => {
                     const remainingMs = new Date(estimatedCompletion).getTime() - Date.now();
                     if (remainingMs <= 0) return null;

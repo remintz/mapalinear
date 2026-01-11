@@ -462,7 +462,7 @@ function MapPageContent() {
                             style={{ width: `${progressPercent}%` }}
                           />
                         </div>
-                        <p className="text-sm text-gray-600 mt-2">{progressPercent}%</p>
+                        <p className="text-sm text-gray-600 mt-2">{Math.round(progressPercent)}%</p>
                       </div>
                     )}
                   </div>
