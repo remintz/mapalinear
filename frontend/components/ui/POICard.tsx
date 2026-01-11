@@ -13,6 +13,8 @@ interface POICardProps {
   isPassed?: boolean;
   // Whether this is the next POI ahead
   isNext?: boolean;
+  // Distance traveled on route (km) - used to calculate relative distance
+  distanceTraveled?: number | null;
 }
 
 // Helper function to get icon for POI type
@@ -144,7 +146,7 @@ function getFriendlyPoiName(name: string | null | undefined, type: string): stri
   return name;
 }
 
-export function POICard({ poi, onClick, isPassed = false, isNext = false }: POICardProps) {
+export function POICard({ poi, onClick, isPassed = false, isNext = false, distanceTraveled }: POICardProps) {
   const type = 'type' in poi ? poi.type : (poi as Milestone).type;
   const Icon = getPoiIcon(type);
   const typeName = getPoiTypeName(type);
@@ -153,8 +155,19 @@ export function POICard({ poi, onClick, isPassed = false, isNext = false }: POIC
   const hasJunction = poi.requires_detour && poi.junction_distance_km !== undefined;
 
   // Use junction_distance_km for POIs with detour, otherwise use distance_from_origin_km
-  const displayDistance = hasJunction ? poi.junction_distance_km! : poi.distance_from_origin_km;
-  const kmFormatted = displayDistance.toFixed(1);
+  const poiDistanceFromOrigin = hasJunction ? poi.junction_distance_km! : poi.distance_from_origin_km;
+
+  // Calculate relative distance from user's current position on route
+  // Positive = ahead, Negative = behind (already passed)
+  const isTrackingActive = distanceTraveled != null;
+  const relativeDistance = isTrackingActive
+    ? poiDistanceFromOrigin - distanceTraveled
+    : poiDistanceFromOrigin;
+
+  // Format the distance (absolute value for relative distances)
+  const kmFormatted = isTrackingActive
+    ? Math.abs(relativeDistance).toFixed(1)
+    : poiDistanceFromOrigin.toFixed(1);
 
   // Get direction text based on POI side
   const directionText = poi.side === 'left' ? 'à esquerda' : poi.side === 'right' ? 'à direita' : 'desvio';

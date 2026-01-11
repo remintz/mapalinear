@@ -156,6 +156,7 @@ export function POIFeed({
                 }}
                 isPassed={isPassed}
                 isNext={isNext}
+                distanceTraveled={trackingInfo?.isOnRoute ? trackingInfo.distanceTraveled : null}
               />
             </div>
           </React.Fragment>
