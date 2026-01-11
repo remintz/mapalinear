@@ -242,21 +242,12 @@ class RoadService:
         from api.services.progress_phases import MapGenerationPhase
         from api.services.poi_enrichment_service import enrich_map_pois
 
-        settings = get_settings()
-
-        # Check if any enrichment is enabled
-        google_enabled = settings.google_places_enabled and settings.google_places_api_key
-        here_enabled = (
-            settings.poi_provider.lower() == "osm"
-            and settings.here_enrichment_enabled
-            and settings.here_api_key
-        )
-
-        if not google_enabled and not here_enabled:
-            return
-
         reporter.start_phase(MapGenerationPhase.ENRICHMENT)
-        enrich_map_pois(map_id)
+        result = enrich_map_pois(map_id)
+        logger.info(
+            f"POI enrichment complete: {result['google_places_enriched']} Google Places, "
+            f"{result['here_enriched']} HERE"
+        )
         reporter.complete_phase(MapGenerationPhase.ENRICHMENT)
 
     def _process_steps_into_segments(
