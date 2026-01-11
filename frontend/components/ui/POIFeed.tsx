@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useMemo } from 'react';
+import React, { useEffect, useRef, useMemo, useState } from 'react';
 import { POI, Milestone } from '@/lib/types';
 import { POICard } from './POICard';
 import { useAnalytics } from '@/hooks/useAnalytics';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 
 interface TrackingInfo {
   isOnRoute: boolean;
@@ -33,6 +34,9 @@ export function POIFeed({
   trackingInfo,
 }: POIFeedProps) {
   const { trackPOIClick } = useAnalytics();
+
+  // State for accordion (passed POIs collapsed by default)
+  const [isPassedExpanded, setIsPassedExpanded] = useState(false);
 
   // Refs for each POI card for scrolling
   const poiRefs = useRef<Map<number, HTMLDivElement>>(new Map());
@@ -78,6 +82,27 @@ export function POIFeed({
   useEffect(() => {
     lastScrolledIndex.current = null;
   }, [pois.length]);
+
+  // Separate passed and upcoming POIs (must be before any conditional returns)
+  const isTrackingActive = trackingInfo?.isOnRoute ?? false;
+  const { passedPois, upcomingPois } = useMemo(() => {
+    if (!isPOIPassed || !isTrackingActive || pois.length === 0) {
+      return { passedPois: [] as { poi: POI | Milestone; index: number }[], upcomingPois: sortedPois.map((poi, index) => ({ poi, index })) };
+    }
+
+    const passed: { poi: POI | Milestone; index: number }[] = [];
+    const upcoming: { poi: POI | Milestone; index: number }[] = [];
+
+    sortedPois.forEach((poi, index) => {
+      if (isPOIPassed(poi)) {
+        passed.push({ poi, index });
+      } else {
+        upcoming.push({ poi, index });
+      }
+    });
+
+    return { passedPois: passed, upcomingPois: upcoming };
+  }, [sortedPois, isPOIPassed, isTrackingActive, pois.length]);
 
   if (pois.length === 0) {
     return (
@@ -127,43 +152,76 @@ export function POIFeed({
     );
   };
 
+  // Render a single POI card
+  const renderPOICard = (poi: POI | Milestone, index: number, isPassed: boolean, isNext: boolean) => (
+    <div
+      ref={(el) => {
+        if (el) {
+          poiRefs.current.set(index, el);
+        } else {
+          poiRefs.current.delete(index);
+        }
+      }}
+    >
+      <POICard
+        poi={poi}
+        onClick={() => {
+          trackPOIClick(poi.id, poi.name, poi.type);
+          onPOIClick?.(poi);
+        }}
+        isPassed={isPassed}
+        isNext={isNext}
+        distanceTraveled={trackingInfo?.isOnRoute ? trackingInfo.distanceTraveled : null}
+      />
+    </div>
+  );
+
+  // If tracking is active and there are passed POIs, show accordion layout
+  const hasPassedPois = passedPois.length > 0 && trackingInfo?.isOnRoute;
+
   return (
     <div ref={containerRef} className="space-y-3 pb-20">
-      {sortedPois.map((poi, index) => {
+      {/* Passed POIs Accordion */}
+      {hasPassedPois && (
+        <div className="border border-gray-200 rounded-lg overflow-hidden">
+          <button
+            onClick={() => setIsPassedExpanded(!isPassedExpanded)}
+            className="w-full px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors flex items-center justify-between"
+          >
+            <span className="text-sm font-medium text-gray-600">
+              POIs passados ({passedPois.length})
+            </span>
+            {isPassedExpanded ? (
+              <ChevronUp className="w-4 h-4 text-gray-500" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-gray-500" />
+            )}
+          </button>
+          {isPassedExpanded && (
+            <div className="p-3 space-y-3 bg-gray-50/50">
+              {passedPois.map(({ poi, index }) => (
+                <React.Fragment key={poi.id}>
+                  {renderPOICard(poi, index, true, false)}
+                </React.Fragment>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tracking Bar - between passed and upcoming */}
+      {trackingInfo?.isOnRoute && renderTrackingBar()}
+
+      {/* Upcoming POIs (or all POIs when not tracking) */}
+      {upcomingPois.map(({ poi, index }) => {
         const isPassed = isPOIPassed ? isPOIPassed(poi) : false;
         const isNext = nextPOIIndex === index;
-
-        // Show tracking bar just before the next POI (between passed and upcoming)
-        const showTrackingBar = isNext && trackingInfo?.isOnRoute;
-
         return (
           <React.Fragment key={poi.id}>
-            {showTrackingBar && renderTrackingBar()}
-            <div
-              ref={(el) => {
-                if (el) {
-                  poiRefs.current.set(index, el);
-                } else {
-                  poiRefs.current.delete(index);
-                }
-              }}
-            >
-              <POICard
-                poi={poi}
-                onClick={() => {
-                  trackPOIClick(poi.id, poi.name, poi.type);
-                  onPOIClick?.(poi);
-                }}
-                isPassed={isPassed}
-                isNext={isNext}
-                distanceTraveled={trackingInfo?.isOnRoute ? trackingInfo.distanceTraveled : null}
-              />
-            </div>
+            {renderPOICard(poi, index, isPassed, isNext)}
           </React.Fragment>
         );
       })}
-      {/* Show tracking bar at the end if all POIs are passed */}
-      {trackingInfo?.isOnRoute && nextPOIIndex === null && renderTrackingBar()}
     </div>
   );
 }
