@@ -502,3 +502,100 @@ def enrich_milestones_sync(milestones: List[RoadMilestone]) -> List[RoadMileston
             await engine.dispose()
 
     return asyncio.run(_enrich())
+
+
+async def enrich_map_pois_with_google_places(
+    session: AsyncSession,
+    map_id: str,
+) -> int:
+    """
+    Enrich POIs in a map with Google Places data (ratings).
+
+    This function fetches POIs for the given map from the database,
+    enriches eligible POIs (restaurants, hotels, cafes, etc.) with
+    Google Places ratings, and updates them in the database.
+
+    Args:
+        session: Database session
+        map_id: Map UUID
+
+    Returns:
+        Number of POIs enriched
+    """
+    from uuid import UUID
+    from api.database.repositories.map_poi import MapPOIRepository
+    from api.models.road_models import MilestoneType
+
+    settings = get_settings()
+
+    # Check if enrichment is enabled
+    if not settings.google_places_enabled:
+        logger.debug("Google Places enrichment is disabled (GOOGLE_PLACES_ENABLED=false)")
+        return 0
+    if not settings.google_places_api_key:
+        logger.warning(
+            "Google Places enrichment skipped: GOOGLE_PLACES_API_KEY not configured. "
+            "Add GOOGLE_PLACES_API_KEY to .env to enable restaurant/hotel ratings."
+        )
+        return 0
+
+    # Map POI types to MilestoneType for checking enrichable types
+    TYPE_TO_MILESTONE = {
+        "restaurant": MilestoneType.RESTAURANT,
+        "fast_food": MilestoneType.FAST_FOOD,
+        "cafe": MilestoneType.CAFE,
+        "bar": MilestoneType.BAR,
+        "pub": MilestoneType.PUB,
+        "bakery": MilestoneType.BAKERY,
+        "hotel": MilestoneType.HOTEL,
+    }
+
+    map_poi_repo = MapPOIRepository(session)
+    service = GooglePlacesService(session)
+
+    # Get POIs for the map
+    map_pois = await map_poi_repo.get_pois_for_map(UUID(map_id), include_poi_details=True)
+    db_pois = [mp.poi for mp in map_pois if mp.poi]
+
+    enriched_count = 0
+
+    for db_poi in db_pois:
+        # Check if this POI type is enrichable
+        milestone_type = TYPE_TO_MILESTONE.get(db_poi.type)
+        if milestone_type not in ENRICHABLE_TYPES:
+            continue
+
+        # Skip if already has rating
+        if db_poi.rating is not None:
+            continue
+
+        # Get Google Places data
+        try:
+            place_data = await service.get_place_data(
+                osm_poi_id=db_poi.osm_id or str(db_poi.id),
+                name=db_poi.name,
+                latitude=float(db_poi.latitude),
+                longitude=float(db_poi.longitude),
+                poi_type=milestone_type,
+            )
+
+            if place_data and place_data.rating is not None:
+                # Update POI with Google Places data
+                db_poi.rating = place_data.rating
+                db_poi.rating_count = place_data.rating_count
+                db_poi.google_maps_uri = place_data.google_maps_uri
+                if "google_places" not in (db_poi.enriched_by or []):
+                    db_poi.enriched_by = (db_poi.enriched_by or []) + ["google_places"]
+                enriched_count += 1
+
+            # Rate limiting
+            await asyncio.sleep(0.1)
+
+        except Exception as e:
+            logger.warning(f"Error enriching POI {db_poi.id} with Google Places: {e}")
+
+    logger.info(
+        f"Google Places enrichment: {enriched_count} POIs enriched "
+        f"(out of {len(db_pois)} total)"
+    )
+    return enriched_count

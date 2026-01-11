@@ -228,6 +228,37 @@ class RoadService:
                 f"lon={route.geometry[-1][1]:.6f}"
             )
 
+    def _enrich_map_pois(self, map_id: str, reporter: "ProgressReporter") -> None:
+        """
+        Enrich POIs in a map with external data sources.
+
+        Handles enrichment with Google Places (ratings) and HERE Maps (contact info).
+        Updates progress reporter during the enrichment phase.
+
+        Args:
+            map_id: Map UUID string
+            reporter: Progress reporter for phase updates
+        """
+        from api.services.progress_phases import MapGenerationPhase
+        from api.services.poi_enrichment_service import enrich_map_pois
+
+        settings = get_settings()
+
+        # Check if any enrichment is enabled
+        google_enabled = settings.google_places_enabled and settings.google_places_api_key
+        here_enabled = (
+            settings.poi_provider.lower() == "osm"
+            and settings.here_enrichment_enabled
+            and settings.here_api_key
+        )
+
+        if not google_enabled and not here_enabled:
+            return
+
+        reporter.start_phase(MapGenerationPhase.ENRICHMENT)
+        enrich_map_pois(map_id)
+        reporter.complete_phase(MapGenerationPhase.ENRICHMENT)
+
     def _process_steps_into_segments(
         self,
         steps: List,
@@ -674,70 +705,9 @@ class RoadService:
             logger.error(f"Error saving linear map: {e}")
             map_id = None
 
-        # Step 7: HERE enrichment (only when POI_PROVIDER=osm and HERE_ENRICHMENT_ENABLED=true)
-        settings = get_settings()
-        if (
-            map_id
-            and settings.poi_provider.lower() == "osm"
-            and settings.here_enrichment_enabled
-            and settings.here_api_key
-        ):
-            reporter.start_phase(MapGenerationPhase.ENRICHMENT)
-            try:
-                from .here_enrichment_service import enrich_map_pois_with_here
-                import asyncio
-                from sqlalchemy.ext.asyncio import (
-                    AsyncSession,
-                    async_sessionmaker,
-                    create_async_engine,
-                )
-
-                async def _enrich():
-                    database_url = (
-                        f"postgresql+asyncpg://{settings.postgres_user}:{settings.postgres_password}"
-                        f"@{settings.postgres_host}:{settings.postgres_port}/{settings.postgres_database}"
-                    )
-                    engine = create_async_engine(
-                        database_url,
-                        pool_size=1,
-                        max_overflow=0,
-                        pool_pre_ping=True,
-                    )
-                    session_maker = async_sessionmaker(
-                        engine,
-                        class_=AsyncSession,
-                        expire_on_commit=False,
-                    )
-
-                    try:
-                        async with session_maker() as session:
-                            try:
-                                results = await enrich_map_pois_with_here(
-                                    session=session,
-                                    map_id=map_id,
-                                    poi_types=[
-                                        "gas_station",
-                                        "restaurant",
-                                        "hotel",
-                                        "hospital",
-                                        "pharmacy",
-                                    ],
-                                )
-                                await session.commit()
-                                matched = len([r for r in results if r.matched])
-                                logger.info(
-                                    f"HERE enrichment: {matched}/{len(results)} POIs enriched"
-                                )
-                            except Exception:
-                                await session.rollback()
-                                raise
-                    finally:
-                        await engine.dispose()
-
-                asyncio.run(_enrich())
-                reporter.complete_phase(MapGenerationPhase.ENRICHMENT)
-            except Exception as e:
-                logger.warning(f"Error enriching with HERE: {e}")
+        # Step 7: POI Enrichment (Google Places and/or HERE)
+        if map_id:
+            self._enrich_map_pois(map_id, reporter)
 
         # Log cache statistics summary at the end of map generation
         cache_stats.log_summary()
