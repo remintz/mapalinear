@@ -624,41 +624,18 @@ function MapPageContent() {
               </div>
             )}
 
-            {/* Tracking Status (when on route) */}
-            {tracking.isOnRoute && tracking.distanceTraveled !== null && (
-              <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-green-700 font-medium">
-                    Distancia percorrida: {tracking.distanceTraveled.toFixed(1)} km
-                  </span>
-                  <span className="text-green-600">
-                    {tracking.nextPOI !== null
-                      ? (() => {
-                          const nextPoi = tracking.nextPOI;
-                          if (nextPoi?.requires_detour && nextPoi.junction_distance_km !== undefined) {
-                            // POI requires detour - show distance to junction + detour distance
-                            const distToJunction = nextPoi.junction_distance_km - tracking.distanceTraveled;
-                            const detourDist = (nextPoi.distance_from_road_meters || 0) / 1000;
-                            return `Proximo POI em ${distToJunction.toFixed(1)} + ${detourDist.toFixed(1)} km`;
-                          } else {
-                            // POI on route - show simple distance
-                            const dist = (nextPoi?.distance_from_origin_km || 0) - tracking.distanceTraveled;
-                            return `Proximo POI em ${dist.toFixed(1)} km`;
-                          }
-                        })()
-                      : 'Todos os POIs passados'}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {/* POI Feed */}
+            {/* POI Feed with tracking bar between passed and upcoming POIs */}
             <POIFeed
               pois={filteredPOIs}
               emptyMessage="Nenhum ponto de interesse encontrado com os filtros selecionados"
               isPOIPassed={tracking.isPOIPassed}
               nextPOIIndex={tracking.nextPOIIndex}
               autoScroll={simulation.state.isActive || tracking.isOnRoute}
+              trackingInfo={{
+                isOnRoute: tracking.isOnRoute,
+                distanceTraveled: tracking.distanceTraveled,
+                nextPOI: tracking.nextPOI,
+              }}
             />
 
             {/* Debug Link - Mobile only (admin only) */}

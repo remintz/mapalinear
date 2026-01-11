@@ -3,6 +3,12 @@ import { POI, Milestone } from '@/lib/types';
 import { POICard } from './POICard';
 import { useAnalytics } from '@/hooks/useAnalytics';
 
+interface TrackingInfo {
+  isOnRoute: boolean;
+  distanceTraveled: number | null;
+  nextPOI: (POI | Milestone) | null;
+}
+
 interface POIFeedProps {
   pois: (POI | Milestone)[];
   onPOIClick?: (poi: POI | Milestone) => void;
@@ -13,6 +19,8 @@ interface POIFeedProps {
   nextPOIIndex?: number | null;
   // Whether to auto-scroll to the next POI
   autoScroll?: boolean;
+  // Tracking info to show progress bar between passed and upcoming POIs
+  trackingInfo?: TrackingInfo;
 }
 
 export function POIFeed({
@@ -22,6 +30,7 @@ export function POIFeed({
   isPOIPassed,
   nextPOIIndex,
   autoScroll = true,
+  trackingInfo,
 }: POIFeedProps) {
   const { trackPOIClick } = useAnalytics();
 
@@ -79,35 +88,81 @@ export function POIFeed({
     );
   }
 
+  // Calculate next POI distance text
+  const getNextPOIDistanceText = () => {
+    if (!trackingInfo?.nextPOI || trackingInfo.distanceTraveled === null) {
+      return 'Todos os POIs passados';
+    }
+
+    const nextPoi = trackingInfo.nextPOI;
+    if (nextPoi.requires_detour && nextPoi.junction_distance_km !== undefined) {
+      // POI requires detour - show distance to junction + detour distance
+      const distToJunction = nextPoi.junction_distance_km - trackingInfo.distanceTraveled;
+      const detourDist = (nextPoi.distance_from_road_meters || 0) / 1000;
+      return `Proximo POI em ${distToJunction.toFixed(1)} + ${detourDist.toFixed(1)} km`;
+    } else {
+      // POI on route - show simple distance
+      const dist = (nextPoi.distance_from_origin_km || 0) - trackingInfo.distanceTraveled;
+      return `Proximo POI em ${dist.toFixed(1)} km`;
+    }
+  };
+
+  // Render tracking status bar
+  const renderTrackingBar = () => {
+    if (!trackingInfo?.isOnRoute || trackingInfo.distanceTraveled === null) {
+      return null;
+    }
+
+    return (
+      <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-green-700 font-medium">
+            Distancia percorrida: {trackingInfo.distanceTraveled.toFixed(1)} km
+          </span>
+          <span className="text-green-600">
+            {getNextPOIDistanceText()}
+          </span>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div ref={containerRef} className="space-y-3 pb-20">
       {sortedPois.map((poi, index) => {
         const isPassed = isPOIPassed ? isPOIPassed(poi) : false;
         const isNext = nextPOIIndex === index;
 
+        // Show tracking bar just before the next POI (between passed and upcoming)
+        const showTrackingBar = isNext && trackingInfo?.isOnRoute;
+
         return (
-          <div
-            key={poi.id}
-            ref={(el) => {
-              if (el) {
-                poiRefs.current.set(index, el);
-              } else {
-                poiRefs.current.delete(index);
-              }
-            }}
-          >
-            <POICard
-              poi={poi}
-              onClick={() => {
-                trackPOIClick(poi.id, poi.name, poi.type);
-                onPOIClick?.(poi);
+          <React.Fragment key={poi.id}>
+            {showTrackingBar && renderTrackingBar()}
+            <div
+              ref={(el) => {
+                if (el) {
+                  poiRefs.current.set(index, el);
+                } else {
+                  poiRefs.current.delete(index);
+                }
               }}
-              isPassed={isPassed}
-              isNext={isNext}
-            />
-          </div>
+            >
+              <POICard
+                poi={poi}
+                onClick={() => {
+                  trackPOIClick(poi.id, poi.name, poi.type);
+                  onPOIClick?.(poi);
+                }}
+                isPassed={isPassed}
+                isNext={isNext}
+              />
+            </div>
+          </React.Fragment>
         );
       })}
+      {/* Show tracking bar at the end if all POIs are passed */}
+      {trackingInfo?.isOnRoute && nextPOIIndex === null && renderTrackingBar()}
     </div>
   );
 }
