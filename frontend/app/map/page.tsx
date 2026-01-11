@@ -634,6 +634,7 @@ function MapPageContent() {
               trackingInfo={{
                 isOnRoute: tracking.isOnRoute,
                 distanceTraveled: tracking.distanceTraveled,
+                distanceToRoute: tracking.distanceToRoute,
                 nextPOI: tracking.nextPOI,
               }}
             />

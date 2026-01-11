@@ -7,6 +7,7 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 interface TrackingInfo {
   isOnRoute: boolean;
   distanceTraveled: number | null;
+  distanceToRoute: number | null;
   nextPOI: (POI | Milestone) | null;
 }
 
@@ -134,7 +135,27 @@ export function POIFeed({
 
   // Render tracking status bar
   const renderTrackingBar = () => {
-    if (!trackingInfo?.isOnRoute || trackingInfo.distanceTraveled === null) {
+    if (!trackingInfo || trackingInfo.distanceToRoute === null) {
+      return null;
+    }
+
+    // Check if user is far from route (more than 500m)
+    const isFarFromRoute = trackingInfo.distanceToRoute > 500;
+
+    if (isFarFromRoute) {
+      return (
+        <div className="p-3 bg-yellow-50 border border-yellow-300 rounded-lg">
+          <div className="flex items-center justify-center text-sm">
+            <span className="text-yellow-700 font-medium">
+              Voce esta a {(trackingInfo.distanceToRoute / 1000).toFixed(1)} km da rota
+            </span>
+          </div>
+        </div>
+      );
+    }
+
+    // On route - show green bar with progress
+    if (trackingInfo.distanceTraveled === null) {
       return null;
     }
 
@@ -209,8 +230,8 @@ export function POIFeed({
         </div>
       )}
 
-      {/* Tracking Bar - between passed and upcoming */}
-      {trackingInfo?.isOnRoute && renderTrackingBar()}
+      {/* Tracking Bar - between passed and upcoming (or warning when far from route) */}
+      {trackingInfo?.distanceToRoute !== null && renderTrackingBar()}
 
       {/* Upcoming POIs (or all POIs when not tracking) */}
       {upcomingPois.map(({ poi, index }) => {
