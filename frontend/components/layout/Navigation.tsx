@@ -58,7 +58,7 @@ export function Navigation({ className }: NavigationProps) {
           mobile && "block py-3 text-lg border-b border-gray-100"
         )}
       >
-        Mapas Salvos
+        Meus Mapas
       </Link>
       {session?.user?.isAdmin && (
         <Link

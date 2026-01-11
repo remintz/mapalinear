@@ -522,7 +522,7 @@ function MapPageContent() {
                       Criar Novo Mapa
                     </Button>
                     <Button variant="outline" onClick={() => router.push('/maps')}>
-                      Mapas Salvos
+                      Meus Mapas
                     </Button>
                   </div>
                 </div>
