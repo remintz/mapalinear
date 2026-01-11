@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/Input';
+import { FilterCombobox } from '@/components/ui/FilterCombobox';
 import {
   Globe,
   Search,
@@ -26,6 +26,7 @@ import { EventType } from '@/lib/analytics-types';
 
 export default function AvailableMapsPage() {
   const [availableMaps, setAvailableMaps] = useState<SavedMap[]>([]);
+  const [allMaps, setAllMaps] = useState<SavedMap[]>([]);
   const [myMapIds, setMyMapIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -35,6 +36,16 @@ export default function AvailableMapsPage() {
   const [osmMapId, setOsmMapId] = useState<string | null>(null);
   const router = useRouter();
   const { trackMapEvent } = useAnalytics();
+
+  // Extract unique origins from all available maps
+  const availableOrigins = useMemo(() => {
+    return allMaps.map(map => map.origin);
+  }, [allMaps]);
+
+  // Extract unique destinations from all available maps
+  const availableDestinations = useMemo(() => {
+    return allMaps.map(map => map.destination);
+  }, [allMaps]);
 
   // Load user's maps to know which ones they already have
   const loadMyMaps = useCallback(async () => {
@@ -47,7 +58,7 @@ export default function AvailableMapsPage() {
   }, []);
 
   // Load available maps
-  const loadAvailableMaps = useCallback(async (origin?: string, destination?: string) => {
+  const loadAvailableMaps = useCallback(async (origin?: string, destination?: string, isInitialLoad = false) => {
     try {
       setSearchLoading(true);
       const maps = await apiClient.listAvailableMaps({
@@ -56,6 +67,10 @@ export default function AvailableMapsPage() {
         limit: 100
       });
       setAvailableMaps(maps);
+      // Store all maps on initial load for filter options
+      if (isInitialLoad) {
+        setAllMaps(maps);
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
       toast.error(`Erro ao carregar mapas: ${errorMessage}`);
@@ -68,7 +83,7 @@ export default function AvailableMapsPage() {
 
   useEffect(() => {
     loadMyMaps();
-    loadAvailableMaps();
+    loadAvailableMaps(undefined, undefined, true);
   }, [loadMyMaps, loadAvailableMaps]);
 
   const handleSearch = (e: React.FormEvent) => {
@@ -135,7 +150,7 @@ export default function AvailableMapsPage() {
         <CardContent className="p-4">
           {/* Route Info */}
           <div className="mb-3">
-            <h3 className="text-base font-semibold text-gray-900 mb-1 truncate">
+            <h3 className="text-base font-semibold text-gray-900 mb-1 min-h-[2.75rem] line-clamp-2">
               {map.origin} → {map.destination}
             </h3>
             <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
@@ -245,28 +260,20 @@ export default function AvailableMapsPage() {
         <div className="max-w-6xl mx-auto px-4">
           <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-3">
             <div className="flex-1">
-              <div className="relative">
-                <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <Input
-                  type="text"
-                  placeholder="Filtrar por origem..."
-                  value={searchOrigin}
-                  onChange={(e) => setSearchOrigin(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
+              <FilterCombobox
+                value={searchOrigin}
+                onChange={setSearchOrigin}
+                options={availableOrigins}
+                placeholder="Filtrar por origem..."
+              />
             </div>
             <div className="flex-1">
-              <div className="relative">
-                <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <Input
-                  type="text"
-                  placeholder="Filtrar por destino..."
-                  value={searchDestination}
-                  onChange={(e) => setSearchDestination(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
+              <FilterCombobox
+                value={searchDestination}
+                onChange={setSearchDestination}
+                options={availableDestinations}
+                placeholder="Filtrar por destino..."
+              />
             </div>
             <div className="flex gap-2">
               <Button type="submit" disabled={searchLoading}>
