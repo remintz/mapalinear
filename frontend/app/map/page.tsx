@@ -627,7 +627,7 @@ function MapPageContent() {
             {/* POI Feed with tracking bar between passed and upcoming POIs */}
             <POIFeed
               pois={filteredPOIs}
-              emptyMessage="Nenhum ponto de interesse encontrado com os filtros selecionados"
+              emptyMessage="Nenhum ponto de interesse com as categorias selecionadas"
               isPOIPassed={tracking.isPOIPassed}
               nextPOIIndex={tracking.nextPOIIndex}
               autoScroll={simulation.state.isActive || tracking.isOnRoute}
