@@ -93,7 +93,7 @@ function StarRating({ rating, count }: { rating: number; count?: number }) {
 }
 
 // Helper function to get friendly name when POI has generic/type name
-function getFriendlyPoiName(name: string | null | undefined, type: string): string {
+export function getFriendlyPoiName(name: string | null | undefined, type: string): string {
   // List of generic names from OSM that should be replaced
   const genericNames = [
     'fuel', 'gas_station', 'restaurant', 'cafe', 'fast_food', 'food_court', 'hotel',

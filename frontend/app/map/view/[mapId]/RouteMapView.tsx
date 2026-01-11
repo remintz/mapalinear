@@ -5,6 +5,7 @@ import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from 'react-
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { POI, Milestone } from '@/lib/types';
+import { getFriendlyPoiName } from '@/components/ui/POICard';
 
 // Support both coordinate formats from API
 interface CoordinatePoint {
@@ -287,8 +288,8 @@ export default function RouteMapView({ coordinates, origin, destination, userPos
             >
               <Popup>
                 <div className="text-sm min-w-[150px]">
-                  <p className="font-bold" style={{ color: config.color }}>
-                    {config.icon} {poi.name || config.label}
+                  <p className="font-bold text-black">
+                    {config.icon} {getFriendlyPoiName(poi.name, poi.type)}
                   </p>
                   <p className="text-gray-600 text-xs mt-1">
                     {config.label} - {poi.distance_from_origin_km?.toFixed(1)} km
