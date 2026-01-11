@@ -156,8 +156,8 @@ export function POICard({ poi, onClick, isPassed = false, isNext = false }: POIC
   const displayDistance = hasJunction ? poi.junction_distance_km! : poi.distance_from_origin_km;
   const kmFormatted = displayDistance.toFixed(1);
 
-  // Get direction arrow based on POI side
-  const directionArrow = poi.side === 'left' ? '←' : poi.side === 'right' ? '→' : '🔀';
+  // Get direction text based on POI side
+  const directionText = poi.side === 'left' ? 'à esquerda' : poi.side === 'right' ? 'à direita' : 'desvio';
 
   // Check if POI has Google Maps link
   const hasGoogleMapsLink = !!poi.google_maps_uri;
@@ -213,9 +213,8 @@ export function POICard({ poi, onClick, isPassed = false, isNext = false }: POIC
                 {kmFormatted} km
               </span>
               {hasJunction && (
-                <span className="text-xs text-zinc-500 flex items-center gap-1">
-                  <span>{directionArrow}</span>
-                  <span>{((poi.distance_from_road_meters || 0) / 1000).toFixed(1)}km</span>
+                <span className="text-xs text-zinc-500">
+                  + {((poi.distance_from_road_meters || 0) / 1000).toFixed(1)}km {directionText}
                 </span>
               )}
             </div>
