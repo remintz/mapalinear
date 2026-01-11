@@ -9,6 +9,21 @@
 const SESSION_ID_KEY = 'mapalinear_session_id';
 
 /**
+ * Generate a UUID v4 with fallback for environments where crypto.randomUUID is not available.
+ */
+function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  // Fallback implementation for older browsers or restricted contexts
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+/**
  * Get or create a session ID.
  *
  * - If a session ID exists in sessionStorage, return it
@@ -25,7 +40,7 @@ export function getSessionId(): string {
     let sessionId = sessionStorage.getItem(SESSION_ID_KEY);
 
     if (!sessionId) {
-      sessionId = crypto.randomUUID();
+      sessionId = generateUUID();
       sessionStorage.setItem(SESSION_ID_KEY, sessionId);
     }
 
@@ -33,7 +48,7 @@ export function getSessionId(): string {
   } catch {
     // sessionStorage might be disabled (e.g., private browsing in some browsers)
     // Fall back to a temporary ID that won't persist
-    return crypto.randomUUID();
+    return generateUUID();
   }
 }
 

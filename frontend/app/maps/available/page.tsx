@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/badge';
-import { CityCombobox } from '@/components/ui/CityCombobox';
+import { Input } from '@/components/ui/Input';
 import {
   Globe,
   Search,
@@ -245,18 +245,28 @@ export default function AvailableMapsPage() {
         <div className="max-w-6xl mx-auto px-4">
           <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-3">
             <div className="flex-1">
-              <CityCombobox
-                placeholder="Filtrar por origem..."
-                value={searchOrigin}
-                onChange={setSearchOrigin}
-              />
+              <div className="relative">
+                <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  type="text"
+                  placeholder="Filtrar por origem..."
+                  value={searchOrigin}
+                  onChange={(e) => setSearchOrigin(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
             </div>
             <div className="flex-1">
-              <CityCombobox
-                placeholder="Filtrar por destino..."
-                value={searchDestination}
-                onChange={setSearchDestination}
-              />
+              <div className="relative">
+                <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  type="text"
+                  placeholder="Filtrar por destino..."
+                  value={searchDestination}
+                  onChange={(e) => setSearchDestination(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
             </div>
             <div className="flex gap-2">
               <Button type="submit" disabled={searchLoading}>
