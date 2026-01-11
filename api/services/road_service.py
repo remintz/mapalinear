@@ -30,6 +30,7 @@ from api.services.milestone_factory import MilestoneFactory
 from api.services.poi_debug_service import POIDebugDataCollector
 from api.services.poi_quality_service import POIQualityService
 from api.services.poi_search_service import POISearchService
+from api.services.progress_phases import ProgressReporter
 from api.services.route_segmentation_service import RouteSegmentationService
 from api.utils.async_utils import run_async_safe
 from api.utils.geo_utils import calculate_distance_meters
@@ -234,6 +235,7 @@ class RoadService:
         max_distance_from_road: float,
         force_poi_refresh: bool = False,
         force_new_segments: bool = False,
+        progress_reporter: Optional["ProgressReporter"] = None,
     ) -> Tuple[List[Tuple[RouteSegmentDB, bool]], List[Tuple[Any, int, int, RouteSegmentDB]]]:
         """
         Process OSRM steps into reusable RouteSegments.
@@ -250,12 +252,14 @@ class RoadService:
             force_new_segments: If True, always create new segment versions
                                (for map regeneration with versioning). All segments
                                will be new and will need POI search.
+            progress_reporter: Optional ProgressReporter for phase-aware progress updates
 
         Returns:
             Tuple of:
             - List of (RouteSegment, is_new) tuples
             - List of (POI, search_point_index, distance_m, segment) tuples
         """
+        from api.services.progress_phases import MapGenerationPhase
         import asyncio
         from sqlalchemy.ext.asyncio import (
             AsyncSession,
@@ -301,8 +305,22 @@ class RoadService:
                             steps, force_new=force_new_segments
                         )
 
+                        # Progress calculation within POI_SEARCH phase (0-100% of the phase)
+                        total_segments = len(results)
+
+                        def _report_segment_progress(segment_index: int):
+                            """Report progress based on segment index within POI_SEARCH phase."""
+                            if progress_reporter and total_segments > 0:
+                                # Calculate progress within the phase (0-100%)
+                                phase_progress = ((segment_index + 1) / total_segments) * 100
+                                progress_reporter.report(MapGenerationPhase.POI_SEARCH, phase_progress)
+
+                        # Start POI search phase
+                        if progress_reporter:
+                            progress_reporter.start_phase(MapGenerationPhase.POI_SEARCH)
+
                         # For each segment, get or search POIs
-                        for segment, is_new in results:
+                        for idx, (segment, is_new) in enumerate(results):
                             if is_new and await segment_service.needs_poi_search(segment):
                                 # Search POIs for this NEW segment
                                 pois_with_data = await self.poi_search_service.search_pois_for_segment(
@@ -340,6 +358,8 @@ class RoadService:
                                     from api.database.repositories.route_segment import RouteSegmentRepository
                                     segment_repo = RouteSegmentRepository(session)
                                     await segment_repo.mark_pois_fetched(segment.id)
+                                # Report progress after processing new segment
+                                _report_segment_progress(idx)
                             else:
                                 # EXISTING segment - load POIs from SegmentPOI associations
                                 segment_pois = await segment_poi_repo.get_by_segment_with_pois(
@@ -379,6 +399,8 @@ class RoadService:
                                             sp.straight_line_distance_m,
                                             segment,
                                         ))
+                                # Report progress after processing existing segment
+                                _report_segment_progress(idx)
 
                         await session.commit()
                         return results, all_pois_with_segments
@@ -465,7 +487,7 @@ class RoadService:
         max_distance_from_road: float = 3000,
         max_detour_distance_km: float = 5.0,
         min_distance_from_origin_km: float = 0.0,  # Deprecated
-        progress_callback: Optional[Callable[[float], None]] = None,
+        progress_callback: Optional[Callable[[float, Optional[str]], None]] = None,
         segment_length_km: float = 1.0,
         user_id: Optional[str] = None,
         force_new_segments: bool = False,
@@ -490,7 +512,7 @@ class RoadService:
             max_distance_from_road: Maximum POI search radius in meters
             max_detour_distance_km: Maximum detour distance for distant POIs
             min_distance_from_origin_km: DEPRECATED - No longer used
-            progress_callback: Callback for progress updates (0-100)
+            progress_callback: Callback for progress updates (progress: float, phase: str)
             segment_length_km: Target length for each segment
             user_id: Optional user ID to associate the map with
             force_new_segments: If True, always create new segment versions
@@ -523,7 +545,7 @@ class RoadService:
         include_cities: bool,
         max_distance_from_road: float,
         max_detour_distance_km: float,
-        progress_callback: Optional[Callable[[float], None]],
+        progress_callback: Optional[Callable[[float, Optional[str]], None]],
         segment_length_km: float,
         user_id: Optional[str],
         cache_stats,
@@ -531,6 +553,17 @@ class RoadService:
     ) -> LinearMapResponse:
         """Internal implementation of generate_linear_map with cache stats tracking."""
         from api.services.cache_stats_collector import CacheStatsCollector
+        from api.services.progress_phases import (
+            MapGenerationPhase,
+            ProgressReporter,
+        )
+
+        # Create progress reporter that converts (phase, phase_progress) to (overall_progress, phase_name)
+        def _update_callback(overall_progress: float, phase_name: str) -> None:
+            if progress_callback:
+                progress_callback(overall_progress, phase_name)
+
+        reporter = ProgressReporter(update_callback=_update_callback)
 
         logger.info(f"Starting linear map generation: {origin} -> {destination}")
 
@@ -539,10 +572,14 @@ class RoadService:
         logger.info(f"Origin city extracted: {origin_city}")
 
         # Step 1: Geocode origin and destination
+        reporter.start_phase(MapGenerationPhase.GEOCODING)
         origin_location = self._geocode_and_validate(origin, "origin")
+        reporter.report(MapGenerationPhase.GEOCODING, 50)
         destination_location = self._geocode_and_validate(destination, "destination")
+        reporter.complete_phase(MapGenerationPhase.GEOCODING)
 
         # Step 2: Calculate route
+        reporter.start_phase(MapGenerationPhase.ROUTE_CALCULATION)
         logger.info("Calculating route...")
         route = run_async_safe(
             self.geo_provider.calculate_route(origin_location, destination_location)
@@ -552,8 +589,10 @@ class RoadService:
             raise ValueError(f"Could not calculate route from {origin} to {destination}")
 
         self._log_route_info(route)
+        reporter.complete_phase(MapGenerationPhase.ROUTE_CALCULATION)
 
         # Step 3: Process route into linear segments (for display)
+        reporter.start_phase(MapGenerationPhase.SEGMENT_PROCESSING)
         linear_segments = self.segmentation_service.process_route_into_segments(
             route, segment_length_km
         )
@@ -574,6 +613,7 @@ class RoadService:
                 f"Route from {origin} to {destination} has no steps. "
                 "OSRM steps are required for map generation."
             )
+        reporter.complete_phase(MapGenerationPhase.SEGMENT_PROCESSING)
 
         logger.info(f"Processing {len(route.steps)} OSRM steps into reusable segments")
         route_segments_data, all_pois_with_segments = self._process_steps_into_segments(
@@ -581,6 +621,7 @@ class RoadService:
             milestone_categories=milestone_categories,
             max_distance_from_road=max_distance_from_road,
             force_new_segments=force_new_segments,
+            progress_reporter=reporter,
         )
         logger.info(
             f"Created/reused {len(route_segments_data)} route segments "
@@ -610,8 +651,11 @@ class RoadService:
 
         # Log final statistics
         logger.info(f"Linear map complete: {len(linear_segments)} segments")
+        reporter.start_phase(MapGenerationPhase.MAP_CREATION)
+        reporter.complete_phase(MapGenerationPhase.MAP_CREATION)
 
         # Save linear map to database
+        reporter.start_phase(MapGenerationPhase.SAVING)
         try:
             from .map_storage_service_db import save_map_sync
 
@@ -625,6 +669,7 @@ class RoadService:
                 route_total_km=route.total_distance,
             )
             linear_map.id = map_id
+            reporter.complete_phase(MapGenerationPhase.SAVING)
         except Exception as e:
             logger.error(f"Error saving linear map: {e}")
             map_id = None
@@ -637,6 +682,7 @@ class RoadService:
             and settings.here_enrichment_enabled
             and settings.here_api_key
         ):
+            reporter.start_phase(MapGenerationPhase.ENRICHMENT)
             try:
                 from .here_enrichment_service import enrich_map_pois_with_here
                 import asyncio
@@ -689,11 +735,14 @@ class RoadService:
                         await engine.dispose()
 
                 asyncio.run(_enrich())
+                reporter.complete_phase(MapGenerationPhase.ENRICHMENT)
             except Exception as e:
                 logger.warning(f"Error enriching with HERE: {e}")
 
         # Log cache statistics summary at the end of map generation
         cache_stats.log_summary()
+        reporter.start_phase(MapGenerationPhase.FINALIZING)
+        reporter.complete_phase(MapGenerationPhase.FINALIZING)
 
         return linear_map
 

@@ -195,7 +195,7 @@ make db-shell      # Open PostgreSQL interactive shell
 make install    # Install dependencies
 make run        # Start all services with mprocs
 make format     # Format code (black + isort)
-make test       # Run tests with coverage check (min 52%)
+make test       # Run tests with coverage check (min 55%)
 ```
 
 ### Code Quality Tools
@@ -211,8 +211,8 @@ poetry run isort .
 # Type checking with mypy
 poetry run mypy .
 
-# Run tests with coverage (minimum 52% required)
-poetry run python -m pytest --cov=api --cov-fail-under=52
+# Run tests with coverage (minimum 55% required)
+poetry run python -m pytest --cov=api --cov-fail-under=55
 
 # Run specific test file
 poetry run python -m pytest tests/services/test_road_service.py -v
@@ -682,7 +682,7 @@ When working with geographic data:
 - os testes automáticos devem sempre passar 100%
 - se um teste automático está falhando descubra a causa raiz. O objetivo não é simplesmente passar nos testes mas assegurar que o sistema está funcionando conforme desejado
 - só faça commit se eu pedir
-- Cobertura mínima de testes: 52% (enforced via `make test`)
+- Cobertura mínima de testes: 55% (enforced via `make test`)
 
 ### Test Structure
 ```

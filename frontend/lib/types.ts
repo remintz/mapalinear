@@ -168,6 +168,29 @@ export interface RouteMapProps {
   onPOISelect?: (poiId: string) => void;
 }
 
+// Map generation phases (must match backend MapGenerationPhase enum)
+export type MapGenerationPhase =
+  | 'geocoding'
+  | 'route_calculation'
+  | 'segment_processing'
+  | 'poi_search'
+  | 'map_creation'
+  | 'saving'
+  | 'enrichment'
+  | 'finalizing';
+
+// Phase descriptions in Portuguese (must match backend PHASE_CONFIGS)
+export const PHASE_DESCRIPTIONS: Record<MapGenerationPhase, string> = {
+  geocoding: 'Localizando enderecos...',
+  route_calculation: 'Calculando rota...',
+  segment_processing: 'Processando segmentos...',
+  poi_search: 'Buscando pontos de interesse...',
+  map_creation: 'Criando mapa...',
+  saving: 'Salvando mapa...',
+  enrichment: 'Enriquecendo dados...',
+  finalizing: 'Finalizando...',
+};
+
 // Async operation types
 export interface AsyncOperation {
   operation_id: string;
@@ -175,6 +198,7 @@ export interface AsyncOperation {
   type: 'linear_map' | 'osm_search';
   started_at: string;
   progress_percent: number;
+  current_phase?: MapGenerationPhase;
   estimated_completion?: string;
   result?: RouteSearchResponse;
   error?: string;
@@ -419,6 +443,7 @@ export interface AdminOperation {
   operation_type: string;
   status: 'in_progress' | 'completed' | 'failed';
   progress_percent: number;
+  current_phase?: MapGenerationPhase;
   started_at: string;
   completed_at?: string;
   duration_seconds?: number;

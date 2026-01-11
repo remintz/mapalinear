@@ -70,6 +70,7 @@ class AsyncOperationRepository(BaseRepository[AsyncOperation]):
         operation_id: str,
         progress_percent: float,
         estimated_completion: Optional[datetime] = None,
+        current_phase: Optional[str] = None,
     ) -> bool:
         """
         Update operation progress.
@@ -78,6 +79,7 @@ class AsyncOperationRepository(BaseRepository[AsyncOperation]):
             operation_id: Operation ID
             progress_percent: New progress percentage (0-100)
             estimated_completion: Updated estimated completion time
+            current_phase: Current phase of the operation (e.g., "geocoding", "poi_search")
 
         Returns:
             True if updated, False if operation not found
@@ -85,6 +87,8 @@ class AsyncOperationRepository(BaseRepository[AsyncOperation]):
         values = {"progress_percent": progress_percent}
         if estimated_completion is not None:
             values["estimated_completion"] = estimated_completion
+        if current_phase is not None:
+            values["current_phase"] = current_phase
 
         result = await self.session.execute(
             update(AsyncOperation)

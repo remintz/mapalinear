@@ -166,6 +166,7 @@ class AsyncOperationResponse(BaseModel):
     type: str = Field(..., description="Tipo da operação (ex: linear_map)")
     started_at: datetime = Field(default_factory=datetime.now, description="Data e hora de início da operação")
     progress_percent: float = Field(0.0, description="Percentual de progresso (0-100)")
+    current_phase: Optional[str] = Field(None, description="Fase atual da operação (ex: geocoding, poi_search)")
     estimated_completion: Optional[datetime] = Field(None, description="Estimativa de conclusão da operação")
     result: Optional[Dict[str, Any]] = Field(None, description="Resultado da operação (quando concluída)")
     error: Optional[str] = Field(None, description="Mensagem de erro (quando falha)") 

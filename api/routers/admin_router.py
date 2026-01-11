@@ -840,6 +840,7 @@ class AdminOperationResponse(BaseModel):
     operation_type: str = Field(..., description="Type of operation")
     status: str = Field(..., description="Status: in_progress, completed, failed")
     progress_percent: float = Field(..., description="Progress 0-100")
+    current_phase: Optional[str] = Field(None, description="Current phase (e.g., geocoding, poi_search)")
     started_at: UTCDatetime = Field(..., description="When operation started")
     completed_at: Optional[UTCDatetime] = Field(None, description="When operation completed")
     duration_seconds: Optional[float] = Field(None, description="Duration in seconds")
@@ -998,6 +999,7 @@ async def list_operations(
                 operation_type=op.operation_type,
                 status=op.status,
                 progress_percent=op.progress_percent,
+                current_phase=op.current_phase,
                 started_at=op.started_at,
                 completed_at=op.completed_at,
                 duration_seconds=duration,

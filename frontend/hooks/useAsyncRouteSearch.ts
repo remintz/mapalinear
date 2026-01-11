@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { apiClient } from '@/lib/api';
-import { RouteSearchRequest, RouteSearchResponse, AsyncOperation, POIType } from '@/lib/types';
+import { RouteSearchRequest, RouteSearchResponse, AsyncOperation, POIType, PHASE_DESCRIPTIONS, MapGenerationPhase } from '@/lib/types';
 import { SearchFormData } from '@/lib/validations';
 import { trackAnalyticsEvent } from '@/hooks/useAnalytics';
 import { EventType } from '@/lib/analytics-types';
@@ -46,18 +46,13 @@ export function useAsyncRouteSearch(): UseAsyncRouteSearchReturn {
       // Update progress
       setProgressPercent(operation.progress_percent);
       setEstimatedCompletion(operation.estimated_completion || null);
-      
-      // Update progress message based on percentage and type
-      if (operation.progress_percent <= 10) {
+
+      // Update progress message based on current phase from backend
+      if (operation.current_phase && PHASE_DESCRIPTIONS[operation.current_phase]) {
+        setProgressMessage(PHASE_DESCRIPTIONS[operation.current_phase]);
+      } else if (operation.progress_percent <= 5) {
+        // Fallback for initial state before phase is set
         setProgressMessage('Iniciando busca...');
-      } else if (operation.progress_percent <= 30) {
-        setProgressMessage('Consultando OpenStreetMap...');
-      } else if (operation.progress_percent <= 60) {
-        setProgressMessage('Processando rota...');
-      } else if (operation.progress_percent <= 90) {
-        setProgressMessage('Buscando pontos de interesse...');
-      } else {
-        setProgressMessage('Finalizando...');
       }
 
       // Handle completion

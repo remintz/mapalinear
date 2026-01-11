@@ -403,9 +403,12 @@ export default function AdminOperationsPage() {
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap max-w-[200px]">
                       {op.status === "in_progress" ? (
-                        <div className="w-24">
+                        <div className="w-32">
                           <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
-                            <span>{Math.round(op.progress_percent)}%</span>
+                            <span className="truncate" title={op.current_phase || undefined}>
+                              {op.current_phase?.replace(/_/g, ' ') || 'iniciando'}
+                            </span>
+                            <span className="ml-1 font-medium">{Math.round(op.progress_percent)}%</span>
                           </div>
                           <div className="w-full bg-gray-200 rounded-full h-1.5">
                             <div

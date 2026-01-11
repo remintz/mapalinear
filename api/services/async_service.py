@@ -46,6 +46,7 @@ class AsyncService:
             status=OperationStatus(db_op.status),
             started_at=db_op.started_at,
             progress_percent=db_op.progress_percent,
+            current_phase=db_op.current_phase,
             estimated_completion=db_op.estimated_completion,
             result=db_op.result,
             error=db_op.error,
@@ -295,7 +296,7 @@ class AsyncService:
             # Create a standalone engine for this thread
             engine = create_standalone_engine()
 
-            async def _update_progress_bg(progress: float):
+            async def _update_progress_bg(progress: float, phase: Optional[str] = None):
                 """Update progress using the thread's own database connection."""
                 async with get_standalone_session(engine) as session:
                     repo = AsyncOperationRepository(session)
@@ -303,10 +304,13 @@ class AsyncService:
                         operation_id=operation_id,
                         progress_percent=progress,
                         estimated_completion=datetime.now() + timedelta(minutes=5 * (100 - progress) / 100),
+                        current_phase=phase,
                     )
                 # Update in-memory cache
                 if operation_id in _active_operations:
                     _active_operations[operation_id].progress_percent = progress
+                    if phase is not None:
+                        _active_operations[operation_id].current_phase = phase
 
             async def _complete_operation_bg(result: Dict[str, Any]):
                 """Complete operation using the thread's own database connection."""
@@ -328,14 +332,19 @@ class AsyncService:
 
             # Track last persisted progress to avoid excessive DB writes
             last_persisted_progress = [0.0]  # Use list to allow mutation in closure
+            last_persisted_phase = [None]  # Track last phase to detect phase changes
 
-            def _update_progress_sync(progress: float):
+            def _update_progress_sync(progress: float, phase: Optional[str] = None):
                 """Sync wrapper for progress updates.
 
                 Persists progress to database with throttling (only when progress
-                changes by >= 5%). When called from within a running event loop
-                (e.g., inside run_async_safe), schedules the update as a task.
+                changes by >= 5% OR phase changes). When called from within a running
+                event loop (e.g., inside run_async_safe), schedules the update as a task.
                 When called from sync context, uses run_until_complete.
+
+                Args:
+                    progress: Overall progress percentage (0-100)
+                    phase: Current phase name (e.g., "geocoding", "poi_search")
                 """
                 # Always update in-memory cache (fast, sync)
                 if operation_id in _active_operations:
@@ -343,22 +352,39 @@ class AsyncService:
                     _active_operations[operation_id].estimated_completion = (
                         datetime.now() + timedelta(minutes=5 * (100 - progress) / 100)
                     )
+                    if phase is not None:
+                        _active_operations[operation_id].current_phase = phase
 
-                # Only persist to DB if progress changed by >= 5%
-                if progress - last_persisted_progress[0] < 5.0:
+                # Persist to DB if progress changed by >= 5% OR phase changed
+                phase_changed = phase is not None and phase != last_persisted_phase[0]
+                progress_changed = progress - last_persisted_progress[0] >= 5.0
+
+                if not phase_changed and not progress_changed:
                     return
 
                 last_persisted_progress[0] = progress
+                if phase is not None:
+                    last_persisted_phase[0] = phase
 
                 # Persist to DB
-                if loop.is_running():
-                    # Loop is running - schedule the update as a task
-                    # This happens when called from inside run_async_safe()
-                    asyncio.ensure_future(_update_progress_bg(progress), loop=loop)
-                else:
-                    # Loop not running - can use run_until_complete
+                # We need to check if we're in the same thread/loop context
+                try:
+                    running_loop = asyncio.get_running_loop()
+                    # We're inside an async context - check if it's our loop
+                    if running_loop is loop:
+                        # Same loop - schedule as task
+                        asyncio.ensure_future(_update_progress_bg(progress, phase), loop=loop)
+                    else:
+                        # Different loop (e.g., inside run_async_safe's thread)
+                        # Schedule on our main worker loop using thread-safe call
+                        # Capture values in default args to avoid closure issues
+                        def _schedule_update(p=progress, ph=phase):
+                            asyncio.ensure_future(_update_progress_bg(p, ph), loop=loop)
+                        loop.call_soon_threadsafe(_schedule_update)
+                except RuntimeError:
+                    # No running loop - we can use run_until_complete
                     try:
-                        loop.run_until_complete(_update_progress_bg(progress))
+                        loop.run_until_complete(_update_progress_bg(progress, phase))
                     except Exception as e:
                         logger.warning(f"Failed to persist progress to DB: {e}")
 

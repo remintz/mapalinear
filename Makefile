@@ -136,8 +136,8 @@ db-migrate-current: ## Show current migration revision
 	@echo "📍 Current migration revision:"
 	poetry run alembic current
 
-test: ## Run tests with coverage check (minimum 52%)
-	poetry run python -m pytest --cov=api --cov-fail-under=52
+test: ## Run tests with coverage check (minimum 55%)
+	poetry run python -m pytest --cov=api --cov-fail-under=55
 
 format: ## Format code with black and isort
 	poetry run black .

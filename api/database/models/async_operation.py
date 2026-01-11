@@ -35,6 +35,10 @@ class AsyncOperation(Base):
     # Progress percentage (0-100)
     progress_percent: Mapped[float] = mapped_column(default=0.0)
 
+    # Current phase of the operation (e.g., "geocoding", "poi_search")
+    # See api/services/progress_phases.py for phase definitions
+    current_phase: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
     # User who requested the operation (optional for backwards compatibility)
     user_id: Mapped[Optional[str]] = mapped_column(
         UUID(as_uuid=False),
