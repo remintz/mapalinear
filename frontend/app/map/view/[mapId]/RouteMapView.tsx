@@ -294,7 +294,7 @@ export default function RouteMapView({ coordinates, origin, destination, userPos
                   <p className="text-gray-600 text-xs mt-1">
                     {config.label} - {poi.distance_from_origin_km?.toFixed(1)} km
                   </p>
-                  {poi.brand && (
+                  {poi.brand && !['yes', 'no', 'true', 'false'].includes(poi.brand.toLowerCase()) && (
                     <p className="text-gray-500 text-xs">{poi.brand}</p>
                   )}
                   {poi.city && (
