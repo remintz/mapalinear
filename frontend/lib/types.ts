@@ -574,3 +574,52 @@ export interface LoginLocation {
   user_name: string | null;
 }
 
+// GPS Debug Log types (admin)
+export interface GPSDebugPOIInfo {
+  id: string;
+  name: string;
+  type: string;
+  distance_from_origin_km: number;
+  relative_distance_km: number;
+}
+
+export interface GPSDebugLogRequest {
+  map_id: string;
+  map_origin: string;
+  map_destination: string;
+  latitude: number;
+  longitude: number;
+  gps_accuracy?: number;
+  distance_from_origin_km?: number;
+  is_on_route: boolean;
+  distance_to_route_m?: number;
+  previous_pois?: GPSDebugPOIInfo[];
+  next_pois?: GPSDebugPOIInfo[];
+  session_id?: string;
+}
+
+export interface GPSDebugLogResponse {
+  status: string;
+  message: string;
+  log_id?: string;
+  last_log_at?: string;
+}
+
+export interface GPSDebugLogEntry {
+  id: string;
+  created_at: string;
+  user_email: string;
+  map_id: string;
+  map_origin: string;
+  map_destination: string;
+  latitude: number;
+  longitude: number;
+  gps_accuracy?: number;
+  distance_from_origin_km?: number;
+  is_on_route: boolean;
+  distance_to_route_m?: number;
+  previous_pois?: GPSDebugPOIInfo[];
+  next_pois?: GPSDebugPOIInfo[];
+  session_id?: string;
+}
+

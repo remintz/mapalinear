@@ -4,7 +4,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Users, Settings, Shield, UserX, AlertTriangle, FileWarning, Map, MapPin, Tag, Activity, FileText, BarChart3 } from "lucide-react";
+import { Users, Settings, Shield, UserX, AlertTriangle, FileWarning, Map, MapPin, Tag, Activity, FileText, BarChart3, Navigation } from "lucide-react";
 import { toast } from "sonner";
 
 const SIMULATE_USER_KEY = 'mapalinear_simulate_user';
@@ -232,6 +232,23 @@ export default function AdminPage() {
                 <h2 className="text-lg font-semibold text-gray-900">Analytics</h2>
                 <p className="text-sm text-gray-500">
                   Estatísticas de uso e comportamento
+                </p>
+              </div>
+            </div>
+          </Link>
+
+          <Link
+            href="/admin/gps-debug"
+            className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
+          >
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-orange-100 rounded-lg">
+                <Navigation className="w-6 h-6 text-orange-600" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">GPS Debug</h2>
+                <p className="text-sm text-gray-500">
+                  Logs de posição GPS para debug
                 </p>
               </div>
             </div>

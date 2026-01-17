@@ -16,6 +16,7 @@ from api.database.repositories.segment_poi import SegmentPOIRepository
 from api.database.repositories.user import UserRepository
 from api.database.repositories.system_settings import SystemSettingsRepository
 from api.database.repositories.frontend_error_log import FrontendErrorLogRepository
+from api.database.repositories.gps_debug_log import GPSDebugLogRepository
 from api.database.repositories.user_event import UserEventRepository
 
 __all__ = [
@@ -34,5 +35,6 @@ __all__ = [
     "UserRepository",
     "SystemSettingsRepository",
     "FrontendErrorLogRepository",
+    "GPSDebugLogRepository",
     "UserEventRepository",
 ]

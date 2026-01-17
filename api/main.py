@@ -160,7 +160,7 @@ app.middleware("http")(error_handler_middleware)
 setup_error_handlers(app)
 
 # Import only required routers
-from api.routers import operations_router, export, maps_router, api_logs_router, auth_router, admin_router, settings_router, municipalities_router, problem_types_router, problem_reports_router, poi_debug_router, admin_pois_router, frontend_errors_router, session_activity_router, application_logs_router, user_events_router
+from api.routers import operations_router, export, maps_router, api_logs_router, auth_router, admin_router, settings_router, municipalities_router, problem_types_router, problem_reports_router, poi_debug_router, admin_pois_router, frontend_errors_router, session_activity_router, application_logs_router, user_events_router, gps_debug_router
 
 # Include only required routers
 app.include_router(auth_router.router, tags=["Auth"])
@@ -179,6 +179,7 @@ app.include_router(frontend_errors_router.router, tags=["Frontend Errors"])
 app.include_router(session_activity_router.router, tags=["Session Activity"])
 app.include_router(application_logs_router.router, tags=["Application Logs"])
 app.include_router(user_events_router.router, tags=["User Events"])
+app.include_router(gps_debug_router.router, tags=["GPS Debug"])
 
 @app.get("/")
 async def root():

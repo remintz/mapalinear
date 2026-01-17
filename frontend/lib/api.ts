@@ -36,6 +36,9 @@ import {
   DailyActiveUsers,
   PerformanceStats,
   LoginLocation,
+  GPSDebugLogRequest,
+  GPSDebugLogResponse,
+  GPSDebugLogEntry,
 } from './types';
 
 // Helper to wait for session with retry
@@ -876,6 +879,33 @@ class APIClient {
       '/events/cleanup',
       { params: { days_to_keep: daysToKeep } }
     );
+    return data;
+  }
+
+  // GPS Debug Logs (admin)
+
+  /**
+   * Create a GPS debug log entry (admin only).
+   * Used for debugging distance calculation issues during real-world testing.
+   */
+  async createGPSDebugLog(logData: GPSDebugLogRequest): Promise<GPSDebugLogResponse> {
+    const { data } = await this.client.post<GPSDebugLogResponse>('/gps-debug', logData);
+    return data;
+  }
+
+  /**
+   * Get recent GPS debug logs (admin).
+   */
+  async getGPSDebugLogs(limit: number = 100): Promise<GPSDebugLogEntry[]> {
+    const { data } = await this.client.get<GPSDebugLogEntry[]>('/gps-debug/recent', { params: { limit } });
+    return data;
+  }
+
+  /**
+   * Get GPS debug logs for a specific map (admin).
+   */
+  async getGPSDebugLogsByMap(mapId: string, limit: number = 100): Promise<GPSDebugLogEntry[]> {
+    const { data } = await this.client.get<GPSDebugLogEntry[]>(`/gps-debug/map/${mapId}`, { params: { limit } });
     return data;
   }
 }
