@@ -15,7 +15,6 @@ import { useRouteSimulation } from '@/hooks/useRouteSimulation';
 import { useRouteTracking } from '@/hooks/useRouteTracking';
 import { useGeolocation } from '@/hooks/useGeolocation';
 import { useAnalytics } from '@/hooks/useAnalytics';
-import { useGPSDebugLog } from '@/hooks/useGPSDebugLog';
 import { EventType } from '@/lib/analytics-types';
 import { RouteSegment, Milestone } from '@/lib/types';
 import { ReportProblemButton } from '@/components/reports/ReportProblemButton';
@@ -290,22 +289,6 @@ function MapPageContent() {
     segments: data?.segments || [],
     pois: filteredPOIs,
     onRouteThreshold: 1500, // 1.5km threshold for linearized segments
-  });
-
-  // GPS Debug logging hook (admin only)
-  // Automatically logs GPS position when admin opens/refreshes the map
-  // Throttled to max 1 log per 5 minutes per map
-  useGPSDebugLog({
-    isAdmin,
-    mapId,
-    mapOrigin: data?.origin || '',
-    mapDestination: data?.destination || '',
-    userPosition: currentPosition,
-    gpsAccuracy: geoLocation.position?.accuracy,
-    distanceTraveled: tracking.distanceTraveled,
-    isOnRoute: tracking.isOnRoute,
-    distanceToRoute: tracking.distanceToRoute,
-    pois: filteredPOIs,
   });
 
   // Download files function
