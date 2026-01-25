@@ -61,7 +61,7 @@ class POI(Base):
     operator: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     brand: Mapped[Optional[str]] = mapped_column(String(200), index=True, nullable=True)
     opening_hours: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    phone: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     website: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     cuisine: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
 
