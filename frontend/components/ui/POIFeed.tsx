@@ -200,8 +200,23 @@ export function POIFeed({
   // If tracking is active and there are passed POIs, show accordion layout
   const hasPassedPois = passedPois.length > 0 && trackingInfo?.isOnRoute;
 
+  // Check if location is not available (no tracking info or not on route)
+  const isLocationUnavailable = !trackingInfo || trackingInfo.distanceToRoute === null;
+
   return (
     <div ref={containerRef} className="space-y-3 pb-20">
+      {/* Location unavailable banner */}
+      {isLocationUnavailable && (
+        <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="flex items-center gap-2 text-sm text-blue-700">
+            <span className="text-lg">📍</span>
+            <span>
+              Habilite a localização para ver sua posição no mapa e os POIs já passados.
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Passed POIs Accordion */}
       {hasPassedPois && (
         <div className="border border-gray-200 rounded-lg overflow-hidden">
