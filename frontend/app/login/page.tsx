@@ -3,12 +3,22 @@
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 import { Map } from "lucide-react";
-import { Suspense } from "react";
+import { Suspense, useEffect, useRef } from "react";
 
 function LoginContent() {
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") || "/search";
   const error = searchParams.get("error");
+  const autoLogin = searchParams.get("auto") === "true";
+  const hasTriggeredAutoLogin = useRef(false);
+
+  // Auto-trigger Google login when coming from header button
+  useEffect(() => {
+    if (autoLogin && !error && !hasTriggeredAutoLogin.current) {
+      hasTriggeredAutoLogin.current = true;
+      signIn("google", { callbackUrl });
+    }
+  }, [autoLogin, error, callbackUrl]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 px-4">

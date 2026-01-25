@@ -1,13 +1,16 @@
 "use client";
 
-import { signIn, signOut, useSession } from "next-auth/react";
+import { signOut, useSession } from "next-auth/react";
 import { LogIn, LogOut, User, Loader2 } from "lucide-react";
 import Image from "next/image";
 import { useAnalytics } from "@/hooks/useAnalytics";
+import { usePathname, useRouter } from "next/navigation";
 
 export function LoginButton() {
   const { data: session, status } = useSession();
   const { trackAuthEvent } = useAnalytics();
+  const pathname = usePathname();
+  const router = useRouter();
 
   if (status === "loading") {
     return (
@@ -57,12 +60,18 @@ export function LoginButton() {
     );
   }
 
+  // Callback URL after login - use /search if on home page
+  const callbackUrl = !pathname || pathname === "/" ? "/search" : pathname;
+
+  const handleLogin = () => {
+    trackAuthEvent('login', { provider: 'google' });
+    // Redirect to login page with auto parameter to trigger Google login automatically
+    router.push(`/login?callbackUrl=${encodeURIComponent(callbackUrl)}&auto=true`);
+  };
+
   return (
     <button
-      onClick={() => {
-        trackAuthEvent('login', { provider: 'google' });
-        signIn("google");
-      }}
+      onClick={handleLogin}
       className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
     >
       <LogIn className="w-4 h-4" />

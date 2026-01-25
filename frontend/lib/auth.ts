@@ -23,15 +23,28 @@ declare module "next-auth" {
   }
 }
 
+// In development with non-standard domains (like Tailscale), OAuth cookies
+// may not be sent back correctly in incognito/private browsing mode.
+// Disable checks in development, use PKCE in production.
+const isDevelopment = process.env.NODE_ENV === "development";
+
 export const { handlers, signIn, signOut, auth } = NextAuth({
+  debug: isDevelopment,
   trustHost: true,
   providers: [
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+      // Disable OAuth checks in development to avoid cookie issues
+      // with non-standard domains in incognito mode
+      checks: isDevelopment ? [] : ["pkce"],
     }),
   ],
   callbacks: {
+    async signIn({ user, account, profile }) {
+      console.log("[Auth] signIn callback - user:", user?.email, "account type:", account?.type);
+      return true;
+    },
     async jwt({ token, account }) {
       // On initial sign in, exchange Google token with our backend
       if (account?.id_token) {
