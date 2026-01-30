@@ -23,7 +23,7 @@ class Map(Base):
     """
     Map model representing a linear map between two locations.
 
-    Segments are stored as JSONB for simplicity (they are always accessed via the map).
+    Segments are stored in the map_segments table (via MapSegment -> RouteSegment).
     POIs are stored in a separate normalized table and linked via MapPOI.
     """
 
@@ -36,9 +36,6 @@ class Map(Base):
     destination: Mapped[str] = mapped_column(String(500))
     total_length_km: Mapped[float] = mapped_column()
     road_id: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
-
-    # Segments stored as JSONB (list of LinearRoadSegment dicts)
-    segments: Mapped[list] = mapped_column(JSONB, default=list)
 
     # Optional metadata
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)

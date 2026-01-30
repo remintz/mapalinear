@@ -15,7 +15,6 @@ from api.providers.base import GeoProvider, ProviderType
 from api.providers.models import GeoLocation, Route, POI, POICategory
 from api.models.road_models import (
     LinearMapResponse,
-    LinearRoadSegment,
     RoadMilestone,
     MilestoneType,
     Coordinates,
@@ -293,112 +292,6 @@ class TestInterpolateCoordinateAtDistance:
 
 
 # =============================================================================
-# TEST: PROCESS ROUTE INTO SEGMENTS
-# =============================================================================
-
-class TestProcessRouteIntoSegments:
-    """Test _process_route_into_segments method."""
-
-    def test_creates_correct_number_of_segments(self, road_service, sample_route):
-        """It should create correct number of segments based on length."""
-        # 430.5 km / 10 km per segment = ~44 segments
-        segments = road_service._process_route_into_segments(sample_route, 10.0)
-
-        assert len(segments) == 44
-
-    def test_segment_distances_are_continuous(self, road_service, sample_route):
-        """It should create continuous segments."""
-        segments = road_service._process_route_into_segments(sample_route, 50.0)
-
-        for i in range(len(segments) - 1):
-            assert segments[i].end_distance_km == segments[i + 1].start_distance_km
-
-    def test_first_segment_starts_at_zero(self, road_service, sample_route):
-        """It should start first segment at 0."""
-        segments = road_service._process_route_into_segments(sample_route, 50.0)
-
-        assert segments[0].start_distance_km == 0.0
-
-    def test_last_segment_ends_at_total_distance(self, road_service, sample_route):
-        """It should end last segment at total distance."""
-        segments = road_service._process_route_into_segments(sample_route, 50.0)
-
-        assert segments[-1].end_distance_km == sample_route.total_distance
-
-    def test_segments_have_coordinates(self, road_service, sample_route):
-        """It should include start/end coordinates in segments."""
-        segments = road_service._process_route_into_segments(sample_route, 100.0)
-
-        for segment in segments:
-            assert segment.start_coordinates is not None
-            assert segment.end_coordinates is not None
-            assert segment.start_coordinates.latitude != 0
-            assert segment.start_coordinates.longitude != 0
-
-    def test_segments_have_road_name(self, road_service, sample_route):
-        """It should include road name in segments."""
-        segments = road_service._process_route_into_segments(sample_route, 100.0)
-
-        for segment in segments:
-            assert segment.name == "BR-116"  # First road name from route
-
-    def test_single_segment_for_short_route(self, road_service):
-        """It should create single segment for route shorter than segment length."""
-        short_route = Route(
-            origin=GeoLocation(latitude=-23.55, longitude=-46.63),
-            destination=GeoLocation(latitude=-23.56, longitude=-46.64),
-            total_distance=5.0,
-            total_duration=10.0,
-            geometry=[(-23.55, -46.63), (-23.56, -46.64)],
-            road_names=["Rua Teste"]
-        )
-
-        segments = road_service._process_route_into_segments(short_route, 10.0)
-
-        assert len(segments) == 1
-        assert segments[0].length_km == 5.0
-
-
-# =============================================================================
-# TEST: EXTRACT SEARCH POINTS
-# =============================================================================
-
-class TestExtractSearchPointsFromSegments:
-    """Test _extract_search_points_from_segments method."""
-
-    def test_extracts_start_points_from_all_segments(self, road_service, sample_route):
-        """It should extract start point from each segment."""
-        segments = road_service._process_route_into_segments(sample_route, 100.0)
-
-        search_points = road_service._extract_search_points_from_segments(segments)
-
-        # Should have 5 segments + 1 end point = 6 points for 430km route with 100km segments
-        assert len(search_points) >= len(segments)
-
-    def test_includes_last_segment_end_point(self, road_service, sample_route):
-        """It should include end point of last segment."""
-        segments = road_service._process_route_into_segments(sample_route, 100.0)
-
-        search_points = road_service._extract_search_points_from_segments(segments)
-
-        # Last point should be at total distance
-        last_point = search_points[-1]
-        assert abs(last_point[1] - sample_route.total_distance) < 1.0
-
-    def test_search_points_have_coordinates_and_distance(self, road_service, sample_route):
-        """It should return tuples of (coords, distance)."""
-        segments = road_service._process_route_into_segments(sample_route, 100.0)
-
-        search_points = road_service._extract_search_points_from_segments(segments)
-
-        for point in search_points:
-            coords, distance = point
-            assert isinstance(coords, tuple)
-            assert len(coords) == 2
-            assert isinstance(distance, float)
-
-
-# =============================================================================
 # TEST: GENERATE LINEAR MAP (MAIN METHOD)
 # =============================================================================
 
@@ -435,7 +328,9 @@ class TestGenerateLinearMap:
         assert result.origin == "São Paulo, SP"
         assert result.destination == "Rio de Janeiro, RJ"
         assert result.total_length_km == sample_route.total_distance
-        assert len(result.segments) > 0
+        # Segments are now populated when loading from database, not at creation time
+        # So we just verify the segments field exists (empty list at creation)
+        assert result.segments is not None
 
     @patch('api.services.road_service._is_debug_enabled_sync', return_value=False)
     def test_raises_error_for_invalid_origin(

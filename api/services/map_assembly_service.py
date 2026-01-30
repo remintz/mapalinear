@@ -26,6 +26,7 @@ from api.database.repositories.map_poi import MapPOIRepository
 from api.database.repositories.map_segment import MapSegmentRepository
 from api.database.repositories.poi import POIRepository
 from api.database.repositories.segment_poi import SegmentPOIRepository
+from api.models.road_models import Coordinates, MapSegmentResponse
 from api.providers.base import GeoProvider
 from api.services.junction_calculation_service import (
     GlobalSearchPoint,
@@ -594,3 +595,50 @@ class MapAssemblyService:
 
         if enriched_count > 0:
             logger.info(f"Enriched {enriched_count}/{len(pois)} POIs with city information")
+
+    async def get_segments_for_response(self, map_id: UUID) -> List[MapSegmentResponse]:
+        """
+        Get segments for a map formatted as MapSegmentResponse objects.
+
+        This method retrieves MapSegments with their RouteSegments and builds
+        the response objects with geometry and distance_from_origin_km.
+
+        Args:
+            map_id: ID of the map
+
+        Returns:
+            List of MapSegmentResponse objects with full geometry and distances
+        """
+        map_segments = await self.map_segment_repo.get_by_map_with_segments(map_id)
+
+        segments_response = []
+        for ms in map_segments:
+            segment = ms.segment
+            if segment is None:
+                continue
+
+            # Convert geometry from [[lat, lon], ...] to List[Coordinates]
+            geometry_coords = []
+            if segment.geometry:
+                for point in segment.geometry:
+                    if isinstance(point, (list, tuple)) and len(point) >= 2:
+                        geometry_coords.append(
+                            Coordinates(latitude=point[0], longitude=point[1])
+                        )
+
+            segments_response.append(
+                MapSegmentResponse(
+                    id=str(segment.id),
+                    sequence_order=ms.sequence_order,
+                    distance_from_origin_km=float(ms.distance_from_origin_km),
+                    length_km=float(segment.length_km),
+                    geometry=geometry_coords,
+                    road_name=segment.road_name,
+                    start_lat=float(segment.start_lat),
+                    start_lon=float(segment.start_lon),
+                    end_lat=float(segment.end_lat),
+                    end_lon=float(segment.end_lon),
+                )
+            )
+
+        return segments_response

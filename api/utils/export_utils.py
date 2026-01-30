@@ -46,8 +46,19 @@ def export_to_geojson(
     # 1. Adicionar linha da rota (LineString)
     route_coordinates = []
     for segment in route_response.segments:
-        for coord in segment.geometry:
-            route_coordinates.append([coord.longitude, coord.latitude])  # GeoJSON usa [lon, lat]
+        # Handle both MapSegmentResponse (new) and LinearRoadSegment (legacy) formats
+        geometry = getattr(segment, 'geometry', [])
+        for coord in geometry:
+            # Handle both Coordinates objects and dict/list formats
+            if hasattr(coord, 'longitude'):
+                route_coordinates.append([coord.longitude, coord.latitude])
+            elif hasattr(coord, 'lat'):
+                route_coordinates.append([coord.lon, coord.lat])
+            elif isinstance(coord, dict):
+                route_coordinates.append([coord.get('longitude', coord.get('lon', 0)), coord.get('latitude', coord.get('lat', 0))])
+            elif isinstance(coord, (list, tuple)) and len(coord) >= 2:
+                # Assume [lat, lon] format from database
+                route_coordinates.append([coord[1], coord[0]])
     
     if route_coordinates:
         route_feature = {
@@ -176,10 +187,25 @@ def export_to_gpx(
     trkseg = ET.SubElement(trk, "trkseg")
     
     for segment in route_response.segments:
-        for coord in segment.geometry:
+        # Handle both MapSegmentResponse (new) and LinearRoadSegment (legacy) formats
+        geometry = getattr(segment, 'geometry', [])
+        for coord in geometry:
+            # Handle both Coordinates objects and dict/list formats
+            if hasattr(coord, 'latitude'):
+                lat, lon = coord.latitude, coord.longitude
+            elif hasattr(coord, 'lat'):
+                lat, lon = coord.lat, coord.lon
+            elif isinstance(coord, dict):
+                lat = coord.get('latitude', coord.get('lat', 0))
+                lon = coord.get('longitude', coord.get('lon', 0))
+            elif isinstance(coord, (list, tuple)) and len(coord) >= 2:
+                # Assume [lat, lon] format from database
+                lat, lon = coord[0], coord[1]
+            else:
+                continue
             trkpt = ET.SubElement(trkseg, "trkpt", {
-                "lat": str(coord.latitude),
-                "lon": str(coord.longitude)
+                "lat": str(lat),
+                "lon": str(lon)
             })
     
     # Converter para string XML
@@ -213,30 +239,51 @@ def export_umap_url(route_response: LinearMapResponse) -> str:
     """
     
     # Calcular centro da rota
-    if route_response.segments and route_response.segments[0].geometry:
-        first_coord = route_response.segments[0].geometry[0]
-        last_coord = route_response.segments[-1].geometry[-1]
-        
-        center_lat = (first_coord.latitude + last_coord.latitude) / 2
-        center_lon = (first_coord.longitude + last_coord.longitude) / 2
-        
-        # Estimar zoom baseado na distância
-        if route_response.total_length_km > 300:
-            zoom = 8
-        elif route_response.total_length_km > 100:
-            zoom = 10
-        else:
-            zoom = 12
-            
-        url = f"https://umap.openstreetmap.fr/pt/map/new/#{zoom}/{center_lat:.4f}/{center_lon:.4f}"
-        
-        print(f"🗺️  URL do uMap: {url}")
-        print(f"   1. Abra o link")
-        print(f"   2. Clique em 'Importar dados'")
-        print(f"   3. Carregue o arquivo GeoJSON gerado")
-        
-        return url
-    
+    if route_response.segments:
+        first_segment = route_response.segments[0]
+        last_segment = route_response.segments[-1]
+        first_geometry = getattr(first_segment, 'geometry', [])
+        last_geometry = getattr(last_segment, 'geometry', [])
+
+        if first_geometry and last_geometry:
+            first_coord = first_geometry[0]
+            last_coord = last_geometry[-1]
+
+            # Handle different coordinate formats
+            if hasattr(first_coord, 'latitude'):
+                first_lat, first_lon = first_coord.latitude, first_coord.longitude
+            elif isinstance(first_coord, (list, tuple)):
+                first_lat, first_lon = first_coord[0], first_coord[1]
+            else:
+                first_lat, first_lon = first_coord.get('latitude', first_coord.get('lat', 0)), first_coord.get('longitude', first_coord.get('lon', 0))
+
+            if hasattr(last_coord, 'latitude'):
+                last_lat, last_lon = last_coord.latitude, last_coord.longitude
+            elif isinstance(last_coord, (list, tuple)):
+                last_lat, last_lon = last_coord[0], last_coord[1]
+            else:
+                last_lat, last_lon = last_coord.get('latitude', last_coord.get('lat', 0)), last_coord.get('longitude', last_coord.get('lon', 0))
+
+            center_lat = (first_lat + last_lat) / 2
+            center_lon = (first_lon + last_lon) / 2
+
+            # Estimar zoom baseado na distância
+            if route_response.total_length_km > 300:
+                zoom = 8
+            elif route_response.total_length_km > 100:
+                zoom = 10
+            else:
+                zoom = 12
+
+            url = f"https://umap.openstreetmap.fr/pt/map/new/#{zoom}/{center_lat:.4f}/{center_lon:.4f}"
+
+            print(f"🗺️  URL do uMap: {url}")
+            print(f"   1. Abra o link")
+            print(f"   2. Clique em 'Importar dados'")
+            print(f"   3. Carregue o arquivo GeoJSON gerado")
+
+            return url
+
     return "https://umap.openstreetmap.fr/"
 
 
@@ -289,11 +336,25 @@ def export_to_overpass_turbo_url(
     # Calcular bounding box da rota
     lats = []
     lons = []
-    
+
     for segment in route_response.segments:
-        for coord in segment.geometry:
-            lats.append(coord.latitude)
-            lons.append(coord.longitude)
+        # Handle both MapSegmentResponse (new) and LinearRoadSegment (legacy) formats
+        geometry = getattr(segment, 'geometry', [])
+        for coord in geometry:
+            # Handle both Coordinates objects and dict/list formats
+            if hasattr(coord, 'latitude'):
+                lats.append(coord.latitude)
+                lons.append(coord.longitude)
+            elif hasattr(coord, 'lat'):
+                lats.append(coord.lat)
+                lons.append(coord.lon)
+            elif isinstance(coord, dict):
+                lats.append(coord.get('latitude', coord.get('lat', 0)))
+                lons.append(coord.get('longitude', coord.get('lon', 0)))
+            elif isinstance(coord, (list, tuple)) and len(coord) >= 2:
+                # Assume [lat, lon] format from database
+                lats.append(coord[0])
+                lons.append(coord[1])
     
     if not lats:
         return "https://overpass-turbo.eu/"

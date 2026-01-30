@@ -12,6 +12,8 @@ from sqlalchemy.orm import selectinload
 
 from api.database.models.map import Map
 from api.database.models.map_poi import MapPOI
+from api.database.models.map_segment import MapSegment
+from api.database.models.route_segment import RouteSegment
 from api.database.models.user_map import UserMap
 from api.database.repositories.base import BaseRepository
 
@@ -136,6 +138,7 @@ class MapRepository(BaseRepository[Map]):
         Find a map with origin and destination within tolerance of given coordinates.
 
         Uses Haversine formula to calculate distance between coordinates.
+        Coordinates are obtained from MapSegment -> RouteSegment relationships.
 
         Args:
             origin_lat: Origin latitude
@@ -147,45 +150,43 @@ class MapRepository(BaseRepository[Map]):
         Returns:
             First matching map or None
         """
-        # Get all maps with their coordinates extracted from segments
+        # Get all maps with their segments loaded
         result = await self.session.execute(
-            select(
-                Map,
-                # Extract origin coordinates from first segment
-                Map.segments[0]["start_coordinates"]["latitude"].astext.label(
-                    "map_origin_lat"
-                ),
-                Map.segments[0]["start_coordinates"]["longitude"].astext.label(
-                    "map_origin_lon"
-                ),
-                # Extract destination coordinates from last segment
-                func.jsonb_array_length(Map.segments).label("seg_count"),
-            ).where(func.jsonb_array_length(Map.segments) > 0)
+            select(Map).options(
+                selectinload(Map.map_segments).selectinload(MapSegment.segment)
+            )
         )
 
-        rows = result.all()
+        maps = result.scalars().all()
 
-        for row in rows:
-            map_obj = row[0]
+        for map_obj in maps:
             try:
-                map_origin_lat = float(row.map_origin_lat) if row.map_origin_lat else None
-                map_origin_lon = float(row.map_origin_lon) if row.map_origin_lon else None
-
-                if map_origin_lat is None or map_origin_lon is None:
+                if not map_obj.map_segments:
                     continue
 
-                # Get destination from last segment
-                segments = map_obj.segments
-                if not segments:
+                # Sort segments by sequence_order
+                sorted_segments = sorted(
+                    map_obj.map_segments, key=lambda s: s.sequence_order
+                )
+
+                if not sorted_segments:
                     continue
 
-                last_segment = segments[-1]
-                end_coords = last_segment.get("end_coordinates", {})
-                map_dest_lat = end_coords.get("latitude")
-                map_dest_lon = end_coords.get("longitude")
-
-                if map_dest_lat is None or map_dest_lon is None:
+                # Get first segment for origin coordinates
+                first_map_segment = sorted_segments[0]
+                if not first_map_segment.segment:
                     continue
+
+                map_origin_lat = float(first_map_segment.segment.start_lat)
+                map_origin_lon = float(first_map_segment.segment.start_lon)
+
+                # Get last segment for destination coordinates
+                last_map_segment = sorted_segments[-1]
+                if not last_map_segment.segment:
+                    continue
+
+                map_dest_lat = float(last_map_segment.segment.end_lat)
+                map_dest_lon = float(last_map_segment.segment.end_lon)
 
                 # Calculate distances using Haversine formula
                 origin_distance = self._haversine_distance(
@@ -199,7 +200,7 @@ class MapRepository(BaseRepository[Map]):
                 if origin_distance <= tolerance_km and dest_distance <= tolerance_km:
                     return map_obj
 
-            except (ValueError, TypeError, KeyError):
+            except (ValueError, TypeError, AttributeError):
                 continue
 
         return None

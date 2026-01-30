@@ -78,6 +78,10 @@ class RoadMilestone(BaseModel):
 
 
 class LinearRoadSegment(BaseModel):
+    """
+    DEPRECATED: Use MapSegmentResponse instead.
+    Kept for backwards compatibility with existing serialized data.
+    """
     id: str = Field(..., description="ID do segmento no mapa linear")
     start_distance_km: float = Field(..., description="Distância do início do segmento em relação ao ponto de origem (km)")
     end_distance_km: float = Field(..., description="Distância do fim do segmento em relação ao ponto de origem (km)")
@@ -93,12 +97,33 @@ class LinearRoadSegment(BaseModel):
     milestones: List[RoadMilestone] = Field(default_factory=list, description="Marcos ao longo do segmento")
 
 
+class MapSegmentResponse(BaseModel):
+    """
+    Response model for map segments using RouteSegment data from database.
+
+    This model replaces LinearRoadSegment and provides all the data needed
+    for the frontend to:
+    1. Draw the route on the map (via geometry)
+    2. Calculate distance from origin for any point on the route
+    """
+    id: str = Field(..., description="RouteSegment ID")
+    sequence_order: int = Field(..., description="Order of this segment in the map (0, 1, 2, ...)")
+    distance_from_origin_km: float = Field(..., description="Cumulative distance from origin to START of this segment (km)")
+    length_km: float = Field(..., description="Length of this segment in km")
+    geometry: List[Coordinates] = Field(..., description="Full geometry of the segment as list of coordinates")
+    road_name: Optional[str] = Field(None, description="Name of the road in this segment")
+    start_lat: float = Field(..., description="Latitude of segment start")
+    start_lon: float = Field(..., description="Longitude of segment start")
+    end_lat: float = Field(..., description="Latitude of segment end")
+    end_lon: float = Field(..., description="Longitude of segment end")
+
+
 class LinearMapResponse(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()), description="ID único do mapa linear")
     origin: str = Field(..., description="Ponto de origem")
     destination: str = Field(..., description="Ponto de destino")
     total_length_km: float = Field(..., description="Comprimento total da rota em quilômetros")
-    segments: List[LinearRoadSegment] = Field(..., description="Segmentos do mapa linear")
+    segments: List[Union[MapSegmentResponse, LinearRoadSegment]] = Field(..., description="Segmentos do mapa linear")
     milestones: List[RoadMilestone] = Field(..., description="Todos os marcos ao longo da rota")
     creation_date: datetime = Field(default_factory=datetime.now, description="Data e hora de criação")
     road_id: str = Field(..., description="ID da estrada no provider geográfico")

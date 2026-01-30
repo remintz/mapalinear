@@ -116,6 +116,68 @@ export interface NearestPointResult {
 }
 
 /**
+ * Get the start distance for a segment (handles both new and legacy formats).
+ */
+function getSegmentStartKm(segment: RouteSegment): number {
+  // New format: distance_from_origin_km is the primary field
+  if (segment.distance_from_origin_km !== undefined) {
+    return segment.distance_from_origin_km;
+  }
+  // Legacy format fallback
+  return segment.start_distance_km ?? 0;
+}
+
+/**
+ * Get the length for a segment (handles both new and legacy formats).
+ */
+function getSegmentLengthKm(segment: RouteSegment): number {
+  // New format: length_km is the primary field
+  if (segment.length_km !== undefined) {
+    return segment.length_km;
+  }
+  // Legacy format fallback
+  return segment.distance_km ?? 0;
+}
+
+/**
+ * Get start coordinates for a segment (handles both new and legacy formats).
+ */
+function getSegmentStartCoords(segment: RouteSegment): Coordinates {
+  // New format: start_lat/start_lon are the primary fields
+  if (segment.start_lat !== undefined && segment.start_lon !== undefined) {
+    return { lat: segment.start_lat, lon: segment.start_lon };
+  }
+  // Legacy format fallback
+  if (segment.start_coordinates) {
+    return normalizeCoords(segment.start_coordinates);
+  }
+  // Last resort: use first geometry point
+  if (segment.geometry && segment.geometry.length > 0) {
+    return normalizeCoords(segment.geometry[0]);
+  }
+  return { lat: 0, lon: 0 };
+}
+
+/**
+ * Get end coordinates for a segment (handles both new and legacy formats).
+ */
+function getSegmentEndCoords(segment: RouteSegment): Coordinates {
+  // New format: end_lat/end_lon are the primary fields
+  if (segment.end_lat !== undefined && segment.end_lon !== undefined) {
+    return { lat: segment.end_lat, lon: segment.end_lon };
+  }
+  // Legacy format fallback
+  if (segment.end_coordinates) {
+    return normalizeCoords(segment.end_coordinates);
+  }
+  // Last resort: use last geometry point
+  if (segment.geometry && segment.geometry.length > 0) {
+    return normalizeCoords(segment.geometry[segment.geometry.length - 1]);
+  }
+  return { lat: 0, lon: 0 };
+}
+
+/**
  * Find the nearest point on the route to the user's position.
  * Uses the geometry from route segments for accurate calculation.
  *
@@ -139,6 +201,10 @@ export function findNearestPointOnRoute(
     const segment = segments[segIdx];
     const geometry = segment.geometry;
 
+    // Get segment properties using helper functions
+    const segmentStartKm = getSegmentStartKm(segment);
+    const segmentLengthKm = getSegmentLengthKm(segment);
+
     // If segment has geometry, use it for precise calculation
     if (geometry && geometry.length >= 2) {
       // Calculate total length of this segment's geometry for interpolation
@@ -156,10 +222,6 @@ export function findNearestPointOnRoute(
 
         if (result.distance < minDistance) {
           minDistance = result.distance;
-
-          // Calculate distance from origin at this point
-          const segmentStartKm = segment.start_distance_km ?? 0;
-          const segmentLengthKm = segment.length_km ?? segment.distance_km ?? 0;
 
           // Interpolate within this geometry segment
           const distanceAlongGeometry = segmentDistances[i] +
@@ -181,17 +243,13 @@ export function findNearestPointOnRoute(
       }
     } else {
       // Fallback: use start/end coordinates
-      const result = pointToSegmentDistance(
-        userPosition,
-        segment.start_coordinates,
-        segment.end_coordinates
-      );
+      const startCoords = getSegmentStartCoords(segment);
+      const endCoords = getSegmentEndCoords(segment);
+      const result = pointToSegmentDistance(userPosition, startCoords, endCoords);
 
       if (result.distance < minDistance) {
         minDistance = result.distance;
 
-        const segmentStartKm = segment.start_distance_km ?? 0;
-        const segmentLengthKm = segment.length_km ?? segment.distance_km ?? 0;
         const distanceFromOrigin = segmentStartKm + result.fraction * segmentLengthKm;
 
         nearestResult = {
@@ -222,8 +280,8 @@ export function getRoutePoints(segments: RouteSegment[]): RoutePoint[] {
 
   for (const segment of segments) {
     const geometry = segment.geometry;
-    const startKm = segment.start_distance_km ?? 0;
-    const lengthKm = segment.length_km ?? segment.distance_km ?? 0;
+    const startKm = getSegmentStartKm(segment);
+    const lengthKm = getSegmentLengthKm(segment);
 
     if (geometry && geometry.length >= 2) {
       // Calculate cumulative distances within segment
@@ -255,15 +313,18 @@ export function getRoutePoints(segments: RouteSegment[]): RoutePoint[] {
       }
     } else {
       // Fallback: use start/end coordinates
+      const startCoords = getSegmentStartCoords(segment);
+      const endCoords = getSegmentEndCoords(segment);
+
       if (points.length === 0 ||
           points[points.length - 1].distanceFromOrigin < startKm - 0.001) {
         points.push({
-          coordinates: normalizeCoords(segment.start_coordinates),
+          coordinates: startCoords,
           distanceFromOrigin: startKm,
         });
       }
       points.push({
-        coordinates: normalizeCoords(segment.end_coordinates),
+        coordinates: endCoords,
         distanceFromOrigin: startKm + lengthKm,
       });
     }

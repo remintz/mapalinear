@@ -77,20 +77,31 @@ export interface ExportRouteData {
 // Route related types
 export interface RouteSegment {
   id: string;
-  start_coordinates: Coordinates;
-  end_coordinates: Coordinates;
-  distance_km: number;
-  // Distance from origin for this segment
-  start_distance_km?: number;
-  end_distance_km?: number;
-  length_km?: number;
+  // Order of this segment in the map (0, 1, 2, ...)
+  sequence_order: number;
+  // Cumulative distance from origin to START of this segment (km)
+  distance_from_origin_km: number;
+  // Length of this segment (km)
+  length_km: number;
+  // Full geometry of the segment (list of coordinates)
+  geometry: Coordinates[];
   // Road information
-  name?: string;
+  road_name?: string;
+  // Start/end coordinates (for compatibility)
+  start_lat: number;
+  start_lon: number;
+  end_lat: number;
+  end_lon: number;
+  // Legacy fields for backwards compatibility
+  start_coordinates?: Coordinates;
+  end_coordinates?: Coordinates;
+  distance_km?: number;  // Alias for length_km
+  start_distance_km?: number;  // Alias for distance_from_origin_km
+  end_distance_km?: number;  // Computed: distance_from_origin_km + length_km
+  name?: string;  // Alias for road_name
   ref?: string;
   highway?: string;
   highway_type?: string;
-  // Full geometry of the segment (list of coordinates)
-  geometry?: Coordinates[];
   milestones?: Milestone[];
 }
 

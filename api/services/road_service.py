@@ -15,7 +15,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from api.database.models.route_segment import RouteSegment as RouteSegmentDB
 from api.models.road_models import (
     LinearMapResponse,
-    LinearRoadSegment,
     RoadMilestone,
     RoadMilestoneResponse,
     RouteStatisticsResponse,
@@ -31,7 +30,6 @@ from api.services.poi_debug_service import POIDebugDataCollector
 from api.services.poi_quality_service import POIQualityService
 from api.services.poi_search_service import POISearchService
 from api.services.progress_phases import ProgressReporter
-from api.services.route_segmentation_service import RouteSegmentationService
 from api.utils.async_utils import run_async_safe
 from api.utils.geo_utils import calculate_distance_meters
 
@@ -85,7 +83,6 @@ class RoadService:
         self,
         geo_provider: Optional[GeoProvider] = None,
         poi_provider: Optional[GeoProvider] = None,
-        segmentation_service: Optional[RouteSegmentationService] = None,
         poi_search_service: Optional[POISearchService] = None,
         milestone_factory: Optional[MilestoneFactory] = None,
         quality_service: Optional[POIQualityService] = None,
@@ -96,7 +93,6 @@ class RoadService:
         Args:
             geo_provider: Provider for routing/geocoding (always OSM if not specified)
             poi_provider: Provider for POI search (configured via POI_PROVIDER env var)
-            segmentation_service: Service for route segmentation (optional)
             poi_search_service: Service for POI search (optional)
             milestone_factory: Factory for milestone creation (optional)
             quality_service: Service for POI quality (optional)
@@ -117,7 +113,6 @@ class RoadService:
         self.poi_provider = poi_provider
 
         # Initialize services with lazy loading
-        self._segmentation_service = segmentation_service
         self._quality_service = quality_service
         self._milestone_factory = milestone_factory
         self._poi_search_service = poi_search_service
@@ -125,13 +120,6 @@ class RoadService:
         logger.info(
             f"RoadService initialized - Route: OSM, POI: {settings.poi_provider.upper()}"
         )
-
-    @property
-    def segmentation_service(self) -> RouteSegmentationService:
-        """Get or create the segmentation service."""
-        if self._segmentation_service is None:
-            self._segmentation_service = RouteSegmentationService()
-        return self._segmentation_service
 
     @property
     def quality_service(self) -> POIQualityService:
@@ -613,11 +601,8 @@ class RoadService:
         self._log_route_info(route)
         reporter.complete_phase(MapGenerationPhase.ROUTE_CALCULATION)
 
-        # Step 3: Process route into linear segments (for display)
+        # Step 3: Process OSRM steps into reusable RouteSegments
         reporter.start_phase(MapGenerationPhase.SEGMENT_PROCESSING)
-        linear_segments = self.segmentation_service.process_route_into_segments(
-            route, segment_length_km
-        )
 
         # Step 3b: Process OSRM steps into reusable RouteSegments and collect POIs
         milestone_categories = self.milestone_factory.build_milestone_categories(
@@ -660,19 +645,19 @@ class RoadService:
         except Exception as e:
             logger.warning(f"Error checking debug config: {e}")
 
-        # Create response (milestones are empty - they are created when map is saved
+        # Create response (segments and milestones are empty - they are created when map is saved
         # and loaded from database via MapAssemblyService)
         linear_map = LinearMapResponse(
             origin=origin,
             destination=destination,
             total_length_km=route.total_distance,
-            segments=linear_segments,
+            segments=[],  # Segments will be populated from database when loading
             milestones=[],
             road_id=road_id or f"route_{hash(origin + destination)}",
         )
 
         # Log final statistics
-        logger.info(f"Linear map complete: {len(linear_segments)} segments")
+        logger.info(f"Linear map complete: {len(route_segments_data)} segments created/reused")
         reporter.start_phase(MapGenerationPhase.MAP_CREATION)
         reporter.complete_phase(MapGenerationPhase.MAP_CREATION)
 
@@ -843,10 +828,8 @@ class RoadService:
             return []
 
     # ========================================================================
-    # BACKWARD COMPATIBILITY METHODS
+    # UTILITY METHODS
     # ========================================================================
-    # These methods delegate to the new services but maintain backward compatibility
-    # for any code that might be calling them directly.
 
     def _calculate_distance_meters(
         self, lat1: float, lon1: float, lat2: float, lon2: float
@@ -866,17 +849,3 @@ class RoadService:
         return interpolate_coordinate_at_distance(
             geometry, target_distance_km, total_distance_km
         )
-
-    def _process_route_into_segments(
-        self, route: Route, segment_length_km: float
-    ) -> List[LinearRoadSegment]:
-        """Process a route into linear segments."""
-        return self.segmentation_service.process_route_into_segments(
-            route, segment_length_km
-        )
-
-    def _extract_search_points_from_segments(
-        self, segments: List[LinearRoadSegment]
-    ) -> List[Tuple[Tuple[float, float], float]]:
-        """Extract search points from segments."""
-        return self.segmentation_service.extract_search_points_from_segments(segments)

@@ -34,6 +34,7 @@ from api.models.road_models import (
     Coordinates,
     LinearMapResponse,
     LinearRoadSegment,
+    MapSegmentResponse,
     MilestoneType,
     RoadMilestone,
     SavedMapResponse,
@@ -106,12 +107,13 @@ class MapStorageServiceDB:
             # Convert LinearMapResponse to Map model
             map_id = UUID(linear_map.id) if linear_map.id else uuid4()
 
-            # Serialize segments to JSONB
-            segments_data = [self._segment_to_dict(seg) for seg in linear_map.segments]
+            # Segments are now stored in MapSegment/RouteSegment tables, not JSONB
+            # Keep empty list in JSONB for backwards compatibility
+            segments_data = []
 
-            # Create metadata
+            # Create metadata (road_refs extracted from route_segments later if needed)
             metadata = {
-                "road_refs": self._extract_road_refs(linear_map.segments),
+                "road_refs": [],  # Will be populated from RouteSegment data
                 "creation_date": linear_map.creation_date.isoformat(),
             }
 
@@ -222,8 +224,9 @@ class MapStorageServiceDB:
                 map_uuid, include_poi_details=True
             )
 
-            # Convert segments from JSONB
-            segments = [self._dict_to_segment(seg_data) for seg_data in db_map.segments]
+            # Load segments from MapSegment/RouteSegment (new format)
+            assembly_service = MapAssemblyService(self.session)
+            segments = await assembly_service.get_segments_for_response(map_uuid)
 
             # Convert POIs to milestones
             milestones = [self._map_poi_to_milestone(map_poi) for map_poi in map_pois]
@@ -458,29 +461,24 @@ class MapStorageServiceDB:
                     milestone_count=len(pois),
                 )
 
-                # Calculate distance if user location provided and segments available
+                # Calculate distance if user location provided
                 distance = float("inf")
-                if user_lat is not None and user_lon is not None and db_map.segments:
+                if user_lat is not None and user_lon is not None:
                     try:
-                        # Get first segment's start point
-                        first_segment = db_map.segments[0]
-                        if (
-                            isinstance(first_segment, dict)
-                            and "coordinates" in first_segment
-                        ):
-                            coords = first_segment["coordinates"]
-                            if coords and len(coords) > 0:
-                                first_point = coords[0]
-                                if len(first_point) >= 2:
-                                    # OSRM returns [lon, lat]
-                                    origin_lon, origin_lat = (
-                                        first_point[0],
-                                        first_point[1],
-                                    )
-                                    distance = haversine_distance(
-                                        user_lat, user_lon, origin_lat, origin_lon
-                                    )
-                    except (KeyError, IndexError, TypeError) as e:
+                        # Get first segment's start point from map_segments relationship
+                        if db_map.map_segments:
+                            # Sort by sequence_order to get first segment
+                            sorted_segments = sorted(
+                                db_map.map_segments, key=lambda s: s.sequence_order
+                            )
+                            first_map_segment = sorted_segments[0]
+                            if first_map_segment.segment:
+                                origin_lat = float(first_map_segment.segment.start_lat)
+                                origin_lon = float(first_map_segment.segment.start_lon)
+                                distance = haversine_distance(
+                                    user_lat, user_lon, origin_lat, origin_lon
+                                )
+                    except (AttributeError, IndexError, TypeError) as e:
                         logger.debug(
                             f"Could not get coordinates for map {db_map.id}: {e}"
                         )
@@ -984,7 +982,6 @@ async def replace_map_data_async(
 
         # 6. Update original map metadata with temp map data
         original_map.total_length_km = temp_map.total_length_km
-        original_map.segments = temp_map.segments
         original_map.metadata_ = temp_map.metadata_
         original_map.updated_at = datetime.now()
         await session.flush()
