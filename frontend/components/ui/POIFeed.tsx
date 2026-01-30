@@ -237,11 +237,6 @@ export function POIFeed({
                 Solicitar permissão de localização
               </button>
             )}
-            {locationInfo?.error === 'Permissão de localização negada' && (
-              <p className="text-xs text-blue-600">
-                No iPhone: Ajustes → Safari → Localização → Permitir, ou toque no "aA" na barra de endereço → Ajustes do Site → Localização → Permitir
-              </p>
-            )}
           </div>
         </div>
       )}
