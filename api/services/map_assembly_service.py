@@ -391,28 +391,91 @@ class MapAssemblyService:
                     dx = route_geometry[next_idx][1] - route_geometry[prev_idx][1]  # lon
                     dy = route_geometry[next_idx][0] - route_geometry[prev_idx][0]  # lat
 
-                    # Vector from junction to POI
-                    px = float(poi.longitude) - junction.junction_lon
-                    py = float(poi.latitude) - junction.junction_lat
+                    # For POIs with access routes, calculate based on access route direction
+                    access_route_geom = junction.access_route_geometry
+                    if access_route_geom and len(access_route_geom) >= 2:
+                        # Find junction index in access route
+                        access_junction_idx = 0
+                        best_access_dist = float('inf')
+                        for i, point in enumerate(access_route_geom):
+                            dist = calculate_distance_meters(
+                                junction.junction_lat, junction.junction_lon, point[0], point[1]
+                            )
+                            if dist < best_access_dist:
+                                best_access_dist = dist
+                                access_junction_idx = i
 
-                    # Cross product
-                    cross = dx * py - dy * px
+                        # Find access direction point (50-500m from junction)
+                        access_direction_point = None
+                        access_direction_point_idx = None
+                        for i in range(access_junction_idx + 1, len(access_route_geom)):
+                            point = access_route_geom[i]
+                            dist_from_junction = calculate_distance_meters(
+                                junction.junction_lat, junction.junction_lon, point[0], point[1]
+                            )
+                            if dist_from_junction >= 50:
+                                access_direction_point = point
+                                access_direction_point_idx = i
+                                break
 
-                    side_calculation = {
-                        "road_vector": {"dx": dx, "dy": dy},
-                        "poi_vector": {"dx": px, "dy": py},
-                        "cross_product": cross,
-                        "segment_start": {
-                            "lat": route_geometry[prev_idx][0],
-                            "lon": route_geometry[prev_idx][1],
-                        },
-                        "segment_end": {
-                            "lat": route_geometry[next_idx][0],
-                            "lon": route_geometry[next_idx][1],
-                        },
-                        "resulting_side": junction.side,
-                        "method": "cross_product",
-                    }
+                        if access_direction_point:
+                            # Access route direction vector
+                            ax = access_direction_point[1] - junction.junction_lon
+                            ay = access_direction_point[0] - junction.junction_lat
+
+                            # Cross product with access route direction
+                            cross = dx * ay - dy * ax
+
+                            side_calculation = {
+                                "road_vector": {"dx": dx, "dy": dy},
+                                "access_vector": {"dx": ax, "dy": ay},
+                                "cross_product": cross,
+                                "segment_start": {
+                                    "lat": route_geometry[prev_idx][0],
+                                    "lon": route_geometry[prev_idx][1],
+                                },
+                                "segment_end": {
+                                    "lat": route_geometry[next_idx][0],
+                                    "lon": route_geometry[next_idx][1],
+                                },
+                                "resulting_side": junction.side,
+                                "method": "access_route_direction",
+                                "junction_idx_on_access": access_junction_idx,
+                                "access_direction_point_idx": access_direction_point_idx,
+                                "access_start": {
+                                    "lat": junction.junction_lat,
+                                    "lon": junction.junction_lon,
+                                },
+                                "access_direction_point": {
+                                    "lat": access_direction_point[0],
+                                    "lon": access_direction_point[1],
+                                },
+                            }
+
+                    # Fallback for nearby POIs (no access route) - use POI position
+                    if not side_calculation:
+                        # Vector from junction to POI
+                        px = float(poi.longitude) - junction.junction_lon
+                        py = float(poi.latitude) - junction.junction_lat
+
+                        # Cross product
+                        cross = dx * py - dy * px
+
+                        side_calculation = {
+                            "road_vector": {"dx": dx, "dy": dy},
+                            "poi_vector": {"dx": px, "dy": py},
+                            "cross_product": cross,
+                            "segment_start": {
+                                "lat": route_geometry[prev_idx][0],
+                                "lon": route_geometry[prev_idx][1],
+                            },
+                            "segment_end": {
+                                "lat": route_geometry[next_idx][0],
+                                "lon": route_geometry[next_idx][1],
+                            },
+                            "resulting_side": junction.side,
+                            "method": "poi_position",
+                        }
 
             # Build lookback data
             lookback_data = None

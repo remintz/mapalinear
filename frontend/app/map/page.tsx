@@ -14,6 +14,7 @@ import { apiClient } from '@/lib/api';
 import { useRouteSimulation } from '@/hooks/useRouteSimulation';
 import { useRouteTracking } from '@/hooks/useRouteTracking';
 import { useGeolocation } from '@/hooks/useGeolocation';
+import { useAdminSimulatedPosition } from '@/hooks/useAdminSimulatedPosition';
 import { useAnalytics } from '@/hooks/useAnalytics';
 import { EventType } from '@/lib/analytics-types';
 import { RouteSegment, Milestone } from '@/lib/types';
@@ -265,21 +266,36 @@ function MapPageContent() {
     initialSpeedKmH: 80,
   });
 
+  // Admin simulated position hook (set via OSM map click)
+  const adminSimulatedPos = useAdminSimulatedPosition();
+
   // Real GPS hook (used when simulation is not active)
   const geoLocation = useGeolocation({
     simulatedPosition: simulation.state.isActive ? simulation.state.position : null,
   });
 
-  // Determine current position (simulation or real GPS)
+  // Determine current position (admin simulated > route simulation > real GPS)
   const currentPosition = useMemo(() => {
+    // Priority 1: Admin simulated position (set via OSM map)
+    if (adminSimulatedPos.isActive && adminSimulatedPos.position) {
+      return { lat: adminSimulatedPos.position.lat, lon: adminSimulatedPos.position.lon };
+    }
+    // Priority 2: Route simulation
     if (simulation.state.isActive && simulation.state.position) {
       return simulation.state.position;
     }
+    // Priority 3: Real GPS
     if (geoLocation.position) {
       return { lat: geoLocation.position.lat, lon: geoLocation.position.lon };
     }
     return null;
-  }, [simulation.state.isActive, simulation.state.position, geoLocation.position]);
+  }, [
+    adminSimulatedPos.isActive,
+    adminSimulatedPos.position,
+    simulation.state.isActive,
+    simulation.state.position,
+    geoLocation.position,
+  ]);
 
   // Route tracking hook
   // Using 1500m threshold because segments are linearized (~1km segments)
@@ -611,6 +627,31 @@ function MapPageContent() {
 
           {/* Content - POI Feed */}
           <div className="flex-1 lg:max-w-3xl">
+            {/* Admin Simulated Position Banner */}
+            {adminSimulatedPos.isActive && adminSimulatedPos.position && (
+              <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 bg-amber-500 rounded-full animate-pulse" />
+                    <div>
+                      <p className="text-sm font-medium text-amber-800">
+                        Posição Simulada (Admin)
+                      </p>
+                      <p className="text-xs text-amber-600">
+                        {adminSimulatedPos.position.lat.toFixed(6)}, {adminSimulatedPos.position.lon.toFixed(6)}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => adminSimulatedPos.clearPosition()}
+                    className="text-xs text-amber-700 hover:text-amber-900 underline"
+                  >
+                    Limpar
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Simulation Controls - Only visible for admins */}
             {isAdmin && (
               <div className="mb-4">
@@ -804,6 +845,7 @@ function MapPageContent() {
           isOpen={osmMapOpen}
           onClose={() => setOsmMapOpen(false)}
           filteredPOIs={filteredPOIs}
+          isAdmin={isAdmin}
         />
       )}
     </div>

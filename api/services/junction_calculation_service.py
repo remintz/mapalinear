@@ -375,6 +375,102 @@ class JunctionCalculationService:
         else:
             return "right"
 
+    def _determine_side_from_access_route(
+        self,
+        junction: Tuple[float, float],
+        access_geometry: List[Tuple[float, float]],
+        route_geometry: List[Tuple[float, float]],
+    ) -> str:
+        """
+        Determine POI side based on access route direction after leaving main route.
+
+        For distant POIs, the side should be determined by which direction you turn
+        to leave the main route, not where the final POI is located.
+
+        Args:
+            junction: Junction coordinates (lat, lon)
+            access_geometry: Access route geometry from lookback to POI
+            route_geometry: Main route geometry
+
+        Returns:
+            "left", "right", or "center"
+        """
+        if not route_geometry or len(route_geometry) < 2:
+            return "center"
+
+        if not access_geometry or len(access_geometry) < 2:
+            return "center"
+
+        # Find junction index in main route
+        junction_idx = 0
+        best_dist = float('inf')
+        for i, point in enumerate(route_geometry):
+            dist = calculate_distance_meters(
+                junction[0], junction[1], point[0], point[1]
+            )
+            if dist < best_dist:
+                best_dist = dist
+                junction_idx = i
+
+        # Get main route direction vector
+        prev_idx = max(0, junction_idx - 1)
+        next_idx = min(len(route_geometry) - 1, junction_idx + 1)
+
+        if prev_idx == next_idx:
+            return "center"
+
+        # Main route direction vector
+        route_dx = route_geometry[next_idx][1] - route_geometry[prev_idx][1]  # lon
+        route_dy = route_geometry[next_idx][0] - route_geometry[prev_idx][0]  # lat
+
+        # Find junction index in access route (where it leaves main route)
+        access_junction_idx = 0
+        best_access_dist = float('inf')
+        for i, point in enumerate(access_geometry):
+            dist = calculate_distance_meters(
+                junction[0], junction[1], point[0], point[1]
+            )
+            if dist < best_access_dist:
+                best_access_dist = dist
+                access_junction_idx = i
+
+        # Get access route direction AFTER the junction
+        # We want the first point that's clearly off the main route
+        # Look for a point at least 50m away from junction, within next 500m of access route
+        access_direction_point = None
+        for i in range(access_junction_idx + 1, len(access_geometry)):
+            point = access_geometry[i]
+            dist_from_junction = calculate_distance_meters(
+                junction[0], junction[1], point[0], point[1]
+            )
+            # Find a point that's 50-500m from junction
+            if dist_from_junction >= 50:
+                access_direction_point = point
+                break
+
+        if not access_direction_point:
+            # Fallback: use last point in access geometry if we couldn't find a good one
+            if access_junction_idx + 1 < len(access_geometry):
+                access_direction_point = access_geometry[-1]
+            else:
+                return "center"
+
+        # Access route direction vector from junction
+        access_dx = access_direction_point[1] - junction[1]  # lon
+        access_dy = access_direction_point[0] - junction[0]  # lat
+
+        # Cross product: route_direction × access_direction
+        # Positive = access goes to the left of route direction
+        # Negative = access goes to the right of route direction
+        cross = route_dx * access_dy - route_dy * access_dx
+
+        if abs(cross) < 1e-10:
+            return "center"
+        elif cross > 0:
+            return "left"
+        else:
+            return "right"
+
     async def _calculate_junction_with_routing(
         self,
         poi_lat: float,
@@ -417,9 +513,11 @@ class JunctionCalculationService:
             if not junction_coords:
                 return None
 
-            # Determine side
-            side = self._determine_side(
-                poi_lat, poi_lon, junction_coords, route_geometry
+            # Determine side using access route direction (not direct POI position)
+            # For distant POIs, we need to know which way the ACCESS ROUTE goes
+            # from the junction, not where the final POI is located
+            side = self._determine_side_from_access_route(
+                junction_coords, access_route.geometry, route_geometry
             )
 
             # Access distance is from junction to POI along access route

@@ -337,6 +337,117 @@ class TestDetermineSide:
         assert result == "center"
 
 
+class TestDetermineSideFromAccessRoute:
+    """Tests for the _determine_side_from_access_route method."""
+
+    @pytest.fixture
+    def junction_service(self):
+        return JunctionCalculationService()
+
+    def test_access_route_going_left(self, junction_service):
+        """Test detection of access route going left from main route."""
+        # Main route going south (latitude decreasing)
+        main_route = [
+            (-20.20, -43.80),  # North
+            (-20.22, -43.80),  # Junction area
+            (-20.24, -43.80),  # South
+        ]
+        junction = (-20.22, -43.80)
+
+        # Access route going west (left when traveling south)
+        access_route = [
+            (-20.20, -43.80),  # Start on main route
+            (-20.22, -43.80),  # Junction
+            (-20.22, -43.81),  # 50m west (turning left)
+            (-20.22, -43.82),  # Further west
+        ]
+
+        result = junction_service._determine_side_from_access_route(
+            junction, access_route, main_route
+        )
+
+        # When going south, west is RIGHT (not left!)
+        assert result == "right"
+
+    def test_access_route_going_right(self, junction_service):
+        """Test detection of access route going right from main route."""
+        # Main route going south
+        main_route = [
+            (-20.20, -43.80),
+            (-20.22, -43.80),
+            (-20.24, -43.80),
+        ]
+        junction = (-20.22, -43.80)
+
+        # Access route going east (right when traveling south)
+        access_route = [
+            (-20.20, -43.80),
+            (-20.22, -43.80),  # Junction
+            (-20.22, -43.79),  # 50m east (turning right)
+            (-20.22, -43.78),
+        ]
+
+        result = junction_service._determine_side_from_access_route(
+            junction, access_route, main_route
+        )
+
+        # When going south, east is LEFT
+        assert result == "left"
+
+    def test_access_route_insufficient_geometry(self, junction_service):
+        """Test with insufficient access route geometry."""
+        main_route = [
+            (-20.20, -43.80),
+            (-20.24, -43.80),
+        ]
+        junction = (-20.22, -43.80)
+
+        # Access route too short
+        access_route = [(-20.22, -43.80)]
+
+        result = junction_service._determine_side_from_access_route(
+            junction, access_route, main_route
+        )
+
+        assert result == "center"
+
+    def test_real_itabirito_scenario(self, junction_service):
+        """Test with real-world Itabirito coordinates scenario.
+
+        Route going south on BR-040, Itabirito to the west.
+        Access route should turn RIGHT (west when heading south).
+        """
+        # Main route going south (based on debug data)
+        # Start: -20.220358, -43.801619
+        # End: -20.223029, -43.801783
+        main_route = [
+            (-20.218, -43.8015),  # Before junction
+            (-20.220358, -43.801619),  # Segment start
+            (-20.220581, -43.801627),  # Junction
+            (-20.223029, -43.801783),  # Segment end
+            (-20.226, -43.802),  # After junction
+        ]
+        junction = (-20.220581, -43.801627)
+
+        # Access route that goes west (towards Itabirito)
+        # Simulating a realistic exit that turns west
+        access_route = [
+            (-20.218, -43.8015),  # Before junction (on main route)
+            (-20.220, -43.8016),  # Near junction
+            (-20.220581, -43.801627),  # Junction point
+            (-20.2206, -43.8025),  # ~100m west (turning right when going south)
+            (-20.2208, -43.8035),  # Further west
+            (-20.251972, -43.802917),  # Itabirito POI
+        ]
+
+        result = junction_service._determine_side_from_access_route(
+            junction, access_route, main_route
+        )
+
+        # When going south, turning west is RIGHT
+        assert result == "right"
+
+
 class TestFindClosestRoutePoint:
     """Tests for the _find_closest_route_point method."""
 

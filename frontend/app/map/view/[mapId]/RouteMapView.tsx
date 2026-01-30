@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo } from 'react';
-import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { POI, Milestone } from '@/lib/types';
@@ -26,6 +26,11 @@ interface RouteMapViewProps {
   destination: string;
   userPosition?: UserPosition;
   pois?: (POI | Milestone)[];
+  // Admin features for setting simulated position
+  isAdmin?: boolean;
+  isSettingPosition?: boolean;
+  onPositionSet?: (lat: number, lon: number) => void;
+  adminSimulatedPosition?: { lat: number; lon: number } | null;
 }
 
 // POI type configuration with colors and icons
@@ -95,6 +100,25 @@ function MapBounds({ coordinates }: { coordinates: CoordinatePoint[] }) {
     const bounds = L.latLngBounds(latLngs);
     map.fitBounds(bounds, { padding: [50, 50] });
   }, [coordinates, map]);
+
+  return null;
+}
+
+// Component to handle map clicks for setting admin simulated position
+function MapClickHandler({
+  isActive,
+  onPositionSet,
+}: {
+  isActive: boolean;
+  onPositionSet?: (lat: number, lon: number) => void;
+}) {
+  useMapEvents({
+    click: (e) => {
+      if (isActive && onPositionSet) {
+        onPositionSet(e.latlng.lat, e.latlng.lng);
+      }
+    },
+  });
 
   return null;
 }
@@ -187,7 +211,61 @@ const createUserIcon = () => {
   });
 };
 
-export default function RouteMapView({ coordinates, origin, destination, userPosition, pois }: RouteMapViewProps) {
+// Admin simulated position marker - orange/yellow to distinguish from real position
+const createAdminSimulatedIcon = () => {
+  return L.divIcon({
+    html: `<div style="
+      position: relative;
+      width: 28px;
+      height: 28px;
+    ">
+      <div style="
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background-color: #f59e0b;
+        border: 3px solid white;
+        border-radius: 50%;
+        width: 18px;
+        height: 18px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+      "></div>
+      <div style="
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background-color: rgba(245, 158, 11, 0.3);
+        border-radius: 50%;
+        width: 28px;
+        height: 28px;
+        animation: pulse-admin 2s infinite;
+      "></div>
+      <style>
+        @keyframes pulse-admin {
+          0% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+          100% { transform: translate(-50%, -50%) scale(2); opacity: 0; }
+        }
+      </style>
+    </div>`,
+    className: '',
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+  });
+};
+
+export default function RouteMapView({
+  coordinates,
+  origin,
+  destination,
+  userPosition,
+  pois,
+  isAdmin = false,
+  isSettingPosition = false,
+  onPositionSet,
+  adminSimulatedPosition,
+}: RouteMapViewProps) {
   // Convert coordinates to Leaflet format [lat, lng]
   const routePositions = useMemo((): [number, number][] => {
     return coordinates
@@ -209,6 +287,7 @@ export default function RouteMapView({ coordinates, origin, destination, userPos
   const startIcon = useMemo(() => createStartIcon(), []);
   const endIcon = useMemo(() => createEndIcon(), []);
   const userIcon = useMemo(() => createUserIcon(), []);
+  const adminSimulatedIcon = useMemo(() => createAdminSimulatedIcon(), []);
 
   return (
     <div className="h-full w-full absolute inset-0">
@@ -224,6 +303,14 @@ export default function RouteMapView({ coordinates, origin, destination, userPos
         />
 
         <MapBounds coordinates={coordinates} />
+
+        {/* Admin click handler for setting simulated position */}
+        {isAdmin && (
+          <MapClickHandler
+            isActive={isSettingPosition}
+            onPositionSet={onPositionSet}
+          />
+        )}
 
         {/* Route polyline */}
         {routePositions.length >= 2 && (
@@ -265,6 +352,23 @@ export default function RouteMapView({ coordinates, origin, destination, userPos
             <Popup>
               <div className="text-sm">
                 <p className="font-bold text-blue-600">Sua localização</p>
+              </div>
+            </Popup>
+          </Marker>
+        )}
+
+        {/* Admin simulated position marker */}
+        {adminSimulatedPosition && (
+          <Marker
+            position={[adminSimulatedPosition.lat, adminSimulatedPosition.lon]}
+            icon={adminSimulatedIcon}
+          >
+            <Popup>
+              <div className="text-sm">
+                <p className="font-bold text-amber-600">Posição simulada (Admin)</p>
+                <p className="text-xs text-gray-500">
+                  {adminSimulatedPosition.lat.toFixed(6)}, {adminSimulatedPosition.lon.toFixed(6)}
+                </p>
               </div>
             </Popup>
           </Marker>

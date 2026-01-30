@@ -2,11 +2,12 @@
 
 import React, { useEffect, useState, useMemo } from 'react';
 import dynamic from 'next/dynamic';
-import { X, Loader2, MapPin, Route, Calendar } from 'lucide-react';
+import { X, Loader2, MapPin, Route, Calendar, Crosshair } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { apiClient } from '@/lib/api';
 import { RouteSearchResponse, POI, Milestone } from '@/lib/types';
 import { useGeolocation } from '@/hooks/useGeolocation';
+import { useAdminSimulatedPosition } from '@/hooks/useAdminSimulatedPosition';
 
 // Support both coordinate formats from API
 interface CoordinatePoint {
@@ -31,15 +32,26 @@ interface RouteMapModalProps {
   isOpen: boolean;
   onClose: () => void;
   filteredPOIs?: (POI | Milestone)[];
+  isAdmin?: boolean;
 }
 
-export default function RouteMapModal({ mapId, isOpen, onClose, filteredPOIs }: RouteMapModalProps) {
+export default function RouteMapModal({ mapId, isOpen, onClose, filteredPOIs, isAdmin = false }: RouteMapModalProps) {
   const [routeData, setRouteData] = useState<RouteSearchResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isSettingPosition, setIsSettingPosition] = useState(false);
 
   // Get user's current location
   const { position: userPosition } = useGeolocation();
+
+  // Admin simulated position
+  const adminSimulatedPos = useAdminSimulatedPosition();
+
+  // Handle position set from map click
+  const handlePositionSet = (lat: number, lon: number) => {
+    adminSimulatedPos.setPosition(lat, lon);
+    setIsSettingPosition(false);
+  };
 
   useEffect(() => {
     if (!isOpen || !mapId) return;
@@ -139,13 +151,42 @@ export default function RouteMapModal({ mapId, isOpen, onClose, filteredPOIs }: 
                   <span className="text-gray-600">Mapa OSM</span>
                 )}
               </div>
-              <button
-                onClick={onClose}
-                className="p-2 hover:bg-gray-100 rounded-full transition-colors"
-                aria-label="Fechar"
-              >
-                <X className="h-6 w-6 text-gray-600" />
-              </button>
+              <div className="flex items-center gap-2">
+                {/* Admin: Set Position Button */}
+                {isAdmin && (
+                  <button
+                    onClick={() => setIsSettingPosition(!isSettingPosition)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                      isSettingPosition
+                        ? 'bg-amber-500 text-white'
+                        : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                    }`}
+                    title={isSettingPosition ? 'Clique no mapa para definir posição' : 'Definir posição simulada'}
+                  >
+                    <Crosshair className="h-4 w-4" />
+                    <span className="hidden sm:inline">
+                      {isSettingPosition ? 'Clique no mapa' : 'Definir posição'}
+                    </span>
+                  </button>
+                )}
+                {/* Admin: Clear Position Button */}
+                {isAdmin && adminSimulatedPos.isActive && (
+                  <button
+                    onClick={() => adminSimulatedPos.clearPosition()}
+                    className="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
+                    title="Limpar posição simulada"
+                  >
+                    Limpar
+                  </button>
+                )}
+                <button
+                  onClick={onClose}
+                  className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                  aria-label="Fechar"
+                >
+                  <X className="h-6 w-6 text-gray-600" />
+                </button>
+              </div>
             </div>
           </div>
         </header>
@@ -169,13 +210,25 @@ export default function RouteMapModal({ mapId, isOpen, onClose, filteredPOIs }: 
               </div>
             </div>
           ) : routeCoordinates.length > 0 ? (
-            <RouteMapView
-              coordinates={routeCoordinates}
-              origin={routeData.origin}
-              destination={routeData.destination}
-              userPosition={userPosition ? { lat: userPosition.lat, lon: userPosition.lon } : undefined}
-              pois={filteredPOIs}
-            />
+            <>
+              {/* Admin: Position setting mode indicator */}
+              {isSettingPosition && (
+                <div className="absolute top-0 left-0 right-0 z-10 bg-amber-500 text-white text-center py-2 text-sm font-medium">
+                  Clique no mapa para definir a posição simulada
+                </div>
+              )}
+              <RouteMapView
+                coordinates={routeCoordinates}
+                origin={routeData.origin}
+                destination={routeData.destination}
+                userPosition={userPosition ? { lat: userPosition.lat, lon: userPosition.lon } : undefined}
+                pois={filteredPOIs}
+                isAdmin={isAdmin}
+                isSettingPosition={isSettingPosition}
+                onPositionSet={handlePositionSet}
+                adminSimulatedPosition={adminSimulatedPos.position}
+              />
+            </>
           ) : (
             <div className="h-full flex items-center justify-center bg-gray-100">
               <div className="text-center">
