@@ -11,6 +11,13 @@ interface TrackingInfo {
   nextPOI: (POI | Milestone) | null;
 }
 
+interface LocationInfo {
+  error: string | null;
+  isLoading: boolean;
+  isSupported: boolean;
+  requestPermission: () => void;
+}
+
 interface POIFeedProps {
   pois: (POI | Milestone)[];
   onPOIClick?: (poi: POI | Milestone) => void;
@@ -23,6 +30,8 @@ interface POIFeedProps {
   autoScroll?: boolean;
   // Tracking info to show progress bar between passed and upcoming POIs
   trackingInfo?: TrackingInfo;
+  // Location info for permission handling
+  locationInfo?: LocationInfo;
 }
 
 export function POIFeed({
@@ -33,6 +42,7 @@ export function POIFeed({
   nextPOIIndex,
   autoScroll = true,
   trackingInfo,
+  locationInfo,
 }: POIFeedProps) {
   const { trackPOIClick } = useAnalytics();
 
@@ -208,11 +218,30 @@ export function POIFeed({
       {/* Location unavailable banner */}
       {isLocationUnavailable && (
         <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-          <div className="flex items-center gap-2 text-sm text-blue-700">
-            <span className="text-lg">📍</span>
-            <span>
-              Habilite a localização para ver sua posição no mapa e os POIs já passados.
-            </span>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2 text-sm text-blue-700">
+              <span className="text-lg">📍</span>
+              <span>
+                {locationInfo?.error
+                  ? locationInfo.error
+                  : locationInfo?.isLoading
+                    ? 'Obtendo localização...'
+                    : 'Habilite a localização para ver sua posição no mapa e os POIs já passados.'}
+              </span>
+            </div>
+            {locationInfo && !locationInfo.isLoading && locationInfo.isSupported && (
+              <button
+                onClick={locationInfo.requestPermission}
+                className="self-start px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-100 hover:bg-blue-200 rounded-md transition-colors"
+              >
+                Solicitar permissão de localização
+              </button>
+            )}
+            {locationInfo?.error === 'Permissão de localização negada' && (
+              <p className="text-xs text-blue-600">
+                No iPhone: Ajustes → Safari → Localização → Permitir, ou toque no "aA" na barra de endereço → Ajustes do Site → Localização → Permitir
+              </p>
+            )}
           </div>
         </div>
       )}

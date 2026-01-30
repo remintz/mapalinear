@@ -637,6 +637,12 @@ function MapPageContent() {
                 distanceToRoute: tracking.distanceToRoute,
                 nextPOI: tracking.nextPOI,
               }}
+              locationInfo={{
+                error: geoLocation.error,
+                isLoading: geoLocation.isLoading,
+                isSupported: geoLocation.isSupported,
+                requestPermission: geoLocation.requestPermission,
+              }}
             />
 
             {/* Debug Link - Mobile only (admin only) */}
