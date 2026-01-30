@@ -476,7 +476,9 @@ async def regenerate_map(
                         logger.info(f"Cleaned up temporary map {temp_map_id}")
                     except Exception as cleanup_error:
                         logger.warning(f"Failed to cleanup temp map: {cleanup_error}")
-                AsyncService.fail_operation(operation.operation_id, str(e))
+                # Don't call AsyncService.fail_operation() here - the run_async worker
+                # already handles exceptions with its own event loop and database connection.
+                # Calling fail_operation() here causes event loop conflicts.
                 raise
 
         # Execute in background

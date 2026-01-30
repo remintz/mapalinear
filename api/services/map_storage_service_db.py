@@ -108,8 +108,6 @@ class MapStorageServiceDB:
             map_id = UUID(linear_map.id) if linear_map.id else uuid4()
 
             # Segments are now stored in MapSegment/RouteSegment tables, not JSONB
-            # Keep empty list in JSONB for backwards compatibility
-            segments_data = []
 
             # Create metadata (road_refs extracted from route_segments later if needed)
             metadata = {
@@ -118,13 +116,13 @@ class MapStorageServiceDB:
             }
 
             # Create Map record (without user_id - maps are now global)
+            # Note: segments are no longer stored as JSONB - they're in map_segments table
             db_map = Map(
                 id=map_id,
                 origin=linear_map.origin,
                 destination=linear_map.destination,
                 total_length_km=linear_map.total_length_km,
                 road_id=linear_map.road_id,
-                segments=segments_data,
                 metadata_=metadata,
                 created_at=linear_map.creation_date,
                 updated_at=datetime.now(),
