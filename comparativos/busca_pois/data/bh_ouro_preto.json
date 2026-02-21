@@ -1,0 +1,28 @@
+{
+  "map_id": "0e83411b-7494-4b3d-96ab-89c459dcb5ec",
+  "origin": "Belo Horizonte, MG",
+  "destination": "Ouro Preto, MG",
+  "total_length_km": 99.1,
+  "search_points": [
+    {"index": 1, "distance_km": 2, "lat": -19.940022, "lon": -43.934192},
+    {"index": 2, "distance_km": 5, "lat": -19.955714, "lon": -43.940653},
+    {"index": 3, "distance_km": 8, "lat": -19.978385, "lon": -43.947939},
+    {"index": 4, "distance_km": 11, "lat": -20.012929, "lon": -43.968110},
+    {"index": 5, "distance_km": 14, "lat": -20.046019, "lon": -43.964124},
+    {"index": 6, "distance_km": 17, "lat": -20.075506, "lon": -43.983221},
+    {"index": 7, "distance_km": 20, "lat": -20.109466, "lon": -43.973855},
+    {"index": 8, "distance_km": 23, "lat": -20.134052, "lon": -43.963176},
+    {"index": 9, "distance_km": 26, "lat": -20.150619, "lon": -43.962151},
+    {"index": 10, "distance_km": 29, "lat": -20.162924, "lon": -43.946442},
+    {"index": 11, "distance_km": 32, "lat": -20.180186, "lon": -43.917393},
+    {"index": 12, "distance_km": 35, "lat": -20.194463, "lon": -43.880469},
+    {"index": 13, "distance_km": 38, "lat": -20.212968, "lon": -43.839612},
+    {"index": 14, "distance_km": 41, "lat": -20.219372, "lon": -43.810947},
+    {"index": 15, "distance_km": 44, "lat": -20.229847, "lon": -43.800018},
+    {"index": 16, "distance_km": 47, "lat": -20.252563, "lon": -43.791520},
+    {"index": 17, "distance_km": 50, "lat": -20.265684, "lon": -43.777557},
+    {"index": 18, "distance_km": 53, "lat": -20.281439, "lon": -43.734557},
+    {"index": 19, "distance_km": 56, "lat": -20.297628, "lon": -43.707330},
+    {"index": 20, "distance_km": 59, "lat": -20.320021, "lon": -43.694063}
+  ]
+}

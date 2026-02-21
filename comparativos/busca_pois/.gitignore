@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Ambiente virtual
+venv/
+.venv/
+env/
+
+# Arquivo com secrets (não commitar)
+.env
+
+# Dados de execução
+*.log
+results/
+__pycache__/
+
+# IDE
+.idea/
+.vscode/
