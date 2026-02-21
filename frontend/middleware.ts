@@ -6,7 +6,7 @@ export default auth((req) => {
   const isLoggedIn = !!req.auth;
 
   // Public routes that don't require authentication
-  const publicPaths = ["/", "/login", "/api/auth"];
+  const publicPaths = ["/", "/login", "/api/auth", "/offline"];
 
   const isPublicPath = publicPaths.some(
     (path) => nextUrl.pathname === path || nextUrl.pathname.startsWith(path + "/")
@@ -41,6 +41,6 @@ export const config = {
      * - favicon.ico (favicon file)
      * - public folder
      */
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.png$|.*\\.svg$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|sw\\.js|.*\\.png$|.*\\.svg$|.*\\.webmanifest$).*)",
   ],
 };

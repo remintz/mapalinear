@@ -24,6 +24,8 @@ import RouteMapModal from '@/components/RouteMapModal';
 import { SearchFormData } from '@/lib/validations';
 import { useAnalytics } from '@/hooks/useAnalytics';
 import { EventType } from '@/lib/analytics-types';
+import { useOfflineContext } from '@/components/providers/OfflineProvider';
+import { WifiOff } from 'lucide-react';
 
 interface RouteSearchResult {
   id?: string;
@@ -32,6 +34,25 @@ interface RouteSearchResult {
 function SearchPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { isOnline } = useOfflineContext();
+
+  if (!isOnline) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="text-center max-w-md w-full">
+          <WifiOff className="h-16 w-16 text-amber-500 mx-auto mb-4" />
+          <h2 className="text-xl font-bold text-gray-900 mb-2">Sem conexão</h2>
+          <p className="text-sm text-gray-600 mb-6">
+            A criação de mapas requer conexão com a internet.
+            Seus mapas salvos estão disponíveis offline.
+          </p>
+          <Button onClick={() => router.push('/maps')}>
+            Ver Meus Mapas
+          </Button>
+        </div>
+      </div>
+    );
+  }
   const operationId = searchParams.get('operationId');
 
   const { searchRoute, isLoading, error, data, progressMessage, progressPercent, estimatedCompletion } = useAsyncRouteSearch();

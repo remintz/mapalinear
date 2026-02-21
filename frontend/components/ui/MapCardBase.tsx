@@ -9,6 +9,7 @@ import { SavedMap } from '@/lib/api';
 interface MapCardBaseProps {
   map: SavedMap;
   children: ReactNode; // Action buttons
+  badge?: ReactNode;   // Optional badge (e.g., offline indicator)
 }
 
 const formatDate = (dateString: string) => {
@@ -27,15 +28,18 @@ const formatDate = (dateString: string) => {
   }
 };
 
-export function MapCardBase({ map, children }: MapCardBaseProps) {
+export function MapCardBase({ map, children, badge }: MapCardBaseProps) {
   return (
     <Card className="hover:shadow-md transition-shadow">
       <CardContent className="p-4">
         {/* Route Info */}
         <div className="mb-3">
-          <h3 className="text-base font-semibold text-gray-900 mb-1 min-h-[3rem] line-clamp-2">
-            {map.origin} → {map.destination}
-          </h3>
+          <div className="flex items-start justify-between gap-2">
+            <h3 className="text-base font-semibold text-gray-900 mb-1 min-h-[3rem] line-clamp-2">
+              {map.origin} → {map.destination}
+            </h3>
+            {badge}
+          </div>
           <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
             <span className="flex items-center gap-1">
               <Calendar className="h-3 w-3" />

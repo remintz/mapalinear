@@ -9,47 +9,88 @@ import {
   FolderOpen,
   Loader2,
   Plus,
-  MapPinned
+  MapPinned,
+  WifiOff
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { apiClient, SavedMap } from '@/lib/api';
 import RouteMapModal from '@/components/RouteMapModal';
 import { useAnalytics } from '@/hooks/useAnalytics';
+import { useOfflineContext } from '@/components/providers/OfflineProvider';
+import { getAllCachedMapsMeta, type CachedMapMeta } from '@/lib/offline-storage';
 
 export default function SavedMapsPage() {
   const [myMaps, setMyMaps] = useState<SavedMap[]>([]);
+  const [cachedMetas, setCachedMetas] = useState<CachedMapMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [osmMapId, setOsmMapId] = useState<string | null>(null);
   const router = useRouter();
   const { trackPageView, trackMapEvent } = useAnalytics();
+  const { isOnline, cachedMapIds } = useOfflineContext();
 
   useEffect(() => {
     trackPageView('/maps');
     loadMyMaps();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isOnline]);
+
+  // Load cached map metadata for offline indicator
+  useEffect(() => {
+    getAllCachedMapsMeta().then(setCachedMetas).catch(() => {});
+  }, [cachedMapIds]);
+
+  const loadFromIndexedDB = async () => {
+    const metas = await getAllCachedMapsMeta();
+    setCachedMetas(metas);
+    const offlineMaps: SavedMap[] = metas.map(m => ({
+      id: m.id,
+      name: null,
+      origin: m.origin,
+      destination: m.destination,
+      total_length_km: m.total_length_km,
+      creation_date: m.creation_date,
+      road_refs: [],
+      milestone_count: m.milestone_count,
+    }));
+    setMyMaps(offlineMaps);
+  };
 
   const loadMyMaps = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await apiClient.listMaps();
-      setMyMaps(data);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
-      setError(errorMessage);
-      toast.error(`Erro ao carregar mapas: ${errorMessage}`);
-      setMyMaps([]);
-    } finally {
-      setLoading(false);
+    setLoading(true);
+    setError(null);
+
+    if (isOnline) {
+      try {
+        const data = await apiClient.listMaps();
+        setMyMaps(data);
+      } catch {
+        // API failed - fallback to IndexedDB
+        try {
+          await loadFromIndexedDB();
+        } catch {
+          setError('Erro ao carregar mapas');
+          setMyMaps([]);
+        }
+      }
+    } else {
+      // Offline: load from IndexedDB
+      try {
+        await loadFromIndexedDB();
+      } catch {
+        setError('Sem conexão e sem mapas salvos offline');
+        setMyMaps([]);
+      }
     }
+
+    setLoading(false);
   };
 
   const handleOpenMap = (mapId: string) => {
-    router.push(`/map?mapId=${mapId}`);
+    // Full page navigation so the service worker can serve from cache offline
+    window.location.href = `/map?mapId=${mapId}`;
   };
 
   const handleViewOnMap = (mapId: string) => {
@@ -73,9 +114,24 @@ export default function SavedMapsPage() {
     }
   };
 
+  const isCached = (mapId: string) => cachedMetas.some(m => m.id === mapId);
+
   const MapCard = ({ map }: { map: SavedMap }) => {
     return (
-      <MapCardBase map={map}>
+      <MapCardBase
+        map={map}
+        badge={
+          isOnline && isCached(map.id) ? (
+            <span className="text-xs font-medium text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full whitespace-nowrap">
+              Offline
+            </span>
+          ) : !isOnline ? (
+            <span className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full whitespace-nowrap">
+              Offline
+            </span>
+          ) : null
+        }
+      >
         <Button
           onClick={() => handleOpenMap(map.id)}
           className="flex-1"
@@ -84,29 +140,33 @@ export default function SavedMapsPage() {
           <FolderOpen className="h-4 w-4 mr-1" />
           Abrir
         </Button>
-        <Button
-          onClick={() => handleViewOnMap(map.id)}
-          size="sm"
-          variant="outline"
-          className="px-3"
-          title="Ver rota no mapa"
-        >
-          <MapPinned className="h-4 w-4" />
-        </Button>
-        <Button
-          onClick={() => handleRemoveFromCollection(map.id)}
-          size="sm"
-          variant="destructive"
-          disabled={deletingId === map.id}
-          className="px-3"
-          title="Remover da coleção"
-        >
-          {deletingId === map.id ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Trash2 className="h-4 w-4" />
-          )}
-        </Button>
+        {isOnline && (
+          <Button
+            onClick={() => handleViewOnMap(map.id)}
+            size="sm"
+            variant="outline"
+            className="px-3"
+            title="Ver rota no mapa"
+          >
+            <MapPinned className="h-4 w-4" />
+          </Button>
+        )}
+        {isOnline && (
+          <Button
+            onClick={() => handleRemoveFromCollection(map.id)}
+            size="sm"
+            variant="destructive"
+            disabled={deletingId === map.id}
+            className="px-3"
+            title="Remover da coleção"
+          >
+            {deletingId === map.id ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Trash2 className="h-4 w-4" />
+            )}
+          </Button>
+        )}
       </MapCardBase>
     );
   };
@@ -149,14 +209,21 @@ export default function SavedMapsPage() {
                 </p>
               </div>
             </div>
-            <Button
-              onClick={() => router.push('/search')}
-              size="sm"
-              className="text-xs"
-            >
-              <Plus className="h-4 w-4 mr-1" />
-              Novo Mapa
-            </Button>
+            {isOnline ? (
+              <Button
+                onClick={() => router.push('/search')}
+                size="sm"
+                className="text-xs"
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                Novo Mapa
+              </Button>
+            ) : (
+              <span className="flex items-center gap-1 text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded-full">
+                <WifiOff className="h-3 w-3" />
+                offline
+              </span>
+            )}
           </div>
         </div>
       </header>

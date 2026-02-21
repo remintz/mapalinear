@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Button, Card, CardContent } from '@/components/ui';
-import { MapPin, Bug, Loader2, Menu, Download, X, Fuel, Utensils, Bed, Tent, Hospital, Ticket, Building2, Home, FileText, MapPinned } from 'lucide-react';
+import { MapPin, Bug, Loader2, Menu, Download, X, Fuel, Utensils, Bed, Tent, Hospital, Ticket, Building2, Home, FileText, MapPinned, WifiOff } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { useSession } from 'next-auth/react';
@@ -20,6 +20,8 @@ import { EventType } from '@/lib/analytics-types';
 import { RouteSegment, Milestone } from '@/lib/types';
 import { ReportProblemButton } from '@/components/reports/ReportProblemButton';
 import RouteMapModal from '@/components/RouteMapModal';
+import { useOfflineMap } from '@/hooks/useOfflineMap';
+import { useOfflineContext } from '@/components/providers/OfflineProvider';
 
 interface RouteSearchResponse {
   origin: string;
@@ -55,9 +57,13 @@ function MapPageContent() {
 
   const mapId = searchParams.get('mapId');
   const operationId = searchParams.get('operationId');
+  const { isOnline } = useOfflineContext();
 
-  const [isLoading, setIsLoading] = useState(true);
+  // Map loading: API when online, IndexedDB when offline
+  const offlineMap = useOfflineMap(mapId);
+
   const [data, setData] = useState<RouteSearchResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [progressMessage, setProgressMessage] = useState<string>('Carregando mapa...');
   const [progressPercent, setProgressPercent] = useState<number>(0);
@@ -70,57 +76,47 @@ function MapPageContent() {
     new Set(['gas_station', 'restaurant', 'hotel', 'camping', 'hospital', 'toll_booth', 'city', 'town', 'village'])
   );
 
-  // Load saved map if mapId is provided
+  // Sync offlineMap state into local state (for mapId loads)
   useEffect(() => {
-    if (mapId) {
-      const loadSavedMap = async () => {
-        const startTime = performance.now();
-        try {
-          setIsLoading(true);
-          setProgressMessage('Carregando mapa salvo...');
+    if (!mapId) return;
+    // Don't override if operationId is being used
+    if (operationId) return;
 
-          const savedMap = await apiClient.getMap(mapId);
-
-          // Transform saved map data to match RouteSearchResponse format
-          const routeData: RouteSearchResponse = {
-            origin: savedMap.origin,
-            destination: savedMap.destination,
-            total_distance_km: savedMap.total_length_km || 0,
-            segments: (savedMap.segments || []) as RouteSegment[],
-            pois: savedMap.milestones || [],
-            milestones: savedMap.milestones || []
-          };
-
-          setData(routeData);
-          setIsLoading(false);
-
-          // Track map load time
-          const loadTime = performance.now() - startTime;
-          trackPerformance(EventType.MAP_LOAD_TIME, loadTime, {
-            map_id: mapId,
-            poi_count: savedMap.milestones?.length || 0,
-            segment_count: savedMap.segments?.length || 0,
-          });
-
-          // Track map view
-          trackPageView('/map');
-          trackMapEvent('linear_map_view', {
-            map_id: mapId,
-            origin: savedMap.origin,
-            destination: savedMap.destination,
-            total_distance_km: savedMap.total_length_km || 0,
-          });
-        } catch (error) {
-          console.error('Error loading saved map:', error);
-          setError('Erro ao carregar mapa salvo');
-          setIsLoading(false);
-          toast.error('Erro ao carregar mapa salvo');
-        }
-      };
-
-      loadSavedMap();
+    if (offlineMap.isLoading) {
+      setIsLoading(true);
+      setProgressMessage('Carregando mapa salvo...');
+      return;
     }
-  }, [mapId, trackPageView, trackMapEvent, trackPerformance]);
+
+    if (offlineMap.error) {
+      setError(offlineMap.error);
+      setIsLoading(false);
+      return;
+    }
+
+    if (offlineMap.data) {
+      const routeData: RouteSearchResponse = {
+        origin: offlineMap.data.origin,
+        destination: offlineMap.data.destination,
+        total_distance_km: offlineMap.data.total_distance_km,
+        segments: offlineMap.data.segments,
+        pois: offlineMap.data.milestones,
+        milestones: offlineMap.data.milestones,
+      };
+      setData(routeData);
+      setIsLoading(false);
+
+      // Track map view
+      trackPageView('/map');
+      trackMapEvent('linear_map_view', {
+        map_id: mapId,
+        origin: offlineMap.data.origin,
+        destination: offlineMap.data.destination,
+        total_distance_km: offlineMap.data.total_distance_km,
+        is_offline: !isOnline,
+      });
+    }
+  }, [mapId, operationId, offlineMap.data, offlineMap.isLoading, offlineMap.error, isOnline, trackPageView, trackMapEvent]);
 
   // Monitor async operation if operationId is provided
   useEffect(() => {
@@ -318,7 +314,7 @@ function MapPageContent() {
           id: seg.id,
           name: seg.name,
           geometry: seg.geometry!,
-          length_km: seg.length_km || seg.distance_km
+          length_km: seg.length_km || seg.distance_km || 0
         }));
 
       // Convert POIs to ExportPOI format
@@ -418,7 +414,7 @@ function MapPageContent() {
           id: seg.id,
           name: seg.name,
           geometry: seg.geometry!,
-          length_km: seg.length_km || seg.distance_km
+          length_km: seg.length_km || seg.distance_km || 0
         }));
 
       // Convert POIs to ExportPOI format
@@ -566,8 +562,15 @@ function MapPageContent() {
               <span className="text-sm font-medium text-zinc-900 bg-zinc-100 px-3 py-1 rounded-full whitespace-nowrap">
                 {data.total_distance_km ? data.total_distance_km.toFixed(1) : '0.0'} km
               </span>
-              {/* View Route on Map Button */}
-              {mapId && (
+              {/* Offline indicator */}
+              {!isOnline && (
+                <span className="flex items-center gap-1 text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded-full">
+                  <WifiOff className="h-3 w-3" />
+                  <span className="hidden sm:inline">offline</span>
+                </span>
+              )}
+              {/* View Route on Map Button (needs network for tiles) */}
+              {mapId && isOnline && (
                 <button
                   onClick={() => {
                     setOsmMapOpen(true);
@@ -580,20 +583,22 @@ function MapPageContent() {
                   <span className="hidden sm:inline">Mapa</span>
                 </button>
               )}
-              {/* PDF Export Button */}
-              <button
-                onClick={() => downloadPDF()}
-                disabled={isExporting || !mapId}
-                className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900 px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors border border-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                title={mapId ? "Exportar PDF" : "Salve o mapa para exportar PDF"}
-              >
-                {isExporting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <FileText className="h-4 w-4" />
-                )}
-                <span className="hidden sm:inline">PDF</span>
-              </button>
+              {/* PDF Export Button (needs network) */}
+              {isOnline && (
+                <button
+                  onClick={() => downloadPDF()}
+                  disabled={isExporting || !mapId}
+                  className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900 px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors border border-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={mapId ? "Exportar PDF" : "Salve o mapa para exportar PDF"}
+                >
+                  {isExporting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <FileText className="h-4 w-4" />
+                  )}
+                  <span className="hidden sm:inline">PDF</span>
+                </button>
+              )}
               {/* Desktop: Show options button in header (admin only) */}
               {isAdmin && (
                 <button
@@ -701,8 +706,8 @@ function MapPageContent() {
         </div>
       </main>
 
-      {/* Report Problem Button */}
-      <ReportProblemButton
+      {/* Report Problem Button (needs network) */}
+      {isOnline && <ReportProblemButton
         mapId={mapId || undefined}
         pois={filteredPOIs.map(poi => ({
           id: poi.id || String(Math.random()),
@@ -711,7 +716,7 @@ function MapPageContent() {
           distance_from_origin_km: poi.distance_from_origin_km,
         }))}
         userLocation={currentPosition ? { lat: currentPosition.lat, lon: currentPosition.lon } : undefined}
-      />
+      />}
 
       {/* Admin/Debug Slide-out Menu */}
       {isAdminMenuOpen && (
